@@ -1,0 +1,892 @@
+import { computed, ref, watch } from 'vue'
+
+/**
+ * 轻量 i18n。
+ *
+ * 为什么不引 vue-i18n：本项目只有两套语言、词条量级在几百，需要的能力就是
+ * 「按键取字符串 + 变量插值 + 切换即重渲染」。引一个插值/复数/日期格式化全套依赖，
+ * 换来的复杂度超过收益。
+ *
+ * 约定：
+ *  - key 用点分层级（`command.openFile`），**键集合在 zh / en 两侧必须完全一致**；
+ *  - 未翻译的键在开发期直接显示 key，一眼能看出漏翻，而不是静默回退中文；
+ *  - `locale` 是响应式状态，切换后所有用到 `t()` 的模板自动更新（computed 依赖它）。
+ */
+
+export type Locale = 'zh' | 'en'
+
+export const LOCALES: Array<{ id: Locale; label: string }> = [
+  { id: 'zh', label: '中文' },
+  { id: 'en', label: 'English' },
+]
+
+type Dict = Record<string, string>
+
+const zh: Dict = {
+  'app.name': 'docvi',
+  'app.library': '文档库',
+  'app.plugins': '插件',
+  'app.settings': '设置',
+
+  'titlebar.palette': '命令面板',
+  'titlebar.searchPlaceholder': '搜索文档或命令',
+  'titlebar.toggleTree': '显示 / 隐藏目录树',
+  'titlebar.toggleOutline': '显示 / 隐藏本页目录',
+  'titlebar.settings': '设置',
+
+  'tabbar.label': '打开的文档',
+  'tabbar.close': '关闭 {title}',
+
+  'status.chooseTheme': '选择主题',
+  'status.mode.read': '阅读',
+  'status.mode.live': '实时预览',
+  'status.mode.source': '源码',
+  'status.mode.split': '分屏',
+  'status.editorWrap': '源码折行：长行折下来 / 一行就是一行',
+  'status.wrapOn': '折行',
+  'status.wrapOff': '不折行',
+  'status.indexing': '正在建立搜索索引',
+  'status.taskDone': '{label} 已完成',
+  'status.taskCancel': '取消后台任务',
+  'status.dirty': '未保存',
+  'status.standalone': '单文件',
+  'status.noWorkspace': '未打开工作区',
+  'status.contentWidth': '内容宽度',
+  'status.widthFull': '铺满',
+  'status.widthMeasure': '收窄',
+  'status.widthAction': '内容宽度：{action}',
+  'status.serviceRunning': '服务',
+  'status.serviceOn': '服务 :{port}',
+  'status.serviceOff': '服务未运行',
+  'status.serviceOnHint': '本地服务运行中（端口 {port}）· MCP 端点与分享链接都走它 · 点击打开设置',
+  'status.serviceOffHint': '本地服务未运行：MCP 与分享都不可用 · 点击打开设置启动',
+
+  'editor.emptyHint': '输入 / 插入内容',
+
+  'empty.reader.title': '还没有打开文档',
+  'empty.reader.hint': '从左侧目录选择一篇，或按 Ctrl+O 打开任意 Markdown 文件。',
+  'empty.reader.open': '打开文件…',
+  'empty.tree': '此目录下没有 Markdown 文档',
+  'empty.plugins': '还没有插件。可以从文件夹安装一个包含 plugin.json 的插件包。',
+  'empty.shares': '还没有分享。选择一个文件或目录即可生成链接。',
+
+  'palette.placeholder': '搜索全部工作区，或输入命令…',
+  'palette.results': '结果',
+  'palette.indexed': '{count} 篇已索引',
+  'palette.localScope': '当前工作区 · {name}',
+  'palette.otherScopes': '其他工作区',
+  'palette.singleFile': '单文件',
+  'palette.removedWorkspace': '已移除的工作区',
+  'palette.indexingOther': '正在索引其他工作区 {done}/{total}',
+  'palette.move': '移动',
+  'palette.open': '打开',
+
+  'cmd.openFile': '打开 Markdown 文件',
+  'cmd.openFolder': '添加文档目录',
+  'cmd.cloneRepo': '克隆 Git 仓库',
+  'cmd.pullWorkspace': '拉取当前工作区更新',
+  'cmd.switchBranch': '切换当前工作区分支',
+
+  'workspace.candidates.title': '这个目录下有多个文档根',
+  'workspace.candidates.hint':
+    '所选目录自身不是文档根，但它的子目录里有配置好的文档站。选一个加进来，或者直接使用所选目录（按目录结构自动扫描）。',
+  'workspace.candidates.keep': '就用所选目录',
+  'cmd.useTheme': '主题：{name}',
+  'cmd.toggleOutline': '显示 / 隐藏大纲',
+  'cmd.toggleContentWidth': '正文宽度：铺满 / 收窄',
+  'cmd.toggleTree': '显示 / 隐藏目录树',
+  'cmd.editLive': '进入实时预览编辑',
+  'cmd.editSource': '进入源码模式',
+  'cmd.split': '分屏预览（左源码 / 右渲染）',
+  'cmd.save': '保存当前文档',
+  'cmd.find': '在文档中查找',
+  'cmd.share': '分享当前文档',
+  'cmd.exportMarkdown': '导出为 Markdown',
+  'cmd.exportHtml': '导出为 HTML',
+  'cmd.exportPdf': '导出为 PDF',
+  'cmd.clearRecent': '清空最近打开',
+  'cmd.shortcuts': '键盘快捷键',
+  'cmd.settings': '打开设置',
+  'cmd.about': '关于 docvi',
+  'cmd.plugins': '打开插件管理',
+  'cmd.service': '本地服务（MCP / 分享）',
+
+  'group.general': '通用',
+  'group.appearance': '外观',
+  'group.document': '文档',
+  'group.help': '帮助',
+
+  'error.noDocToShare': '没有打开的文档可以分享',
+  'error.noDocToExport': '没有打开的文档可以导出',
+  'error.dropPath': '无法读取拖入文件的路径',
+  'error.dropNotMarkdown': '只支持拖入 Markdown 文件（.md）',
+
+  'settings.title': '设置',
+  'settings.exposure': '对外访问',
+  'settings.service': '本地服务',
+  'settings.exposureHint': 'MCP 与临时分享共用这一个进程、端口和令牌；关掉它两者一起停。',
+  'settings.mcpSection': 'MCP（给 AI 用）',
+  'settings.mcpHint': '把这个端点与令牌填进 MCP 客户端，AI 就能检索当前工作区的文档。',
+  'settings.status': '状态',
+  'settings.serviceRestart': '重启服务',
+  'settings.running': '运行中',
+  'settings.stopped': '未运行',
+  'settings.endpoint': 'MCP 端点',
+  'settings.token': '访问令牌',
+  'settings.copy': '复制',
+  'settings.copied': '已复制',
+  'settings.show': '显示令牌',
+  'settings.hide': '隐藏令牌',
+  'settings.mcpConfig': 'MCP 客户端配置',
+  'settings.copyJson': '复制 JSON',
+  'settings.toolsHint':
+    '工具：list_plugins / list_components / get_component_docs / get_plugin_docs / search_docs / read_doc。工作区增减会自动同步到服务。',
+  'settings.lan': '局域网访问',
+  'settings.lanOn': '已开启：同一网络的设备可访问（需令牌）',
+  'settings.lanOff': '仅本机可访问',
+  'settings.lanWarn': '开启后分享链接与 MCP 端点对同一网段的设备可见。公用网络下建议关闭。',
+  'settings.port': '端口',
+  'settings.portApply': '应用并重启',
+  'settings.portHint': '改端口会重启服务；若该端口已被占用，服务会自动顺延到附近空闲端口。',
+  'settings.desktop': '启动与常驻',
+  'settings.autostart': '开机自启动',
+  'settings.autostartHint': '登录 Windows 后自动打开 docvi',
+  'settings.closeToTray': '关闭窗口时留在托盘',
+  'settings.closeToTrayHint': '关窗口不退出：MCP 端点与分享链接继续可用',
+  'settings.logs': '服务日志',
+  'settings.logsHint': 'serve.log 在数据目录内',
+  'settings.openLogs': '打开数据目录',
+  'error.badPort': '端口必须是 1024-65535 之间的整数',
+  'settings.noConfig': '服务未运行，暂无配置',
+  'settings.shares': '临时分享',
+  'settings.newShare': '新建分享',
+  'settings.sharesHint':
+    '分享是只读链接，内容不复制：链接读取的是磁盘上的实时文件。删除分享或服务停止即失效。',
+  'settings.about': '关于',
+  'about.version': '版本',
+  'about.platform': '平台',
+  'about.dataDir': '数据目录',
+  'about.checkUpdate': '检查更新',
+  'about.checking': '检查中…',
+  'about.upToDate': '已是最新版本（{version}）',
+  'about.updateAvailable': '有新版本：{current} → {latest}',
+  'about.checkFailed': '检查失败：{reason}',
+  'about.checkUnavailable': '暂时无法检查更新',
+  'about.openDownload': '打开下载页',
+  'about.updateNote':
+    '当前版本只检查更新并给出下载入口，不自动下载安装（安装包签名与发布渠道就绪后再接）。',
+  'settings.appearance': '外观',
+  'settings.theme': '主题',
+  'theme.lead': '选中即整套生效。插件也可以提供主题，一个插件里可以带多套。',
+  'theme.builtin': '内置主题',
+  'theme.fromPlugin': '来自插件 {name}',
+  'theme.badge': '插件',
+  'theme.slate': '石板',
+  'theme.mist': '薄雾',
+  'theme.graphite': '石墨',
+  'theme.paper': '纸张',
+  'settings.themeHint': '一个主题就是整套配色：窗口、正文、编辑器一起变。',
+  'settings.editorWrap': '源码折行',
+  'settings.editorWrapHint':
+    '折行：长行自动换到下一行（默认）。不折行：一行就是一行，超宽时横向滚动，适合对齐表格与宽代码块。',
+  'settings.language': '语言',
+  'tabmenu.close': '关闭标签页',
+  'tabmenu.closeOthers': '关闭其他标签页',
+  'tabmenu.closeRight': '关闭右侧标签页',
+  'tabmenu.closeAll': '关闭全部标签页',
+  'tabmenu.copy': '复制标签页',
+  'tabmenu.copyPath': '复制路径',
+  'tabmenu.settings': '标签页设置',
+  'switcher.title': '切换标签页',
+  'tree.openNewTab': '在新标签页打开',
+  'tree.copyPath': '复制相对路径',
+  'tree.newFile': '新建文档',
+  'tree.newDir': '新建目录',
+  'tree.rename': '重命名',
+  'tree.cut': '剪切',
+  'tree.copy': '复制',
+  'tree.paste': '粘贴到此处',
+  'tree.trash': '移到回收站',
+  'tree.cutHint': '已剪切，右键目标目录选「粘贴到此处」',
+  'tree.copyHint': '已复制，右键目标目录选「粘贴到此处」',
+  'tree.pasted': '已粘贴：{name}',
+  'tree.trashed': '已移到回收站：{name}',
+  'tree.crossWorkspace': '不能跨工作区粘贴，请在原工作区内操作',
+  'tree.trashTitle': '移到回收站',
+  'tree.trashMessage': '「{name}」会被移到系统回收站，可以再恢复。',
+  'dialog.name': '名称',
+  'dialog.renameLabel': '新名称',
+  'dialog.create': '创建',
+  'dialog.rename': '重命名',
+  'dialog.cancel': '取消',
+  'dialog.nameEmpty': '名字不能为空',
+  'dialog.nameSlash': '名字里不能有路径分隔符',
+  'dialog.nameInvalid': '名字包含非法字符',
+  'ws.openNewTab': '在新标签页打开',
+  'ws.remove': '移除工作区',
+
+  'library.openFile': '打开文件',
+  'library.clone': '克隆仓库',
+  'library.addFolder': '添加目录',
+  'library.pickFolder': '选择文件夹',
+  'library.cloneRepo': '克隆 Git 仓库',
+  'library.openSingle': '打开单个文件',
+  'library.emptyTitle': '还没有文档目录',
+  'library.emptyText':
+    '选择一个存放 Markdown 的文件夹，docvi 会把它变成可浏览、可搜索的文档库。不会移动或改写你的任何文件。',
+  'library.loading': '正在读取文档库…',
+  /** 容器版空状态：读者没有「添加目录」这个动作，文案要说平台侧的情况 */
+  'library.emptyWeb': '平台上还没有可浏览的文档仓库。',
+  'library.workspaces': '工作区',
+  'library.recent': '最近打开',
+  'library.clearRecent': '清空',
+  'library.removeHint': '移除此工作区（不会删除磁盘文件）',
+  'library.openedAt': '打开于 {time}',
+  'library.removedWorkspace': '已移除的工作区',
+  'library.singleFile': '单文件',
+  'library.shareDir': '分享目录',
+  'reader.share': '分享这篇文档',
+  'share.toastTitle': '分享链接已生成，复制发给别人即可访问：',
+  'share.lanTitle': '需要先开启局域网访问',
+  'share.lanMessage':
+    '分享是给同一网络里的其它设备看的，但局域网访问现在是关的——链接只能在本机打开，发出去对方打不开。\n\n现在开启吗？（开启后分享链接与 MCP 端点对同一网段的设备可见，公用网络下请注意。）',
+  'share.lanEnable': '开启并生成链接',
+  'share.lanLocalOnly': '只在本文机看',
+  'share.lanOnlyHint': '局域网未开启：这个链接只能在本机打开',
+
+  'git.cloneTitle': '克隆 Git 仓库',
+  'git.url': '仓库地址',
+  'git.urlPlaceholder': 'https://example.com/team/docs.git',
+  'git.name': '名称',
+  'git.namePlaceholder': '仓库名',
+  'git.branch': '分支（可选）',
+  'git.branchPlaceholder': '留空用默认分支',
+  'git.cloneHint':
+    '仓库会克隆到应用数据目录，按分支建立浏览副本；你的本地目录不会被写入，拉取以云端为准。',
+  'git.cloneAction': '克隆',
+  'git.cloning': '正在克隆…',
+  'git.connecting': '正在连接…',
+  'git.urlRequired': '请填写仓库地址',
+  'git.nameRequired': '请填写名称',
+  'git.unavailable': '当前系统没有可用的 git',
+  'git.switchBranch': '切换分支',
+  'git.pullNow': '拉取更新',
+  'git.branchesTitle': '切换分支 · {name}',
+  'git.filterBranches': '筛选分支',
+  'git.loadingBranches': '正在读取分支…',
+  'git.noBranches': '远端没有任何分支',
+  'git.noMatch': '没有匹配的分支',
+  'git.switchFailed': '切换分支失败',
+  'git.switchedTo': '已切换到分支 {branch}',
+  'git.pulled': '已拉取 {branch} 的 {count} 个新提交',
+  'git.upToDate': '{branch} 已是最新',
+  'git.docsGone': '云端已删除：{list}（标签仍保留，内容停在旧版本）',
+  'git.docMissingOnBranch': '当前文档在分支 {branch} 上不存在',
+  'git.notManaged': '该工作区不是 git 托管的',
+  'portal.branches': '可浏览的分支',
+  'portal.branchHint': '切换只影响你自己（地址带 ?branch=），不会改动仓库',
+  'portal.cloning': '正在克隆…',
+  'portal.syncAt': '同步于 {time}',
+  'portal.neverSynced': '尚未同步',
+  'portal.syncError': '同步失败：{message}',
+  'portal.state.ready': '可浏览',
+  'portal.state.indexing': '索引中',
+  'portal.state.pending': '待索引',
+  'portal.state.failed': '索引失败',
+  'portal.state.building': '构建中',
+  'portal.state.none': '暂无产物',
+  'portal.ops': '运维',
+  'portal.opsHint': '仓库管理、git 凭证、分支规则、索引任务与审计日志',
+  'portal.mcpTitle': 'AI 接入（MCP）',
+  'portal.mcpDesc':
+    '把这个地址配置到支持 MCP 的 AI 客户端（HTTP 传输，无需其它参数）——写文档时 AI 可查询本平台的组件用法，也能检索与读取各仓已发布分支上的文档。',
+  'portal.mcpCopy': '复制地址',
+  'portal.mcpCopied': '已复制',
+  'portal.localTitle': '预览本地 Markdown',
+  'portal.localDesc':
+    '先在浏览器里看一眼刚生成的文件：内容只在内存，不写服务器、不进任何仓库，刷新即失效。',
+  'portal.localPick': '选择文件',
+  'portal.localPickDir': '选择文件夹',
+  'portal.localEmpty': '这里没有可预览的 .md 文件',
+  'portal.localFailed': '读取本地文件失败',
+  'portal.localLoaded': '已装载 {count} 篇本地文档（仅本次会话）',
+  'portal.localBadge': '本地预览',
+  'tabs.section': '标签页',
+  'tabs.max': '最大标签数',
+  'tabs.maxHint': '0 表示不限',
+  'tabs.overflow': '达到上限时',
+  'tabs.overflow.leastRecent': '关闭最久未使用的标签页',
+  'tabs.overflow.oldest': '关闭最早打开的标签页',
+  'tabs.overflow.reject': '拒绝新建并提示',
+  'tabs.layout': '排列方式',
+  'tabs.layout.single': '单行',
+  'tabs.layout.wrap': '允许换行',
+  'tabs.overflowX': '单行溢出',
+  'tabs.overflowX.scroll': '横向滚动条',
+  'tabs.overflowX.shrink': '等比压缩',
+  'tabs.width': '标签宽度',
+  'tabs.widthHint': '上限像素；短标题按内容宽度',
+  'error.tabUnavailable': '该标签指向的内容已不可用，已关闭',
+  'error.tabLimit': '已达到标签页上限，可在设置中调整',
+  'error.linkMissing': '找不到链接指向的文档：{path}',
+  'error.workspaceMissing': '该工作区已被移除，无法打开其中的文档',
+  'error.workspaceGone': '该文件所属的工作区已被移除',
+  'error.clipboard': '复制失败：剪贴板不可用',
+  'error.saveBeforeClose': '保存失败或存在冲突，标签未关闭',
+  'cmd.nextTab': '切换标签页',
+  'cmd.back': '后退（标签内历史）',
+  'cmd.forward': '前进（标签内历史）',
+  'group.tabs': '标签页',
+  'confirm.closeDirtyTitle': '关闭前保存？',
+  'confirm.closeDirtyMessage': '「{name}」有未保存的修改。保存后关闭，还是丢弃修改？',
+  'confirm.save': '保存并关闭',
+  'confirm.discard': '不保存',
+  'confirm.cancel': '取消',
+  'settings.storageHint': '设置保存在 userData/settings.json，可直接编辑或导出。',
+  'file.outsideHint': '该文件不在任何工作区内',
+  'settings.openDataDir': '打开数据目录',
+
+  'plugins.tab.installed': '已安装',
+  'plugins.tab.market': '插件市场',
+  'plugins.market.title': '插件市场',
+  'plugins.market.source': '清单来源',
+  'plugins.market.refresh': '刷新',
+  'plugins.market.refreshing': '刷新中…',
+  'plugins.market.repository': '打开仓库',
+  'plugins.market.installed': '已安装',
+  'plugins.market.installHint':
+    '市场的每条插件都指向它自己的仓库。桌面端不自带解压与校验能力，因此不在这里直接安装——需要的话由容器运维面安装，或把构建好的插件包用「从文件夹安装」装进来。',
+  'plugins.market.empty': '市场清单里还没有条目。',
+  'plugins.market.emptyOffline': '没有可用的清单缓存，且当前拉取失败——联网后点「刷新」再试。',
+  'plugins.market.neverFetched': '尚未拉取过',
+  'plugins.market.justNow': '刚刚更新',
+  'plugins.market.minutesAgo': '{count} 分钟前更新',
+  'plugins.market.hoursAgo': '{count} 小时前更新',
+  'plugins.market.daysAgo': '{count} 天前更新',
+  'plugins.title': '插件',
+  'plugins.subtitle': '主题、组件包、Markdown 语法扩展都是插件。安装后立即生效，停用即完全卸载。',
+  'plugins.install': '从文件夹安装',
+  'plugins.installed': '已安装',
+  'plugins.builtin': '内置',
+  'plugins.trust.presentation': '呈现插件',
+  'plugins.trust.sandbox': '沙箱服务',
+  'plugins.trust.trusted': '受信服务',
+  'plugins.trust.presentationHint': '运行在界面进程内，只能改界面与文档渲染，无文件系统与网络权限',
+  'plugins.trust.sandboxHint': '运行在独立进程，按授权访问指定目录与网络',
+  'plugins.trust.trustedHint': '运行在服务进程，拥有完整系统权限——只安装你完全信任的插件',
+  'plugins.enable': '启用插件',
+  'plugins.disable': '停用插件',
+  'plugins.uninstall': '卸载插件',
+  'plugins.loading': '正在读取插件…',
+  'plugins.contrib.components': '{count} 个组件',
+  'plugins.contrib.themes': '{count} 个主题',
+  'plugins.contrib.syntax': '{count} 个语法扩展',
+  'plugins.contrib.commands': '{count} 个命令',
+  'plugins.contrib.none': '无声明式贡献',
+  'plugins.components.toggle': '组件清单（{count}）',
+  'plugins.components.enable': '启用这个组件',
+  'plugins.components.disable': '停用这个组件（同名实现会自动顶上来）',
+  'plugins.preview.title': '示例预览',
+  'plugins.preview.close': '关闭预览',
+  'plugins.preview.loading': '正在渲染示例…',
+  'plugins.preview.loadFailed': '示例渲染失败：{reason}',
+  'plugins.preview.noExample': '这个组件没有提供示例文件。',
+  'plugins.preview.backToOps': '返回运维面',
+
+  'shortcuts.title': '键盘快捷键',
+  'shortcuts.close': '关闭',
+  'shortcuts.tip':
+    '提示：文本输入框内按 Esc 可退出编辑；命令面板与帮助面板只在各自打开时接管按键。',
+
+  'export.done.markdown': '已导出 Markdown：{path}',
+  'export.done.html': '已导出 HTML：{path}',
+  'export.done.pdf': '已导出 PDF：{path}',
+  'export.richWarning':
+    '（文档含 {count} 处 docvi 富组件：在其他编辑器里会显示为 YAML 声明与标签引用，不是渲染后的卡片）',
+}
+
+const en: Dict = {
+  'app.name': 'docvi',
+  'app.library': 'Library',
+  'app.plugins': 'Plugins',
+  'app.settings': 'Settings',
+
+  'titlebar.palette': 'Command palette',
+  'titlebar.searchPlaceholder': 'Search documents or commands',
+  'titlebar.toggleTree': 'Show / hide file tree',
+  'titlebar.toggleOutline': 'Show / hide outline',
+  'titlebar.settings': 'Settings',
+
+  'tabbar.label': 'Open documents',
+  'tabbar.close': 'Close {title}',
+
+  'status.chooseTheme': 'Choose theme',
+  'status.mode.read': 'Read',
+  'status.mode.live': 'Live preview',
+  'status.mode.source': 'Source',
+  'status.mode.split': 'Split',
+  'status.editorWrap': 'Source wrapping: wrap long lines / one line stays one line',
+  'status.wrapOn': 'Wrap',
+  'status.wrapOff': 'No wrap',
+  'status.indexing': 'Building search index',
+  'status.taskDone': '{label} finished',
+  'status.taskCancel': 'Cancel background task',
+  'status.dirty': 'Unsaved',
+  'status.standalone': 'Single file',
+  'status.noWorkspace': 'No workspace',
+  'status.contentWidth': 'Content width',
+  'status.widthFull': 'Full',
+  'status.widthMeasure': 'Narrow',
+  'status.widthAction': 'Content width: {action}',
+  'status.serviceRunning': 'Service',
+  'status.serviceOn': 'Service :{port}',
+  'status.serviceOff': 'Service off',
+  'status.serviceOnHint':
+    'Local service running (port {port}) · serves both the MCP endpoint and share links · click to open settings',
+  'status.serviceOffHint':
+    'Local service stopped: MCP and sharing are unavailable · click to open settings',
+
+  'editor.emptyHint': 'Type / to insert content',
+
+  'empty.reader.title': 'No document open',
+  'empty.reader.hint': 'Pick one from the sidebar, or press Ctrl+O to open any Markdown file.',
+  'empty.reader.open': 'Open file…',
+  'empty.tree': 'No Markdown documents in this folder',
+  'empty.plugins': 'No plugins yet. Install a folder containing plugin.json.',
+  'empty.shares': 'No shares yet. Pick a file or folder to create a link.',
+
+  'palette.placeholder': 'Search all workspaces, or type a command…',
+  'palette.results': 'Results',
+  'palette.indexed': '{count} indexed',
+  'palette.localScope': 'Current workspace · {name}',
+  'palette.otherScopes': 'Other workspaces',
+  'palette.singleFile': 'Single file',
+  'palette.removedWorkspace': 'Removed workspace',
+  'palette.indexingOther': 'Indexing other workspaces {done}/{total}',
+  'palette.move': 'move',
+  'palette.open': 'open',
+
+  'cmd.openFile': 'Open Markdown file',
+  'cmd.openFolder': 'Add document folder',
+  'cmd.cloneRepo': 'Clone Git repository',
+  'cmd.pullWorkspace': 'Pull updates for the current workspace',
+  'cmd.switchBranch': 'Switch branch of the current workspace',
+
+  'workspace.candidates.title': 'Several document roots in this folder',
+  'workspace.candidates.hint':
+    'The folder you picked is not a document root itself, but its subfolders contain configured sites. Pick one, or use the folder as-is (scanned automatically).',
+  'workspace.candidates.keep': 'Use the picked folder',
+  'cmd.useTheme': 'Theme: {name}',
+  'cmd.toggleOutline': 'Show / hide outline',
+  'cmd.toggleContentWidth': 'Content width: full / narrow',
+  'cmd.toggleTree': 'Show / hide file tree',
+  'cmd.editLive': 'Enter live preview editing',
+  'cmd.editSource': 'Enter source mode',
+  'cmd.split': 'Split preview (source left / rendered right)',
+  'cmd.save': 'Save current document',
+  'cmd.find': 'Find in document',
+  'cmd.share': 'Share current document',
+  'cmd.exportMarkdown': 'Export as Markdown',
+  'cmd.exportHtml': 'Export as HTML',
+  'cmd.exportPdf': 'Export as PDF',
+  'cmd.clearRecent': 'Clear recent files',
+  'cmd.shortcuts': 'Keyboard shortcuts',
+  'cmd.settings': 'Open settings',
+  'cmd.about': 'About docvi',
+  'cmd.plugins': 'Open plugin manager',
+  'cmd.service': 'Local service (MCP / shares)',
+
+  'group.general': 'General',
+  'group.appearance': 'Appearance',
+  'group.document': 'Document',
+  'group.help': 'Help',
+
+  'error.noDocToShare': 'No open document to share',
+  'error.noDocToExport': 'No open document to export',
+  'error.dropPath': 'Cannot read the path of the dropped file',
+  'error.dropNotMarkdown': 'Only Markdown files (.md) can be dropped',
+
+  'settings.title': 'Settings',
+  'settings.exposure': 'External access',
+  'settings.service': 'Local service',
+  'settings.exposureHint':
+    'MCP and temporary shares share this one process, port and token; stopping it stops both.',
+  'settings.mcpSection': 'MCP (for AI)',
+  'settings.mcpHint':
+    'Wire this endpoint and token into an MCP client so AI can search the current workspace.',
+
+  'settings.status': 'Status',
+  'settings.serviceRestart': 'Restart service',
+  'settings.running': 'Running',
+  'settings.stopped': 'Stopped',
+  'settings.endpoint': 'MCP endpoint',
+  'settings.token': 'Access token',
+  'settings.copy': 'Copy',
+  'settings.copied': 'Copied',
+  'settings.show': 'Show token',
+  'settings.hide': 'Hide token',
+  'settings.mcpConfig': 'MCP client config',
+  'settings.copyJson': 'Copy JSON',
+  'settings.toolsHint':
+    'Tools: list_plugins / list_components / get_component_docs / get_plugin_docs / search_docs / read_doc. Workspace changes sync automatically.',
+  'settings.lan': 'LAN access',
+  'settings.lanOn': 'Enabled: devices on the same network can connect (token required)',
+  'settings.lanOff': 'Local machine only',
+  'settings.lanWarn':
+    'When enabled, share links and the MCP endpoint are visible to your local network. Turn it off on public networks.',
+  'settings.port': 'Port',
+  'settings.portApply': 'Apply and restart',
+  'settings.portHint':
+    'Changing the port restarts the service; if it is taken, the service shifts to the nearest free port.',
+  'settings.desktop': 'Startup and background',
+  'settings.autostart': 'Start with Windows',
+  'settings.autostartHint': 'Open docvi automatically after you sign in',
+  'settings.closeToTray': 'Keep running in tray on close',
+  'settings.closeToTrayHint': 'Closing the window keeps the MCP endpoint and share links alive',
+  'settings.logs': 'Service logs',
+  'settings.logsHint': 'serve.log lives in the data folder',
+  'settings.openLogs': 'Open data folder',
+  'error.badPort': 'Port must be an integer between 1024 and 65535',
+  'settings.noConfig': 'Service not running — no config yet',
+  'settings.shares': 'Temporary shares',
+  'settings.newShare': 'New share',
+  'settings.sharesHint':
+    'Shares are read-only links; content is not copied. Removing a share or stopping the service invalidates it.',
+  'settings.about': 'About',
+  'about.version': 'Version',
+  'about.platform': 'Platform',
+  'about.dataDir': 'Data directory',
+  'about.checkUpdate': 'Check for updates',
+  'about.checking': 'Checking…',
+  'about.upToDate': 'Up to date ({version})',
+  'about.updateAvailable': 'New version: {current} → {latest}',
+  'about.checkFailed': 'Check failed: {reason}',
+  'about.checkUnavailable': 'Update check unavailable',
+  'about.openDownload': 'Open download page',
+  'about.updateNote':
+    'This build only checks for updates and links to the download page; it does not self-install (that lands once signing and a release channel are in place).',
+  'settings.appearance': 'Appearance',
+  'settings.theme': 'Theme',
+  'theme.lead':
+    'Picking one applies to everything. Plugins can ship themes too, several per plugin.',
+  'theme.builtin': 'Built-in theme',
+  'theme.fromPlugin': 'From plugin {name}',
+  'theme.badge': 'Plugin',
+  'theme.slate': 'Slate',
+  'theme.mist': 'Mist',
+  'theme.graphite': 'Graphite',
+  'theme.paper': 'Paper',
+  'settings.themeHint':
+    'One theme is one complete palette: window, document and editor change together.',
+  'settings.editorWrap': 'Source wrapping',
+  'settings.editorWrapHint':
+    'Wrap: long lines flow to the next line (default). No wrap: one line stays one line and scrolls horizontally — handy for aligning tables and wide code blocks.',
+  'settings.language': 'Language',
+  'tabmenu.close': 'Close tab',
+  'tabmenu.closeOthers': 'Close other tabs',
+  'tabmenu.closeRight': 'Close tabs to the right',
+  'tabmenu.closeAll': 'Close all tabs',
+  'tabmenu.copy': 'Duplicate tab',
+  'tabmenu.copyPath': 'Copy path',
+  'tabmenu.settings': 'Tab settings',
+  'switcher.title': 'Switch tabs',
+  'tree.openNewTab': 'Open in new tab',
+  'tree.copyPath': 'Copy relative path',
+  'tree.newFile': 'New document',
+  'tree.newDir': 'New folder',
+  'tree.rename': 'Rename',
+  'tree.cut': 'Cut',
+  'tree.copy': 'Copy',
+  'tree.paste': 'Paste here',
+  'tree.trash': 'Move to trash',
+  'tree.cutHint': 'Cut — right-click a target folder and choose "Paste here"',
+  'tree.copyHint': 'Copied — right-click a target folder and choose "Paste here"',
+  'tree.pasted': 'Pasted: {name}',
+  'tree.trashed': 'Moved to trash: {name}',
+  'tree.crossWorkspace': 'Pasting across workspaces is not supported',
+  'tree.trashTitle': 'Move to trash',
+  'tree.trashMessage': '"{name}" will be moved to the system trash and can be restored.',
+  'dialog.name': 'Name',
+  'dialog.renameLabel': 'New name',
+  'dialog.create': 'Create',
+  'dialog.rename': 'Rename',
+  'dialog.cancel': 'Cancel',
+  'dialog.nameEmpty': 'Name cannot be empty',
+  'dialog.nameSlash': 'Name cannot contain path separators',
+  'dialog.nameInvalid': 'Name contains invalid characters',
+  'ws.openNewTab': 'Open in new tab',
+  'ws.remove': 'Remove workspace',
+
+  'library.openFile': 'Open file',
+  'library.clone': 'Clone repo',
+  'library.addFolder': 'Add folder',
+  'library.pickFolder': 'Choose folder',
+  'library.cloneRepo': 'Clone Git repository',
+  'library.openSingle': 'Open a single file',
+  'library.emptyTitle': 'No document folder yet',
+  'library.emptyText':
+    'Pick a folder with Markdown files and docvi turns it into a browsable, searchable library. Your files are never moved or rewritten.',
+  'library.loading': 'Loading the library…',
+  'library.emptyWeb': 'No document repositories are available on this platform yet.',
+  'library.workspaces': 'Workspaces',
+  'library.recent': 'Recently opened',
+  'library.clearRecent': 'Clear',
+  'library.removeHint': 'Remove this workspace (files on disk are kept)',
+  'library.openedAt': 'Opened {time}',
+  'library.removedWorkspace': 'Removed workspace',
+  'library.singleFile': 'Single file',
+  'library.shareDir': 'Share folder',
+  'reader.share': 'Share this document',
+  'share.toastTitle': 'Share link is ready — copy and send it:',
+  'share.lanTitle': 'LAN access needs to be on',
+  'share.lanMessage':
+    'Sharing is for other devices on the same network, but LAN access is currently off — the link only works on this machine and will not open for anyone else.\n\nTurn it on now? (While on, share links and the MCP endpoint are visible to devices on the same subnet. Avoid it on public networks.)',
+  'share.lanEnable': 'Turn on and create link',
+  'share.lanLocalOnly': 'Just view it here',
+  'share.lanOnlyHint': 'LAN access is off: this link only opens on this machine',
+
+  'git.cloneTitle': 'Clone Git repository',
+  'git.url': 'Repository URL',
+  'git.urlPlaceholder': 'https://example.com/team/docs.git',
+  'git.name': 'Name',
+  'git.namePlaceholder': 'Repository name',
+  'git.branch': 'Branch (optional)',
+  'git.branchPlaceholder': 'Leave empty for the default branch',
+  'git.cloneHint':
+    'The repository is cloned into the app data directory with one browsing copy per branch. Your own folders are never written to, and pulling always follows the remote.',
+  'git.cloneAction': 'Clone',
+  'git.cloning': 'Cloning…',
+  'git.connecting': 'Connecting…',
+  'git.urlRequired': 'Enter the repository URL',
+  'git.nameRequired': 'Enter a name',
+  'git.unavailable': 'git is not available on this system',
+  'git.switchBranch': 'Switch branch',
+  'git.pullNow': 'Pull updates',
+  'git.branchesTitle': 'Switch branch · {name}',
+  'git.filterBranches': 'Filter branches',
+  'git.loadingBranches': 'Loading branches…',
+  'git.noBranches': 'The remote has no branches',
+  'git.noMatch': 'No matching branch',
+  'git.switchFailed': 'Failed to switch branch',
+  'git.switchedTo': 'Switched to branch {branch}',
+  'git.pulled': 'Pulled {count} new commit(s) on {branch}',
+  'git.upToDate': '{branch} is up to date',
+  'git.docsGone': 'Deleted on the remote: {list} (tabs kept, content stays at the old version)',
+  'git.docMissingOnBranch': 'The open document does not exist on branch {branch}',
+  'git.notManaged': 'This workspace is not git-managed',
+  'portal.branches': 'Browsable branches',
+  'portal.branchHint': 'Switching only affects you (via ?branch=); the repository is untouched',
+  'portal.cloning': 'Cloning…',
+  'portal.syncAt': 'Synced {time}',
+  'portal.neverSynced': 'Never synced',
+  'portal.syncError': 'Sync failed: {message}',
+  'portal.state.ready': 'Browsable',
+  'portal.state.indexing': 'Indexing',
+  'portal.state.pending': 'Pending index',
+  'portal.state.failed': 'Index failed',
+  'portal.state.building': 'Building',
+  'portal.state.none': 'No artifact',
+  'portal.ops': 'Ops',
+  'portal.opsHint': 'Repositories, git credentials, branch rules, indexing jobs and audit log',
+  'portal.mcpTitle': 'AI access (MCP)',
+  'portal.mcpDesc':
+    'Point an MCP-capable AI client at this address (HTTP transport, no extra parameters) — while writing docs it can look up component usage and search/read documents on published branches.',
+  'portal.mcpCopy': 'Copy address',
+  'portal.mcpCopied': 'Copied',
+  'portal.localTitle': 'Preview local Markdown',
+  'portal.localDesc':
+    'Take a look at a freshly generated file first: content stays in memory, is never uploaded and never enters a repository. Reloading discards it.',
+  'portal.localPick': 'Choose files',
+  'portal.localPickDir': 'Choose folder',
+  'portal.localEmpty': 'No previewable .md file here',
+  'portal.localFailed': 'Failed to read the local files',
+  'portal.localLoaded': 'Loaded {count} local document(s) for this session',
+  'portal.localBadge': 'Local preview',
+  'tabs.section': 'Tabs',
+  'tabs.max': 'Maximum tabs',
+  'tabs.maxHint': '0 means unlimited',
+  'tabs.overflow': 'When the limit is reached',
+  'tabs.overflow.leastRecent': 'Close the least recently used tab',
+  'tabs.overflow.oldest': 'Close the oldest tab',
+  'tabs.overflow.reject': 'Refuse and show a hint',
+  'tabs.layout': 'Layout',
+  'tabs.layout.single': 'Single row',
+  'tabs.layout.wrap': 'Wrap',
+  'tabs.overflowX': 'Overflow (single row)',
+  'tabs.overflowX.scroll': 'Horizontal scrollbar',
+  'tabs.overflowX.shrink': 'Shrink to fit',
+  'tabs.width': 'Tab width',
+  'tabs.widthHint': 'Maximum in px; short titles stay narrow',
+  'error.tabUnavailable': 'The content this tab pointed to is gone; the tab was closed',
+  'error.tabLimit': 'Tab limit reached — adjust it in Settings',
+  'error.linkMissing': 'Linked document not found: {path}',
+  'error.workspaceMissing': 'That workspace was removed, so its documents cannot be opened',
+  'error.workspaceGone': 'The workspace this file belonged to was removed',
+  'error.clipboard': 'Copy failed: clipboard unavailable',
+  'error.saveBeforeClose': 'Save failed or conflicted; the tab stayed open',
+  'cmd.nextTab': 'Switch tabs',
+  'cmd.back': 'Back (tab history)',
+  'cmd.forward': 'Forward (tab history)',
+  'group.tabs': 'Tabs',
+  'confirm.closeDirtyTitle': 'Save before closing?',
+  'confirm.closeDirtyMessage': '"{name}" has unsaved changes. Save it, or discard the changes?',
+  'confirm.save': 'Save and close',
+  'confirm.discard': "Don't save",
+  'confirm.cancel': 'Cancel',
+  'settings.storageHint': 'Settings live in userData/settings.json — edit or export them directly.',
+  'file.outsideHint': 'This file is not inside any workspace',
+  'settings.openDataDir': 'Open data folder',
+
+  'plugins.tab.installed': 'Installed',
+  'plugins.tab.market': 'Market',
+  'plugins.market.title': 'Plugin market',
+  'plugins.market.source': 'Source',
+  'plugins.market.refresh': 'Refresh',
+  'plugins.market.refreshing': 'Refreshing…',
+  'plugins.market.repository': 'Open repository',
+  'plugins.market.installed': 'Installed',
+  'plugins.market.installHint':
+    'Every market entry points at its own repository. The desktop app ships without an archive extractor, so it does not install from the market directly — use the container ops console, or install a prebuilt plugin folder with "Install from folder".',
+  'plugins.market.empty': 'The market catalog has no entries yet.',
+  'plugins.market.emptyOffline':
+    'No cached catalog and the current fetch failed — retry with "Refresh" once online.',
+  'plugins.market.neverFetched': 'Never fetched',
+  'plugins.market.justNow': 'Updated just now',
+  'plugins.market.minutesAgo': 'Updated {count} min ago',
+  'plugins.market.hoursAgo': 'Updated {count} h ago',
+  'plugins.market.daysAgo': 'Updated {count} d ago',
+  'plugins.title': 'Plugins',
+  'plugins.subtitle':
+    'Themes, component packs and Markdown syntax extensions are all plugins. They take effect immediately and unload completely when disabled.',
+  'plugins.install': 'Install from folder',
+  'plugins.installed': 'Installed',
+  'plugins.builtin': 'Built-in',
+  'plugins.trust.presentation': 'Presentation',
+  'plugins.trust.sandbox': 'Sandboxed service',
+  'plugins.trust.trusted': 'Trusted service',
+  'plugins.trust.presentationHint':
+    'Runs in the UI process; can only change UI and document rendering, with no filesystem or network access',
+  'plugins.trust.sandboxHint':
+    'Runs in a separate process with granted directory and network access',
+  'plugins.trust.trustedHint':
+    'Runs in the service process with full system access — install only plugins you fully trust',
+  'plugins.enable': 'Enable plugin',
+  'plugins.disable': 'Disable plugin',
+  'plugins.uninstall': 'Uninstall plugin',
+  'plugins.loading': 'Loading plugins…',
+  'plugins.contrib.components': '{count} components',
+  'plugins.contrib.themes': '{count} themes',
+  'plugins.contrib.syntax': '{count} syntax extensions',
+  'plugins.contrib.commands': '{count} commands',
+  'plugins.contrib.none': 'No declarative contributions',
+  'plugins.components.toggle': 'Components ({count})',
+  'plugins.components.enable': 'Enable this component',
+  'plugins.components.disable': 'Disable this component (a same-kind implementation takes over)',
+  'plugins.preview.title': 'Example preview',
+  'plugins.preview.close': 'Close preview',
+  'plugins.preview.loading': 'Rendering example…',
+  'plugins.preview.loadFailed': 'Failed to render example: {reason}',
+  'plugins.preview.noExample': 'This component ships no example file.',
+  'plugins.preview.backToOps': 'Back to ops console',
+
+  'shortcuts.title': 'Keyboard shortcuts',
+  'shortcuts.close': 'Close',
+  'shortcuts.tip':
+    'Tip: press Esc inside a text field to leave editing; the palette and help panels only capture keys while open.',
+
+  'export.done.markdown': 'Markdown exported: {path}',
+  'export.done.html': 'HTML exported: {path}',
+  'export.done.pdf': 'PDF exported: {path}',
+  'export.richWarning':
+    ' ({count} docvi-rich component(s): other editors will show YAML declarations and tag references instead of rendered cards)',
+}
+
+const DICTS: Record<Locale, Dict> = { zh, en }
+
+/** 供门禁脚本比对键集合（两侧必须完全一致） */
+export const DICTIONARIES: Record<Locale, Dict> = DICTS
+
+const LEGACY_STORAGE_KEY = 'docvi.locale'
+
+/** 启动语言：settings.json 优先；旧 localStorage 仅作一次性迁移来源 */
+function detectInitial(): Locale {
+  const boot = window.docvi?.bootSettings?.locale
+  if (boot === 'zh' || boot === 'en') return boot
+  try {
+    const stored = localStorage.getItem(LEGACY_STORAGE_KEY)
+    if (stored === 'zh' || stored === 'en') return stored
+  } catch {
+    // localStorage 不可用：按系统语言猜
+  }
+  return typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('zh')
+    ? 'zh'
+    : 'en'
+}
+
+export const locale = ref<Locale>(detectInitial())
+
+/** 外部设置变更时同步语言（不写回，避免自己触发自己） */
+export function applyExternalLocale(next: unknown): void {
+  if (next === 'zh' || next === 'en') locale.value = next
+}
+
+/**
+ * 迁移旧 localStorage 语言键：写进 settings.json 后清掉。
+ * 与主题迁移同一时机调用（App 启动一次）。
+ */
+export function migrateLegacyLocale(): void {
+  try {
+    const stored = localStorage.getItem(LEGACY_STORAGE_KEY)
+    if (!stored) return
+    if ((stored === 'zh' || stored === 'en') && stored !== window.docvi.bootSettings.locale) {
+      void window.docvi.settingsWrite({ locale: stored })
+      locale.value = stored
+    }
+    localStorage.removeItem(LEGACY_STORAGE_KEY)
+  } catch {
+    // 迁移失败不影响使用：下次启动再试
+  }
+}
+
+/** 词典里没有的键返回键本身：开发期一眼看出漏翻 */
+export function translate(
+  lang: Locale,
+  key: string,
+  params?: Record<string, string | number>,
+): string {
+  const template = DICTS[lang][key]
+  if (template === undefined) return key
+  if (!params) return template
+  return template.replace(/\{(\w+)\}/g, (_match, name: string) =>
+    String(params[name] ?? `{${name}}`),
+  )
+}
+
+/** 模板里用的翻译函数：依赖 locale，切换语言后自动重渲染 */
+export function useI18n() {
+  const t = (key: string, params?: Record<string, string | number>): string =>
+    translate(locale.value, key, params)
+
+  const langLabel = computed(() => (locale.value === 'zh' ? '中文' : 'English'))
+
+  function setLocale(next: Locale): void {
+    locale.value = next
+  }
+
+  return { locale, t, langLabel, setLocale }
+}
+
+// 语言变化：同步 <html lang> 并写回 settings.json。放在模块级，切语言无需组件参与。
+// 用 bootSettings 做基线，避免「启动时没变过也写一次盘」。
+let localeInitial = locale.value
+watch(
+  locale,
+  next => {
+    if (typeof document !== 'undefined')
+      document.documentElement.lang = next === 'zh' ? 'zh-CN' : 'en'
+    if (next === localeInitial) return
+    localeInitial = next
+    void window.docvi.settingsWrite({ locale: next })
+  },
+  { immediate: true },
+)

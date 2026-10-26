@@ -1,0 +1,11 @@
+{
+  "name": "@docvi/plugin-api",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "description": "docvi 插件协议：manifest / 贡献点 / 激活上下文的类型与常量（零实现、零运行时依赖，可对外发布）",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

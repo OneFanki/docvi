@@ -1,0 +1,31 @@
+[
+  {
+    "name": "src/reactive-core/",
+    "kind": "dir",
+    "open": true,
+    "note": "本课程聚焦的迷你响应式实现",
+    "children": [
+      { "name": "reactivity.ts", "note": "reactive proxy + track + trigger" },
+      { "name": "effect.ts", "note": "ReactiveEffect 与依赖清理" },
+      { "name": "ref.ts", "note": "ref：包装单一值" },
+      { "name": "computed.ts", "note": "computed：惰性派生值" }
+    ]
+  },
+  {
+    "name": "src/app/",
+    "kind": "dir",
+    "note": "业务侧：组合并消费响应式状态",
+    "children": [
+      { "name": "store.ts", "note": "全局状态与读写入口" },
+      {
+        "name": "components/",
+        "kind": "dir",
+        "note": "视图组件（渲染 = effect）",
+        "children": [
+          { "name": "Counter.vue", "note": "读 count、点按钮写 count" },
+          { "name": "TodoList.vue", "note": "读/写 todo 数组" }
+        ]
+      }
+    ]
+  }
+]

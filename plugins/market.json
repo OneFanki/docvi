@@ -1,0 +1,6 @@
+{
+  "$comment": "插件市场清单（远端配置文件）。托管在 GitHub 上（默认 raw.githubusercontent.com/OneFanki/docvi/main/plugins/market.json），客户端打开插件面板时拉取并缓存到本机，可手动刷新。它**只列第三方/可选插件**及各自的仓库地址；内置插件（base / audio）随安装包发布、不存在「安装」这个动作，因此不在这里登记——它们固定出现在「已安装」页签。字段：name（包名，[a-z0-9-]）、version、repository（插件源码仓库，必填且必须 http(s)）、displayName/description（字符串或 {zh,en}）、trust（presentation | sandbox-service | trusted-service）、tags、tarball（可选，预构建包地址，供容器运维面安装）。",
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-24",
+  "plugins": []
+}

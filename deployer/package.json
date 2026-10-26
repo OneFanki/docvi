@@ -1,0 +1,19 @@
+{
+  "name": "docvi-deployer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "docvi 部署编排服务：git 仓库管理 + 构建队列 + 运维 API + 静态产物服务",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "tar": "^7.5.22",
+    "yaml": "^2.4.0"
+  },
+  "scripts": {
+    "start": "node bin/deployer.mjs",
+    "test": "node --test \"test/**/*.test.mjs\""
+  },
+  "license": "MIT"
+}

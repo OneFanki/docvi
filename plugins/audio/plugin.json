@@ -1,0 +1,55 @@
+{
+  "name": "docs-plugin-audio",
+  "displayName": {
+    "zh": "音频场景组件包",
+    "en": "Audio Components"
+  },
+  "version": "0.1.0",
+  "apiVersion": "1",
+  "entry": "dist/index.js",
+  "styles": ["dist/style.css"],
+  "docs": "docs/SKILL.md",
+  "description": {
+    "zh": "音频场景组件包：频谱引擎图、波形包络图、钢琴卷帘图——音频/编曲教学的可视化视图",
+    "en": "docvi audio-scenario component pack: spectrum, waveform and piano-roll teaching diagrams (static SVG)"
+  },
+  "license": "MIT",
+  "components": [
+    {
+      "kind": "audio-spectrum-diagram",
+      "title": {
+        "zh": "频谱引擎图",
+        "en": "Spectrum Diagram"
+      },
+      "description": {
+        "zh": "频域频谱教学图：各 bin 均匀排布的声柱 + 对数频率刻度 + 选中频段覆盖层与峰值保持线（静态 SVG，0..1 电平）",
+        "en": "Frequency-domain teaching chart: evenly spaced bin bars + log frequency scale + selected band overlay and peak-hold line (static SVG, 0..1 levels)"
+      },
+      "example": "examples/audio-spectrum-diagram.md"
+    },
+    {
+      "kind": "waveform-diagram",
+      "title": {
+        "zh": "波形包络图",
+        "en": "Waveform Diagram"
+      },
+      "description": {
+        "zh": "时域波形教学图：对称柱状峰值包络 + 中轴线 + 可选时间刻度与播放头（静态 SVG）",
+        "en": "Time-domain teaching chart: symmetric bar peak envelope + center axis + optional time ticks and playhead (static SVG)"
+      },
+      "example": "examples/waveform-diagram.md"
+    },
+    {
+      "kind": "piano-roll",
+      "title": {
+        "zh": "钢琴卷帘图",
+        "en": "Piano Roll"
+      },
+      "description": {
+        "zh": "音符卷帘教学图：纵轴音高（白/黑键行 + 音名）、横轴为拍，每个音符一条矩形（velocity 决定不透明度）",
+        "en": "Note roll teaching chart: vertical pitch axis (white/black key rows + note names), horizontal beats, one rect per note (velocity → opacity)"
+      },
+      "example": "examples/piano-roll.md"
+    }
+  ]
+}

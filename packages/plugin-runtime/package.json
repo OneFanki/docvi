@@ -1,0 +1,14 @@
+{
+  "name": "@docvi/plugin-runtime",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "description": "docvi 插件运行时：manifest 校验、容器生命周期、贡献点注册与回收（纯 TS，不依赖 Electron）",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@docvi/plugin-api": "workspace:*"
+  }
+}

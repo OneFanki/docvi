@@ -1,0 +1,35 @@
+{
+  "name": "@docvi/desktop",
+  "productName": "docvi",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "description": "docvi 桌面应用：主进程、preload 与渲染进程（app 为唯一完整宿主）",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "test": "node --test \"../../tests/service/**/*.test.mjs\"",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "dist": "electron-builder --config electron-builder.yml"
+  },
+  "dependencies": {
+    "@docvi/renderer-core": "workspace:*",
+    "@docvi/shared": "workspace:*",
+    "lucide-vue-next": "1.0.0",
+    "minisearch": "^7.2.0",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "5.2.4",
+    "electron": "^44.9.0",
+    "electron-vite": "5.0.0",
+    "pinia": "4.1.0",
+    "typescript": "5.9.3",
+    "vite": "5.4.21",
+    "vue": "3.5.41",
+    "vue-tsc": "3.3.13"
+  }
+}

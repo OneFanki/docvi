@@ -1,0 +1,16 @@
+# 平台自带示例内容根（`pnpm docvi:dev` / `pnpm docvi:build` 缺省使用）
+title: docvi 示例
+description: 平台自带的示例课程、内建组件清单与业务组件示例
+
+# 左侧目录树：声明哪些目录映射到树的根节点（子目录自动递归）
+sidebar:
+  - text: 内建组件
+    path: component-showcase
+    order: 10
+  - text: 示例课程
+    path: sample-course
+    order: 20
+  # 业务组件示例（与 plugins/audio 配套）：不需要音频领域时整目录删除
+  - text: 业务组件示例
+    path: business-showcase
+    order: 30

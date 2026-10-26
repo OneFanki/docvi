@@ -1,0 +1,336 @@
+{
+  "name": "docs-plugin-base",
+  "displayName": {
+    "zh": "通用组件包",
+    "en": "General Components"
+  },
+  "version": "0.1.0",
+  "apiVersion": "1",
+  "entry": "dist/index.js",
+  "styles": ["dist/style.css"],
+  "docs": "docs/SKILL.md",
+  "description": {
+    "zh": "docvi 平台通用组件包：流程、状态机、表设计、接口清单、代码走读、合并单元格表格等 24 个声明式文档视图，一切宿主通用",
+    "en": "docvi platform general component pack: 24 declarative document views — flow, state machine, table design, endpoint list, code walkthrough, merged-cell table; host-agnostic"
+  },
+  "repository": "https://github.com/OneFanki/docvi",
+  "license": "MIT",
+  "components": [
+    {
+      "kind": "tutorial-shell",
+      "title": {
+        "zh": "教程页壳",
+        "en": "Tutorial Shell"
+      },
+      "description": {
+        "zh": "课程页页眉：课程名 + 第几步/共几步 + 学习目标，不渲染 H1",
+        "en": "Course page header: course title + step x/y + learning goals, no H1 rendered"
+      },
+      "example": "examples/tutorial-shell.md"
+    },
+    {
+      "kind": "flow-diagram",
+      "title": {
+        "zh": "流程图",
+        "en": "Flow Diagram"
+      },
+      "description": {
+        "zh": "有序流程：节点 + 带标注连线，点节点可下钻",
+        "en": "Ordered flow: nodes + labeled edges, nodes can drill down"
+      },
+      "example": "examples/flow-diagram.md"
+    },
+    {
+      "kind": "file-tree",
+      "title": {
+        "zh": "教学目录树",
+        "en": "File Tree"
+      },
+      "description": {
+        "zh": "教学目录树 + 每个文件/目录的职责说明，可折叠",
+        "en": "Teaching directory tree + per file/dir responsibility notes, collapsible"
+      },
+      "example": "examples/file-tree.md"
+    },
+    {
+      "kind": "call-tree",
+      "title": {
+        "zh": "调用树",
+        "en": "Call Tree"
+      },
+      "description": {
+        "zh": "调用链视图：谁调用了谁，可折叠",
+        "en": "Call chain view: who calls whom, collapsible"
+      },
+      "example": "examples/call-tree.md"
+    },
+    {
+      "kind": "code-walkthrough",
+      "title": {
+        "zh": "代码走读",
+        "en": "Code Walkthrough"
+      },
+      "description": {
+        "zh": "分步代码讲解：行号 + 每步高亮 + 上一步/下一步",
+        "en": "Step-by-step code reading: line numbers + per-step highlight + previous/next"
+      },
+      "example": "examples/code-walkthrough.md"
+    },
+    {
+      "kind": "code-block",
+      "title": {
+        "zh": "代码块",
+        "en": "Code Block"
+      },
+      "description": {
+        "zh": "带文件名的代码块 + 出处徽标 + 一键复制",
+        "en": "Code block with filename + source badge + one-click copy"
+      },
+      "example": "examples/code-block.md"
+    },
+    {
+      "kind": "decision-card",
+      "title": {
+        "zh": "设计决策卡",
+        "en": "Decision Card"
+      },
+      "description": {
+        "zh": "关键设计决策：决策 + 原因 + 证据（正反两种视觉）",
+        "en": "Key design decisions: decision + reason + evidence (why/avoid visuals)"
+      },
+      "example": "examples/decision-card.md"
+    },
+    {
+      "kind": "checklist",
+      "title": {
+        "zh": "验收清单",
+        "en": "Checklist"
+      },
+      "description": {
+        "zh": "验收/自检清单：勾选 + 进度 + localStorage 记忆",
+        "en": "Acceptance / self-check list: ticks + progress + localStorage memory"
+      },
+      "example": "examples/checklist.md"
+    },
+    {
+      "kind": "next-up",
+      "title": {
+        "zh": "下一步卡",
+        "en": "Next Up"
+      },
+      "description": {
+        "zh": "阅读收尾的下一步指引卡（多目标 + 徽标）",
+        "en": "Closing next-step card (multiple targets + badges)"
+      },
+      "example": "examples/next-up.md"
+    },
+    {
+      "kind": "api-contract",
+      "title": {
+        "zh": "模块契约",
+        "en": "API Contract"
+      },
+      "description": {
+        "zh": "模块输入/输出契约与不变量（讲清谁喂什么、吐给谁）",
+        "en": "Module input/output contract and invariants (who feeds what, to whom)"
+      },
+      "example": "examples/api-contract.md"
+    },
+    {
+      "kind": "endpoint-list",
+      "title": {
+        "zh": "接口清单",
+        "en": "Endpoint List"
+      },
+      "description": {
+        "zh": "HTTP 接口清单：默认折叠点击展开；支持非 HTTP 出口（WS/EVENT/INTERNAL）",
+        "en": "HTTP endpoint list: collapsed by default, click to expand; supports non-HTTP exits (WS/EVENT/INTERNAL)"
+      },
+      "example": "examples/endpoint-list.md"
+    },
+    {
+      "kind": "table-tabs",
+      "title": {
+        "zh": "表设计页签",
+        "en": "Table Tabs"
+      },
+      "description": {
+        "zh": "数据库表结构：一表一页签逐字段全量展开（含关系脚注）",
+        "en": "Database table structure: one tab per table, full fields (with relation footnotes)"
+      },
+      "example": "examples/table-tabs.md"
+    },
+    {
+      "kind": "table-graph",
+      "title": {
+        "zh": "表关系图",
+        "en": "Table Graph"
+      },
+      "description": {
+        "zh": "表关系概览：分层表卡 + 外键连线到字段级（悬停高亮链路）",
+        "en": "Table relations overview: layered cards + field-level foreign-key edges (hover to highlight)"
+      },
+      "example": "examples/table-graph.md"
+    },
+    {
+      "kind": "evidence-note",
+      "title": {
+        "zh": "证据卡",
+        "en": "Evidence Note"
+      },
+      "description": {
+        "zh": "教学片段与真实项目快照的证据关联卡",
+        "en": "Evidence card linking teaching snippets to real project snapshots"
+      },
+      "example": "examples/evidence-note.md"
+    },
+    {
+      "kind": "debug-table",
+      "title": {
+        "zh": "排障表",
+        "en": "Debug Table"
+      },
+      "description": {
+        "zh": "按症状/严重度筛选的故障排查表",
+        "en": "Troubleshooting table filterable by symptom / severity"
+      },
+      "example": "examples/debug-table.md"
+    },
+    {
+      "kind": "diff-view",
+      "title": {
+        "zh": "差异视图",
+        "en": "Diff View"
+      },
+      "description": {
+        "zh": "演进/重构 diff 视图：+/- 着色、统计、一键复制",
+        "en": "Diff view for evolution / refactor: +/- coloring, stats, one-click copy"
+      },
+      "example": "examples/diff-view.md"
+    },
+    {
+      "kind": "html-embed",
+      "title": {
+        "zh": "HTML 内嵌",
+        "en": "HTML Embed"
+      },
+      "description": {
+        "zh": "单文件 HTML 图解内嵌（sandbox iframe，零外部请求）",
+        "en": "Single-file HTML embed (sandbox iframe, zero external requests)"
+      },
+      "example": "examples/html-embed.md"
+    },
+    {
+      "kind": "state-flow",
+      "title": {
+        "zh": "状态机图",
+        "en": "State Flow"
+      },
+      "description": {
+        "zh": "状态流转图：分层布局 + 连线，current 状态高亮",
+        "en": "State machine diagram: layered layout + edges, current state highlighted"
+      },
+      "example": "examples/state-flow.md"
+    },
+    {
+      "kind": "message-flow",
+      "title": {
+        "zh": "消息时序图",
+        "en": "Message Flow"
+      },
+      "description": {
+        "zh": "可步进的时序图：泳道 + 单步高亮",
+        "en": "Steppable sequence diagram: lanes + per-step highlight"
+      },
+      "example": "examples/message-flow.md"
+    },
+    {
+      "kind": "metric-row",
+      "title": {
+        "zh": "指标卡组",
+        "en": "Metric Row"
+      },
+      "description": {
+        "zh": "指标卡：数值 + 变化 + 语义色",
+        "en": "Metric cards: value + change + semantic colors"
+      },
+      "example": "examples/metric-row.md"
+    },
+    {
+      "kind": "timeline",
+      "title": {
+        "zh": "时间轴",
+        "en": "Timeline"
+      },
+      "description": {
+        "zh": "竖向时间轴：时间 + 标题 + 状态色",
+        "en": "Vertical timeline: time + title + status color"
+      },
+      "example": "examples/timeline.md"
+    },
+    {
+      "kind": "change-list",
+      "title": {
+        "zh": "改动清单",
+        "en": "Change List"
+      },
+      "description": {
+        "zh": "本次改动清单：编号 + 说明 + 涉及模块徽标，可标新增/变更/移除",
+        "en": "Change list: numbered items with summary + module badges, marked added/changed/removed"
+      },
+      "example": "examples/change-list.md"
+    },
+    {
+      "kind": "risk-list",
+      "title": {
+        "zh": "风险清单",
+        "en": "Risk List"
+      },
+      "description": {
+        "zh": "已知风险：严重度 + 影响 + 当前处置，区分本方案已处理 / 待独立处理",
+        "en": "Known risks: severity + impact + current handling, marking in-scope vs deferred"
+      },
+      "example": "examples/risk-list.md"
+    },
+    {
+      "kind": "merged-table",
+      "title": {
+        "zh": "合并单元格表格",
+        "en": "Merged-Cell Table"
+      },
+      "description": {
+        "zh": "原生 Markdown 表达不了合并单元格；用 ::: merged 容器里的 YAML 描述 rowspan/colspan",
+        "en": "Markdown cannot express merged cells: a ::: merged container with YAML describes rowspan/colspan"
+      },
+      "example": "examples/merged-table.md"
+    }
+  ],
+  "contributes": {
+    "markdownSyntax": [
+      {
+        "name": "merged",
+        "form": "container",
+        "component": "merged-table",
+        "title": {
+          "zh": "合并表格块",
+          "en": "Merged table block"
+        },
+        "description": {
+          "zh": "::: merged 容器内的 YAML 描述列与单元格合并关系",
+          "en": "YAML inside a ::: merged container describes columns and cell spans"
+        }
+      }
+    ],
+    "themes": [
+      {
+        "id": "sea",
+        "title": {
+          "zh": "海岬（深色文档）",
+          "en": "Sea (dark document)"
+        },
+        "appearance": "dark",
+        "tokens": "themes/sea.json"
+      }
+    ]
+  }
+}

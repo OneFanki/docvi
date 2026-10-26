@@ -1,0 +1,95 @@
+# 介绍页部署：site/ 是纯静态 HTML，没有构建步骤，只是把截图与图标装配进去。
+#
+# 为什么单独一个工作流：门禁（verify.yml）验的是代码，介绍页验的是「页面引用的
+# 资源都存在」。两者失败原因不同、修复路径不同，日志分开才好定位。
+#
+# ⚠️ **前提：仓库的 Pages 必须已启用（Settings → Pages → Source = GitHub Actions）**。
+# 私有仓库 + 免费套餐不支持 Pages，此时 configure-pages 会报 404。
+#
+# 所以分成两个 job：
+#   assemble  总是跑 —— 组装页面并探测 Pages 是否启用（页面本身是好的就该能验）
+#   deploy    只在启用时跑 —— `environment` 是 **job 级** 字段（写到 step 上会让
+#             整份 workflow 校验失败、连 job 都不创建），所以不能把两个 job 合并。
+name: 介绍页
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'docs/screenshots/**'
+      - 'docs/assets/logo.svg'
+      - 'scripts/build-site.mjs'
+      - 'package.json'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一分支只保留最新一次部署；介绍页是纯静态资产，旧的一次没必要跑完
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  assemble:
+    name: 组装与探测
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.pages.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.18
+
+      # 组装脚本只用 Node 标准库：不装依赖，秒级完成。
+      # 输出到独立目录而不是 site/ 本身：脚本第一步会清空输出目录，
+      # 指回 site/ 会在读取 index.html 之前把它删掉。
+      - name: 组装静态页
+        run: node scripts/build-site.mjs --out site-build
+
+      - name: 探测 Pages 是否已启用
+        id: pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" >/dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::仓库未启用 GitHub Pages，跳过部署（组装产物已生成，页面本身可用）。启用方式：Settings → Pages → Source 选 GitHub Actions。"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-build
+          path: site-build
+          retention-days: 7
+
+  deploy:
+    name: 部署
+    needs: assemble
+    if: needs.assemble.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: site-build
+          path: site-build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site-build
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

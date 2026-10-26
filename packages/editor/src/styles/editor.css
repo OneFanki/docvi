@@ -1,0 +1,355 @@
+/**
+ * 编辑器样式（Live Preview 装饰）。
+ *
+ * 颜色全部取 `--dv-ed-*`（编辑器维度）或 `--dv-doc-*`（块内容按文档主题渲染）。
+ * 组件块内部走 `--dv-c-*`，所以编辑态里的组件卡片与阅读态配色完全一致。
+ */
+
+.cm-lp-heading {
+  font-weight: 600;
+  color: var(--dv-ed-md-heading);
+}
+
+.cm-lp-h1 {
+  font-size: 1.9em;
+  line-height: 1.35;
+  padding-top: 0.5em;
+  padding-bottom: 0.2em;
+}
+
+.cm-lp-h2 {
+  font-size: 1.5em;
+  line-height: 1.4;
+  padding-top: 0.6em;
+  padding-bottom: 0.15em;
+}
+
+.cm-lp-h3 {
+  font-size: 1.25em;
+  line-height: 1.45;
+  padding-top: 0.5em;
+}
+
+.cm-lp-h4 {
+  font-size: 1.08em;
+}
+
+.cm-lp-h5 {
+  font-size: 1em;
+  letter-spacing: 0.01em;
+}
+
+.cm-lp-h6 {
+  font-size: 0.94em;
+  letter-spacing: 0.04em;
+  color: var(--dv-ed-md-quote);
+}
+
+.cm-lp-quote {
+  border-left: 3px solid var(--dv-ed-md-marker);
+  padding-left: 14px;
+  color: var(--dv-ed-md-quote);
+}
+
+/* 块 Widget：与阅读视图同一套排版，外边距按块间距补齐 */
+.cm-lp-block {
+  margin: 0.6em 0;
+}
+
+.cm-lp-block__body {
+  margin: 0;
+}
+
+/*
+ * 块 Widget 内部完全按文档主题渲染：编辑器只负责「块与块之间的间距」，
+ * 块内部（代码配色、表格线、组件颜色）全部来自 renderer-core 的 doc.css。
+ *
+ * 块体带 `.doc-surface` 是为了拿全正文排版，但这里是嵌在编辑器里的「纸张」，
+ * 不能再铺一层文档底色——否则块会浮出一个与编辑器底色不同的方块。
+ * 用 !important 压过 .doc-surface 上按主题设的 background-color。
+ */
+.cm-lp-block__body.at-doc {
+  max-width: none;
+  color: var(--dv-doc-text);
+  padding: 0;
+  background: transparent !important;
+}
+
+.cm-lp-block--table .cm-lp-block__body {
+  overflow-x: auto;
+}
+
+/*
+ * 表格块右上角的「编辑表格」。
+ *
+ * 默认半透明、鼠标进块才完全显形：常驻高不透明度会让每张表都多一个按钮，
+ * 阅读长文档时反而更吵。块本身要 position: relative 才能把按钮钉在右上角。
+ */
+.cm-lp-block--table {
+  position: relative;
+}
+
+.cm-lp-table-edit {
+  position: absolute;
+  top: -9px;
+  right: 4px;
+  z-index: 2;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--dv-ed-panel-border);
+  border-radius: 999px;
+  background: var(--dv-ed-panel);
+  color: var(--dv-ed-text);
+  font: inherit;
+  font-size: 11px;
+  line-height: 20px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.cm-lp-block--table:hover .cm-lp-table-edit,
+.cm-lp-table-edit:focus-visible {
+  opacity: 1;
+}
+
+.cm-lp-table-edit:hover {
+  border-color: var(--dv-ed-md-link);
+  color: var(--dv-ed-md-link);
+}
+
+.cm-lp-block--image .cm-lp-block__body img {
+  max-height: 420px;
+  object-fit: contain;
+}
+
+/* 行内标记：Live Preview 隐藏标记符后，用样式表达语义 */
+
+/*
+ * 项目符号：把列表标记换成一个圆点。
+ *
+ * 宽度与负外边距同为 1em，正好抵消掉「标记本身占的那一格」——圆点不会额外
+ * 把行内容往右推；缩进全部交给 .cm-lp-li-N 的行内边距。
+ * 之前用 1.05em / -1.05em 又叠加行内边距，圆点会被推到编辑区左侧外面。
+ */
+.cm-lp-bullet {
+  display: inline-block;
+  width: 1em;
+  margin-left: -1em;
+  color: var(--dv-ed-md-marker);
+  text-align: center;
+}
+
+.cm-lp-taskbox {
+  display: inline-block;
+  margin-right: 0.35em;
+  color: var(--dv-ed-md-marker);
+  font-size: 1.02em;
+}
+
+.cm-lp-taskbox.is-checked {
+  color: var(--dv-ed-md-link);
+}
+
+/*
+ * 列表缩进：按嵌套深度给行加左内边距。
+ *
+ * 六级封顶：再深的 Markdown 列表本来就该改结构，多余级别共用一档也不会误导。
+ * 步长 1.6em 对齐「项目符号 + 一个空格」的自然宽度，嵌套看起来才像同一套网格。
+ *
+ * 选择器写成 `.cm-line.cm-lp-li-N`：`.cm-line` 的基础内边距由 CM6 主题注入，
+ * 单类选择器与它同权重，谁后加载谁生效——加上 .cm-line 才稳定压住。
+ */
+.cm-line.cm-lp-li-1 {
+  padding-left: calc(14px + 1.6em);
+}
+
+.cm-line.cm-lp-li-2 {
+  padding-left: calc(14px + 3.2em);
+}
+
+.cm-line.cm-lp-li-3 {
+  padding-left: calc(14px + 4.8em);
+}
+
+.cm-line.cm-lp-li-4 {
+  padding-left: calc(14px + 6.4em);
+}
+
+.cm-line.cm-lp-li-5,
+.cm-line.cm-lp-li-6 {
+  padding-left: calc(14px + 8em);
+}
+
+.cm-lp-strong {
+  font-weight: 650;
+  color: var(--dv-ed-md-strong);
+}
+
+.cm-lp-em {
+  font-style: italic;
+  color: var(--dv-ed-md-emphasis);
+}
+
+.cm-lp-code {
+  padding: 0.08em 0.34em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--dv-ed-md-code) 14%, transparent);
+  color: var(--dv-ed-md-code);
+  font-family: var(--dv-doc-font-mono, ui-monospace, 'Cascadia Code', Consolas, monospace);
+  font-size: 0.92em;
+}
+
+.cm-lp-link {
+  color: var(--dv-ed-md-link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.cm-lp-strike {
+  text-decoration: line-through;
+  color: var(--dv-ed-md-quote);
+}
+
+/* 分割线：隐藏原始 --- 后画一条线 */
+.cm-lp-hr {
+  position: relative;
+  min-height: 1px;
+}
+
+.cm-lp-hr::after {
+  content: '';
+  position: absolute;
+  left: 32px;
+  right: 32px;
+  top: 50%;
+  height: 1px;
+  background: var(--dv-ed-panel-border);
+}
+
+/* 空行提示：光标停在空行时给一句引导，不拦截点击 */
+.cm-lp-empty-hint {
+  color: var(--dv-ed-placeholder);
+  font-size: 0.94em;
+  user-select: none;
+  pointer-events: none;
+}
+
+/*
+ * frontmatter 折叠卡。
+ *
+ * 左边距必须与 `.cm-line` 的 14px 内边距对齐：卡片是块级 widget，不走行的
+ * padding，写 32px 会让它比正文整体右移 18px，标题与属性卡左右错开。
+ * 上下留白压到最小——它只是「这里有一段元信息」的提示，不是标题。
+ */
+.cm-lp-frontmatter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 32px 8px 14px;
+  padding: 1px 8px;
+  border: 1px solid var(--dv-ed-panel-border);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--dv-ed-placeholder);
+  background: var(--dv-ed-panel);
+}
+
+/* ================= 标题悬浮徽标 ================= */
+
+/*
+ * live 模式给正文左侧多留 10px：徽标要站在行首字符左侧，现有的 14px 行内边距
+ * 塞不下一个 18px 的徽标（不留白会被编辑器边界裁掉，或压到文字上）。
+ * 只加在插件挂载后的 `[data-lp-badge-host]` 上，源码模式与阅读视图完全不受影响。
+ *
+ * 用 data 属性而不是 class：CM6 每次 updateAttrs 都会整体重写 .cm-editor 的 class，
+ * 追加的 class 会在第一次更新时被冲掉（表现为「样式规则莫名失效」）。
+ */
+.cm-editor[data-lp-badge-host] .cm-content {
+  padding-left: 10px;
+}
+
+/*
+ * 徽标：绝对定位在 .cm-editor 内（CM6 baseTheme 保证它 position: relative），
+ * 不进入正文流，所以出现/消失不会让文字左右跳动。
+ * pointer-events: auto 是必须的——徽标覆盖在空白区上，只有显式声明才能收到 hover/click。
+ */
+.cm-lp-badge {
+  position: absolute;
+  z-index: 5;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dv-ui-text-dim);
+  font-family: var(--dv-font-mono, ui-monospace, Consolas, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  pointer-events: auto;
+}
+
+.cm-lp-badge.is-visible {
+  display: inline-flex;
+}
+
+.cm-lp-badge:hover,
+.cm-lp-badge:focus-visible {
+  border-color: var(--dv-ui-line);
+  background: var(--dv-ui-surface-1);
+  color: var(--dv-ui-accent);
+}
+
+/*
+ * 菜单挂在 body 上（position: fixed）：编辑器宿主有 overflow: hidden，
+ * 放进编辑器里会在边缘被裁掉。
+ */
+.cm-lp-badge-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 88px;
+  padding: 4px;
+  border: 1px solid var(--dv-ui-line);
+  border-radius: var(--dv-ui-radius-sm);
+  background: var(--dv-ui-surface-1);
+  box-shadow: var(--dv-ui-shadow-2);
+}
+
+.cm-lp-badge-menu__item {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--dv-ui-radius-sm);
+  background: transparent;
+  color: var(--dv-ui-text-2);
+  font-family: var(--dv-font-sans, inherit);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cm-lp-badge-menu__item:hover,
+.cm-lp-badge-menu__item:focus-visible {
+  background: var(--dv-ui-surface-3);
+  color: var(--dv-ui-text);
+}
+
+.cm-lp-badge-menu__item.is-current {
+  color: var(--dv-ui-accent);
+}

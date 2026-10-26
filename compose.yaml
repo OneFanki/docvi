@@ -1,0 +1,28 @@
+# docvi 部署：单容器 + 数据卷（PRD R1/R16）。
+# 首次使用：复制 .env.example 为 .env，填 OPS_TOKEN（必填，运维面凭证）与
+# GIT_CREDENTIALS（访问私有仓库时），然后 docker compose up -d --build。
+services:
+  docs-platform:
+    build: .
+    image: docs-platform:latest
+    ports:
+      - '8080:8080'
+    environment:
+      # 运维 token（必填；不设则运维 API 关闭，只有门户与文档站可访问）
+      - OPS_TOKEN=${OPS_TOKEN:?请在 .env 中设置 OPS_TOKEN}
+      # git 凭证（访问私有仓库时注入，公开仓库可留空）
+      - GIT_CREDENTIALS=${GIT_CREDENTIALS:-}
+      # 镜像版本（写入构建记录，用于平台升级提示；构建时由 CI 覆盖）
+      - PLATFORM_VERSION=${PLATFORM_VERSION:-local}
+      # 容器本地时间（清理 cron 与日志语义；按需改本机时区）
+      - TZ=${TZ:-Asia/Shanghai}
+      - DEPLOYER_DATA_DIR=/data
+      - DEPLOYER_PLATFORM_DIR=/app
+      - DEPLOYER_PORT=8080
+      # 临时分享的共享根（容器内绝对路径，分号分隔；把要分享的本机目录挂进来）
+      - SHARE_ROOTS=${SHARE_ROOTS:-/share}
+    volumes:
+      - ./data:/data
+      # 临时分享目录（可选）：本机任意目录 → 容器 /share，即可生成 /s/<id>/ 链接
+      - ${SHARE_HOST_DIR:-./share}:/share
+    restart: unless-stopped

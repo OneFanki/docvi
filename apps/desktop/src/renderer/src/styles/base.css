@@ -1,0 +1,117 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--dv-ui-bg);
+  color: var(--dv-ui-text);
+  font-family:
+    'Inter',
+    'Segoe UI Variable Text',
+    'Segoe UI',
+    'Microsoft YaHei UI',
+    'Microsoft YaHei',
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'Noto Sans SC',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* 焦点环统一走强调色，不允许浏览器默认方框 */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--dv-ui-focus);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+/*
+ * 滚动条：一律用覆盖式细滚动条，禁止原生经典样式。
+ *
+ * 两个约束缺一不可：
+ *  1. 主进程开启 OverlayScrollbar（否则 `scrollbar-width` 不生效，仍是占 10px 的经典条）；
+ *  2. 不写任何 `::-webkit-scrollbar` 规则——一旦写了，Chromium 会退回经典模式，
+ *     overlay 失效、滚动条重新挤占布局（标签条被压矮就是这么来的）。
+ *
+ * `scrollbar-color` 可继承，`scrollbar-width` 不可继承，所以后者要给 `*`。
+ */
+:root {
+  scrollbar-color: color-mix(in srgb, var(--dv-ui-text-dim) 42%, transparent) transparent;
+}
+
+* {
+  scrollbar-width: thin;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/*
+ * 全局 Tooltip（由 lib/tooltip.ts 的 v-tooltip 指令驱动）。
+ *
+ * 挂在 body 上、fixed 定位：触发元素常位于 overflow:hidden 的容器内
+ * （标签条 / 状态栏 / 滚动区），作为子节点会被裁掉一半。
+ * 不接收指针事件：气泡盖住触发元素时不能让 mouseleave 抖成闪烁。
+ */
+.dv-tip {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 280px;
+  padding: 5px 8px;
+  border: 1px solid var(--dv-ui-line);
+  border-radius: var(--dv-ui-radius-sm);
+  background: var(--dv-ui-surface-2);
+  box-shadow: var(--dv-ui-shadow-2);
+  color: var(--dv-ui-text);
+  font-size: 11.5px;
+  line-height: 1.45;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition:
+    opacity 90ms ease,
+    transform 90ms ease;
+}
+
+.dv-tip.is-open {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.dv-tip__hint {
+  color: var(--dv-ui-text-dim);
+  font-size: 10.5px;
+}

@@ -1,0 +1,545 @@
+/**
+ * 正文排版（.at-doc）。
+ *
+ * 只消费 --dv-* token：正文色走 `--dv-doc-*`，组件相关走 `--dv-c-*`（见 theme.css）。
+ * 与旧仓 doc.css 的差异只有命名与两处修正：
+ *  - 行高统一到无单位比例（绝对值会被子元素继承，把小字号撑成三倍高）
+ *  - blockquote 改用 `--dv-doc-text-2`（旧值引用了不存在的 --at-nav-text）
+ */
+
+.at-doc {
+  color: var(--dv-doc-text-body);
+  font-size: var(--dv-doc-font-size, 16px);
+  /* ⚠️ 必须无单位：写 28px 会被子元素继承为计算值，插件组件里 12px 的小字
+     也会拿到 28px 行高，每个字段行被撑成三倍高（旧实现踩过）。 */
+  line-height: var(--dv-doc-line-height, 1.8);
+  word-wrap: break-word;
+}
+
+/*
+ * 正文选中态。
+ *
+ * 不写这条时浏览器默认选中的是系统蓝，在深色文档主题上几乎不可见
+ * （用户实测「完全看不出来选中了」）。跟随文档主题取强调色底，
+ * 文字保持原色即可——强调色是暖橙/深棕，和正文对比足够。
+ */
+.at-doc ::selection,
+.at-doc::selection {
+  background: var(--dv-doc-selection);
+  color: inherit;
+}
+
+/* 行内加粗比正文亮一档：深色下正文已降档，靠亮度差补足光渗效应吃掉的字重差 */
+.at-doc strong {
+  color: var(--dv-doc-text);
+  font-weight: 700;
+}
+
+.at-doc h1,
+.at-doc h2,
+.at-doc h3,
+.at-doc h4,
+.at-doc h5,
+.at-doc h6 {
+  position: relative;
+  color: var(--dv-doc-text);
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0;
+  /* 标题文字距盒顶的距离：有上内边距的标题（h2）要把它算进去，
+     否则绝对定位的 permalink 会浮在边框上方（实测 h2 的 # 落到分隔线上） */
+  --dv-heading-lead: 0px;
+}
+
+/* 标题层级只靠字号 + 间距，不上色：配色会与链接/强调抢注意力，且六种颜色
+   在 h4 以下实际使用极少（h5/h6 全库为 0）。 */
+.at-doc h1 {
+  font-size: 32px;
+  line-height: 40px;
+  margin: 0 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--dv-doc-border);
+}
+
+.at-doc h2 {
+  font-size: 24px;
+  line-height: 32px;
+  margin: 48px 0 16px;
+  /* 与 --dv-heading-lead 同源：锚点按这个值下移，否则会落在上内边距/边框区 */
+  padding-top: var(--dv-heading-lead);
+  border-top: 1px solid var(--dv-doc-border);
+  --dv-heading-lead: 24px;
+}
+
+.at-doc h3 {
+  font-size: 20px;
+  line-height: 30px;
+  margin: 34px 0 12px;
+  font-weight: 650;
+}
+
+/* h4 是技术文档的实际主力层级（单篇最多 44 处），与 h3 拉开 3px 才可辨 */
+.at-doc h4 {
+  font-size: 17px;
+  line-height: 26px;
+  margin: 24px 0 9px;
+  font-weight: 600;
+}
+
+.at-doc h5 {
+  font-size: 16px;
+  line-height: 24px;
+  margin: 22px 0 8px;
+  letter-spacing: 0.01em;
+  font-weight: 650;
+}
+
+.at-doc h6 {
+  font-size: 15px;
+  line-height: 22px;
+  margin: 20px 0 8px;
+  letter-spacing: 0.04em;
+  font-weight: 650;
+}
+
+.at-doc p {
+  margin: 16px 0;
+}
+
+/* ---- 术语块（markdown 管线打了 .at-term）----
+   600+ 处「**术语**：定义」写法，只加左侧短竖线 + 术语换行 + 稍宽行距，
+   不做卡片：整页几百个卡片会把版面压成一片方块。 */
+.at-doc p.at-term {
+  position: relative;
+  margin: 22px 0 14px;
+  padding-left: 11px;
+  border-left: 3px solid var(--dv-doc-accent);
+  border-radius: 0 2px 2px 0;
+  line-height: 1.85;
+}
+
+.at-doc p.at-term .at-term__label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--dv-doc-accent-strong);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+}
+
+.at-doc p.at-term:has(> strong.at-term__label:only-child) {
+  margin-bottom: 8px;
+}
+
+/* ---- 步骤标题（有序列表项内「1. **步骤名**」+ 缩进说明）----
+   只加重标签与字距，不加边框：列表本身已有编号与缩进做结构。 */
+.at-doc li > p.at-step {
+  margin: 2px 0 4px;
+  padding: 0;
+  border: none;
+}
+
+.at-doc li > p.at-step > strong.at-step__label {
+  color: var(--dv-doc-text);
+  font-size: 15.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.at-doc li > p.at-step + p {
+  margin-top: 4px;
+  color: var(--dv-doc-text-2);
+}
+
+/* ---- 设问小标题（`**为什么…？**`）----
+   升格为块级标题便于扫读，但**不加术语竖线**：竖线读作「术语定义」，与设问语气不符。 */
+.at-doc p.at-question {
+  margin: 24px 0 12px;
+}
+
+.at-doc p.at-question > strong.at-question__label {
+  display: block;
+  color: var(--dv-doc-text);
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.at-doc a {
+  color: var(--dv-doc-accent);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.at-doc a:hover {
+  text-decoration: underline;
+}
+
+/*
+ * 标题 permalink：hover 时出现在标题**第一行行首**。
+ *
+ * 用绝对定位而不是 float：float 的落点是「当前行盒」，而 permalink 生成在
+ * 标题文字之后时会落到最后一行（长标题折行时 `#` 跑到第二行）。
+ * 现在 markdown 侧用 placement:'before' 把它放在文字前，这里绝对定位钉在
+ * 标题盒的左上，折几行都不会漂。标题本身已是 position: relative。
+ *
+ * ⚠️ `top` 必须跟着标题的上内边距走：h2 有 24px padding-top（用于和上节
+ * 分隔线拉开距离），写死 `top: 0` 会让 `#` 浮到分隔线上、与文字垂直错位。
+ */
+.at-doc .header-anchor {
+  position: absolute;
+  left: -0.95em;
+  top: var(--dv-heading-lead, 0px);
+  padding-right: 0.15em;
+  font-weight: 500;
+  line-height: inherit;
+  color: var(--dv-doc-accent);
+  opacity: 0;
+  user-select: none;
+}
+
+.at-doc :is(h1, h2, h3, h4, h5, h6):hover .header-anchor {
+  opacity: 1;
+}
+
+.at-doc ul,
+.at-doc ol {
+  margin: 12px 0;
+  padding-left: 1.5em;
+}
+
+.at-doc li {
+  margin: 6px 0;
+}
+
+.at-doc li > ul,
+.at-doc li > ol {
+  margin: 6px 0;
+}
+
+/*
+ * GFM 任务清单：li 上的圆点要让位给复选框。
+ *
+ * 用 list-style: none 而不是把 list-style-position 改成 inside——后者会让
+ * 多行文本的第二行缩进到圆点下方，而任务清单的续行应该与首行文字对齐。
+ * 复选框自己占的宽度由外边距补齐，正文起点与普通列表项一致。
+ */
+.at-doc li.at-task {
+  list-style: none;
+  margin-left: -1.5em;
+}
+
+.at-doc .at-task__box {
+  width: 0.95em;
+  height: 0.95em;
+  margin: 0 0.45em 0 0;
+  vertical-align: -0.1em;
+  accent-color: var(--dv-doc-accent);
+  cursor: default;
+}
+
+.at-doc blockquote {
+  margin: 16px 0;
+  padding: 0 0 0 16px;
+  border-left: 2px solid var(--dv-doc-border);
+  color: var(--dv-doc-text-2);
+}
+
+.at-doc blockquote p {
+  margin: 0;
+}
+
+.at-doc blockquote p + p {
+  margin-top: 8px;
+}
+
+.at-doc hr {
+  border: none;
+  border-top: 1px solid var(--dv-doc-border);
+  margin: 28px 0;
+}
+
+.at-doc img {
+  max-width: 100%;
+  border-radius: var(--dv-radius-md);
+  /* 可点开大图：光标与被悬停描边是「这张图能点」的唯一线索 */
+  cursor: zoom-in;
+}
+
+.at-doc img:hover {
+  outline: 2px solid var(--dv-doc-accent-soft);
+  outline-offset: 2px;
+}
+
+/* ---------- 表格 ---------- */
+
+/* ⚠️ 不用 `min-width: max-content`：中文整句不可断，表格会被撑到 2760px。
+   改为「表格吃满容器 + 每列最小宽度」：放得下就正常换行，真放不下才横向滚动。 */
+.at-table-wrap {
+  max-width: 100%;
+  margin: 16px 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.at-doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-size: 14.5px;
+}
+
+.at-doc th,
+.at-doc td {
+  min-width: 7rem;
+  border: 1px solid var(--dv-doc-border);
+  padding: 8px 14px;
+  text-align: left;
+}
+
+.at-doc th {
+  font-weight: 600;
+  background-color: var(--dv-doc-surface);
+  white-space: nowrap;
+}
+
+.at-doc tbody tr:nth-child(2n) {
+  background-color: color-mix(in srgb, var(--dv-doc-surface) 45%, transparent);
+}
+
+/* ---------- 行内代码 ---------- */
+
+.at-doc :not(pre) > code {
+  background-color: var(--dv-doc-code-bg);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-family: var(--dv-font-mono);
+  font-size: 0.875em;
+  color: var(--dv-doc-accent);
+}
+
+/* ---------- 代码块 ---------- */
+
+.at-doc [class*='language-'] {
+  position: relative;
+  margin: 16px 0;
+  background-color: var(--dv-doc-code-bg);
+  border: 1px solid var(--dv-doc-border);
+  border-radius: var(--dv-radius-md);
+  overflow: hidden;
+}
+
+.at-doc [class*='language-'] .lang {
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  font-size: 12px;
+  color: var(--dv-doc-text-muted);
+  font-family: var(--dv-font-mono);
+  user-select: none;
+  z-index: 2;
+}
+
+.at-doc [class*='language-'] .at-copy {
+  position: absolute;
+  top: 4px;
+  right: 42px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--dv-radius-sm);
+  background: transparent;
+  color: var(--dv-doc-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--dv-dur-1) var(--dv-ease),
+    background-color var(--dv-dur-1) var(--dv-ease),
+    color var(--dv-dur-1) var(--dv-ease);
+  z-index: 2;
+}
+
+.at-doc [class*='language-']:hover .at-copy {
+  opacity: 1;
+}
+
+.at-doc [class*='language-'] .at-copy:hover {
+  background-color: var(--dv-doc-surface-2);
+  color: var(--dv-doc-text);
+}
+
+.at-doc [class*='language-'] .at-copy::before {
+  content: '';
+  display: block;
+  width: 15px;
+  height: 15px;
+  margin: 0 auto;
+  background-color: currentColor;
+  mask: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M5 3.25A1.25 1.25 0 0 1 6.25 2h5.5A1.25 1.25 0 0 1 13 3.25v6.5A1.25 1.25 0 0 1 11.75 11h-5.5A1.25 1.25 0 0 1 5 9.75v-6.5Zm-1.5 3A1.25 1.25 0 0 0 2.25 7.5v5.25A1.25 1.25 0 0 0 3.5 14h5.5a1.25 1.25 0 0 0 1.25-1.25v-.25h-4A2.25 2.25 0 0 1 4 10.25v-4H3.5Z'/%3E%3C/svg%3E")
+    no-repeat center / contain;
+  -webkit-mask: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M5 3.25A1.25 1.25 0 0 1 6.25 2h5.5A1.25 1.25 0 0 1 13 3.25v6.5A1.25 1.25 0 0 1 11.75 11h-5.5A1.25 1.25 0 0 1 5 9.75v-6.5Zm-1.5 3A1.25 1.25 0 0 0 2.25 7.5v5.25A1.25 1.25 0 0 0 3.5 14h5.5a1.25 1.25 0 0 0 1.25-1.25v-.25h-4A2.25 2.25 0 0 1 4 10.25v-4H3.5Z'/%3E%3C/svg%3E")
+    no-repeat center / contain;
+}
+
+.at-doc [class*='language-'] .at-copy[data-copied]::before {
+  mask-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M13.78 4.22a.75.75 0 0 1 0 1.06l-5.75 5.75a.75.75 0 0 1-1.06 0L4.22 8.28a.75.75 0 0 1 1.06-1.06L7.5 9.44l5.22-5.22a.75.75 0 0 1 1.06 0Z'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M13.78 4.22a.75.75 0 0 1 0 1.06l-5.75 5.75a.75.75 0 0 1-1.06 0L4.22 8.28a.75.75 0 0 1 1.06-1.06L7.5 9.44l5.22-5.22a.75.75 0 0 1 1.06 0Z'/%3E%3C/svg%3E");
+  background-color: var(--dv-doc-ok);
+}
+
+.at-doc [class*='language-'] pre {
+  margin: 0;
+  padding: 18px 20px;
+  overflow-x: auto;
+  font-family: var(--dv-font-mono);
+  font-size: 13.5px;
+  line-height: 1.7;
+  counter-reset: dv-line;
+}
+
+.at-doc [class*='language-'] pre code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+}
+
+.at-doc .shiki .line {
+  display: inline-block;
+  width: 100%;
+}
+
+/* 行号：diff 语言的 ± 前缀照常显示在行号之后 */
+.at-doc .shiki .line::before {
+  counter-increment: dv-line;
+  content: counter(dv-line);
+  display: inline-block;
+  width: 2.2em;
+  margin-right: 1.2em;
+  text-align: right;
+  color: var(--dv-doc-text-muted);
+  opacity: 0.55;
+  font-size: 12px;
+  user-select: none;
+}
+
+.at-doc .shiki .line.highlighted,
+.at-doc .shiki .line.diff.add {
+  background-color: color-mix(in srgb, var(--dv-doc-ok) 12%, transparent);
+}
+
+.at-doc .shiki .line.diff.remove {
+  background-color: color-mix(in srgb, var(--dv-doc-danger) 12%, transparent);
+}
+
+/* ---------- custom-block 容器 ---------- */
+
+.at-doc .custom-block {
+  margin: 16px 0;
+  padding: 14px 18px;
+  border-radius: var(--dv-radius-md);
+  border: 1px solid transparent;
+  font-size: 15px;
+}
+
+.at-doc .custom-block p {
+  margin: 6px 0;
+}
+
+.at-doc .custom-block-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+/* 语义容器的底色一律用 color-mix 从语义 token 派生：主题换色时容器自动跟随，
+   不需要为每个主题各写一套 rgba。 */
+.at-doc .custom-block.tip {
+  background-color: color-mix(in srgb, var(--dv-doc-ok) 9%, transparent);
+  border-color: color-mix(in srgb, var(--dv-doc-ok) 25%, transparent);
+}
+
+.at-doc .custom-block.tip .custom-block-title {
+  color: var(--dv-doc-ok);
+}
+
+.at-doc .custom-block.note,
+.at-doc .custom-block.info {
+  background-color: var(--dv-doc-surface);
+  border-color: var(--dv-doc-border);
+}
+
+.at-doc .custom-block.warning,
+.at-doc .custom-block.caution {
+  background-color: color-mix(in srgb, var(--dv-doc-warn) 9%, transparent);
+  border-color: color-mix(in srgb, var(--dv-doc-warn) 30%, transparent);
+}
+
+.at-doc .custom-block.warning .custom-block-title,
+.at-doc .custom-block.caution .custom-block-title {
+  color: var(--dv-doc-warn);
+}
+
+.at-doc .custom-block.danger {
+  background-color: color-mix(in srgb, var(--dv-doc-danger) 8%, transparent);
+  border-color: color-mix(in srgb, var(--dv-doc-danger) 30%, transparent);
+}
+
+.at-doc .custom-block.danger .custom-block-title {
+  color: var(--dv-doc-danger);
+}
+
+.at-doc .custom-block.details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* ---------- mermaid ---------- */
+
+.at-doc .at-mermaid {
+  margin: 16px 0;
+  padding: 18px;
+  background-color: var(--dv-doc-surface);
+  border: 1px solid var(--dv-doc-border);
+  border-radius: var(--dv-radius-md);
+  text-align: center;
+  overflow-x: auto;
+  /* 可点开大图（图内文字在阅读列里常常小到看不清） */
+  cursor: zoom-in;
+}
+
+.at-doc .at-mermaid:hover {
+  border-color: var(--dv-doc-accent);
+}
+
+.at-doc .at-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ---------- 声明式组件占位 ---------- */
+
+.at-ce-missing {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px dashed var(--dv-doc-border-strong);
+  border-radius: var(--dv-radius-sm);
+  color: var(--dv-doc-text-muted);
+  font-size: 13.5px;
+}
+
+/* ---------- 行内代码颜色色块 ---------- */
+
+.at-color-literal {
+  white-space: nowrap;
+}
+
+.at-color-chip {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: -1px;
+  /* 中性半透明描边：亮色块在浅底/深底都有轮廓 */
+  box-shadow: inset 0 0 0 1px rgb(127 127 127 / 45%);
+}

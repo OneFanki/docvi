@@ -1,0 +1,13 @@
+title: 订单中台
+description: 一个虚构电商订单系统的产品与工程设计文档（截图演示用，数据均为虚构）
+
+sidebar:
+  - text: 开始
+    path: 开始
+    order: 10
+  - text: 设计与实现
+    path: 设计与实现
+    order: 20
+  - text: 交付
+    path: 交付
+    order: 30

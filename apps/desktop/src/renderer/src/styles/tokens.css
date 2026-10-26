@@ -1,0 +1,49 @@
+/**
+ * 窗口骨架尺寸（仅 UI 层）。
+ *
+ * ⚠️ 颜色不在这里定义：UI 配色、文档主题、编辑器主题、组件角色 token 全部在
+ * `@docvi/renderer-core/theme.css`（单一事实源）。本文件只管「布局占多少像素」，
+ * 这样才能保证同一套尺寸在两种外观档位下完全一致（不会因换主题而跳动）。
+ */
+
+:root {
+  --dv-ui-titlebar-h: 44px;
+  --dv-ui-tabbar-h: 34px;
+  --dv-ui-statusbar-h: 24px;
+  --dv-ui-rail-w: 56px;
+  --dv-ui-sidebar-w: 260px;
+  --dv-ui-outline-w: 240px;
+
+  /*
+   * 限宽档的可读行宽。
+   *
+   * 68ch 在 16px 正文下一行只有约 34 个汉字——中文没有词间空格，太窄会让
+   * 每两三句就折一次行，读起来比宽一点更累。84ch ≈ 42 个汉字，接近中文排版
+   * 的常见舒适区间（35–45 字/行）。
+   */
+  --dv-content-measure: 84ch;
+  /*
+   * 铺满档的上限。
+   *
+   * 「铺满」不等于「顶到窗口边缘」：1920 宽屏下画布有 1600+ px，整行 100 多个
+   * 汉字会让人换行时找不到下一行的起点，组件（表格 / 流程图）也会被拉成一条。
+   * 给一个宽版心上限，既保留「比收窄宽得多」的语义，又不至于贴边。
+   */
+  --dv-content-wide: 1360px;
+  --dv-content-font-size: 16px;
+  --dv-content-line-height: 1.8;
+
+  /*
+   * 阅读列 / 编辑列的实际宽度上限。
+   *
+   * 阅读态与源码态共用这一个变量：两者各写各的 max-width 时必然会漂
+   * （源码模式曾经固定 68ch，切过去正文突然变窄、行号还留在窗口最左）。
+   * 默认铺满 = 宽版心（见 `--dv-content-wide`）。
+   */
+  --dv-content-max: var(--dv-content-wide);
+}
+
+/* 限宽档：正文与源码编辑区一起收到可读行宽 */
+:root[data-content-width='measure'] {
+  --dv-content-max: var(--dv-content-measure);
+}

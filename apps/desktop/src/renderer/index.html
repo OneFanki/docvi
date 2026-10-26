@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      内容安全策略：
+      - `wasm-unsafe-eval` 是 Shiki 的 Oniguruma 引擎编译语法所需（只放开 WebAssembly，
+        不放宽普通 eval）；不加会导致代码块高亮静默失败（S1 实测）。
+      - connect-src 不含外网：呈现插件不得自行联外，AI/更新等能力必须走服务插件。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' docvi:; script-src 'self' 'wasm-unsafe-eval' docvi:; style-src 'self' 'unsafe-inline' docvi:; img-src 'self' data: blob: docvi:; font-src 'self' docvi:; connect-src 'self' docvi: ws://127.0.0.1:*;"
+    />
+    <title>docvi</title>
+    <!-- 浏览器标签页图标：与应用图标同一份几何（由 scripts/build-icons.mjs 从
+         scripts/lib/logo.mjs 生成到 public/，不要手改） -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

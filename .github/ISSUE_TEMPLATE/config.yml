@@ -1,0 +1,9 @@
+# 可以配置：选择模板 / 空白 issue
+blank_issues_enabled: true
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/OneFanki/docvi/security/advisories/new
+    about: 请勿用公开 issue 报告漏洞，走私密安全公告
+  - name: 使用文档
+    url: https://github.com/OneFanki/docvi#readme
+    about: 安装、容器部署与内容撰写规范先看 README

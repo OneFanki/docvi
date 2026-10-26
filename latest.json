@@ -1,0 +1,6 @@
+{
+  "version": "0.1.0",
+  "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
+  "notes": "首个公开构建。安装包由 GitHub Actions 在打 tag 时产出，签名暂缺（Windows 会提示未知发布者）。",
+  "homepage": "https://github.com/OneFanki/docvi"
+}

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="100%" height="100%" role="img" aria-label="docvi">
+  <defs>
+    <linearGradient id="dv-bg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#2b2e35"/>
+      <stop offset="1" stop-color="#16181d"/>
+    </linearGradient>
+    <linearGradient id="dv-page" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#f9cd72"/>
+      <stop offset="1" stop-color="#e0a03d"/>
+    </linearGradient>
+    <clipPath id="dv-clip">
+      <rect x="6.8" y="5.4" width="15.4" height="18.6" rx="2.6"/>
+    </clipPath>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#dv-bg)"/>
+  <rect x="0.6" y="0.6" width="30.8" height="30.8" rx="7.45" fill="none" stroke="#ffffff" stroke-opacity="0.09"/>
+  <rect x="10.4" y="8.2" width="15.4" height="18.6" rx="2.6" fill="#e8b055" fill-opacity="0.34"/>
+  <rect x="8.6" y="6.8" width="15.4" height="18.6" rx="2.6" fill="#e8b055" fill-opacity="0.62"/>
+  <g clip-path="url(#dv-clip)">
+    <rect x="6.8" y="5.4" width="15.4" height="18.6" fill="url(#dv-page)"/>
+    <!-- 正文短线：32px 以上读得出「这是一页字」，16px 下自然消失，不糊剪影 -->
+    <g fill="#3a2a0e" fill-opacity="0.42">
+      <rect x="9.6" y="8.600000000000001" width="7.4" height="1.5" rx="0.75"/>
+      <rect x="9.6" y="11.4" width="9.8" height="1.5" rx="0.75"/>
+      <rect x="9.6" y="14.200000000000001" width="8.2" height="1.5" rx="0.75"/>
+      <rect x="9.6" y="17" width="5.6" height="1.5" rx="0.75"/>
+    </g>
+    <g transform="rotate(-34 14.5 14.700000000000001)">
+      <rect x="5.1" y="18.2" width="17.6" height="4.4" rx="2.2" fill="#1b1d22"/>
+    </g>
+  </g>
+</svg>

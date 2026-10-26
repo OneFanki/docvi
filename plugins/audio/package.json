@@ -1,0 +1,11 @@
+{
+  "name": "docs-plugin-audio",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "description": "docvi 预设插件包：音频场景组件包（频谱/波形/钢琴卷帘——音频教学可视化）。构建由根 scripts/build-plugins.mjs 统一执行（external vue，产物 dist/index.js + dist/style.css）。",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

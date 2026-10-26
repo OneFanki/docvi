@@ -1,0 +1,79 @@
+# docvi 安装包配置（Windows NSIS 为主，mac/linux 目标保留但未验证）
+#
+# 打包前必须做完两件事（见根 package.json 的 desktop:dist）：
+#   1. pnpm --filter @docvi/desktop build —— 产出 out/{main,preload,renderer}
+#   2. node scripts/assemble-plugins.mjs --out apps/desktop/build/plugins
+#
+# 主进程与服务进程的依赖已全部打进 bundle（yaml / renderer-core / shared），
+# 因此安装包内**不含 node_modules**：pnpm 的 workspace 软链跟进 asar 既不可靠，
+# 也会把整个依赖树复制一遍。
+appId: app.docvi
+productName: docvi
+copyright: Copyright © docvi contributors
+
+directories:
+  output: release
+  buildResources: build
+
+# 只打构建产物；显式排除 node_modules 与调试文件
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/node_modules/**'
+
+asar: true
+# 主进程产物整体落到真实磁盘：rollup 多入口会把共享代码拆成 out/main/chunks/*，
+# 只 unpack service.js 会导致它 import 的 chunk 仍留在 asar 里、Node 解析失败。
+asarUnpack:
+  - out/main/**
+
+extraResources:
+  # 内置插件包：<包名>/<版本>/ 视图，由 assemble-plugins.mjs 生成
+  - from: build/plugins
+    to: plugins
+  - from: build/icon.png
+    to: icon.png
+
+npmRebuild: false
+
+fileAssociations:
+  - ext: md
+    name: Markdown 文档
+    description: Markdown 文档
+    role: Viewer
+  - ext: markdown
+    name: Markdown 文档
+    description: Markdown 文档
+    role: Viewer
+
+win:
+  executableName: docvi
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  artifactName: docvi-${version}-setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  # 卸载不删用户数据（工作区注册、会话、设置都在 userData）
+  deleteAppDataOnUninstall: false
+  shortcutName: docvi
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
+  icon: build/icon.icns
+
+linux:
+  target:
+    - AppImage
+  category: Office
+  icon: build/icon.png

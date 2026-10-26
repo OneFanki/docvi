@@ -1,0 +1,13 @@
+--- src/report/export.ts
++++ src/report/export.ts
+-// 字节格式化在导出模块里内联了一份，与上传模块的实现已经开始走样
+-function formatSize(bytes: number): string {
+-  return `${(bytes / 1024).toFixed(1)} KB`
+-}
++// 只留一份真相源：复用 utils/format 的 formatBytes（B/KB/MB/GB 全档位）
++import { formatBytes } from '../utils/format'
+ 
+ const total = rows.reduce((sum, row) => sum + row.size, 0)
+-const label = formatSize(total)
++const label = formatBytes(total)
+ return `${label} · ${rows.length} 行`

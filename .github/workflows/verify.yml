@@ -1,0 +1,64 @@
+name: 校验
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支的新推送取消上一轮未完成的任务，省 runner 也省等待
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: 全量门禁
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.10.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.18
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      # verify 是非 fail-fast 的：一次跑完 15 项再统一报，失败时日志里能直接看到全部欠账
+      - name: pnpm verify
+        run: pnpm verify
+
+  # 容器镜像单独一档：构建链路（web 产物 + 插件 + deployer 依赖）与门禁不同，
+  # 且耗时最长，放在并行 job 里不拖慢反馈
+  container:
+    name: 容器镜像构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建镜像
+        run: docker build -t docvi:ci .
+
+      - name: 冒烟（门户可达 + 运维面在无 token 时关闭）
+        run: |
+          docker run -d --name docvi-ci -p 8080:8080 docvi:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/ >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          # 读者面：门户与运维页的 HTML 都该出得来
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)" = "200"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/_/admin)" = "200"
+          # 运维面：/api/audit 属运维 API，无 token 必须被拒（未配置 token 时是 503，
+          # 配了但没带是 401）——绝不允许「没设密码就放行」
+          code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/audit)"
+          echo "未带 token 访问 /api/audit → $code"
+          test "$code" != "200"
+          docker logs docvi-ci
+          docker rm -f docvi-ci

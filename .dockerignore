@@ -1,0 +1,21 @@
+node_modules
+**/node_modules
+.git
+data
+.docvi
+.env
+.temp
+# 平台前端产物在镜像内自构建，不进上下文：
+# 容器站点伺服的是 apps/desktop/dist-web（见 Dockerfile 的 web 构建步骤）。
+# 注意目录规则必须写到子目录层级——根级的 `dist/` 匹配不到 apps/desktop/dist-web
+**/dist-web
+# Tauri 桌面端（容器不需要；Rust target 体积巨大）
+src-tauri
+skills
+# 桌面打包产物（容器不需要）：electron-builder 的 release*/ 每份近 500MB，
+# 曾把镜像从 2GB 撑到 3.55GB——只写 `release/` 匹配不到子目录，必须 `**/`
+**/release
+**/release-*
+**/out
+*.md
+!README.md

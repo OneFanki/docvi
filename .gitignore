@@ -1,0 +1,40 @@
+# 依赖与构建产物
+node_modules/
+dist/
+dist-*/
+packages/*/dist/
+packages/*/dist-*/
+.temp/
+temp/
+
+# Electron 打包产物
+release/
+# 向独立目录出包（运行中的实例会锁住 release/win-unpacked，改用 release-<tag>/ 避开）
+apps/desktop/release-*/
+apps/desktop/out/
+# 打包时组装的内置插件视图（assemble-plugins.mjs 生成，图标是静态资源需入库）
+apps/desktop/build/plugins/
+
+# deployer 数据卷与本机环境（凭证不进仓）
+data/
+.env
+.env.local
+
+# 本机配置（不跨机）
+*.local
+*.local.yaml
+# 本机私有的扫描规则（不入仓，每台机器各自维护）
+.scan-deny.local
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 插件包构建产物（build-plugins.mjs 生成：dist/index.js + dist/style.css）
+plugins/*/dist/
+
+# 介绍页组装产物（build-site.mjs 生成；截图的事实源在 docs/screenshots/）
+site-build/
+

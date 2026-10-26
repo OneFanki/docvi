@@ -1,0 +1,11 @@
+{
+  "name": "@docvi/shared",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "description": "docvi 共享契约：IPC 通道、领域类型（无运行时依赖）",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

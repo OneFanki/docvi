@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "@docvi/shared": ["../../packages/shared/src/index.ts"]
+    }
+  },
+  // service 与 main 同属 Node 侧产物（electron-vite 的第二个入口）：不纳入这里
+  // 就只被 esbuild 转译、从不类型检查——服务层合并后它开始直接 import
+  // packages/server 的 .mjs（靠同名 .d.mts 提供类型），更需要这道门
+  "include": [
+    "src/main/**/*.ts",
+    "src/preload/**/*.ts",
+    "src/service/**/*.ts",
+    "electron.vite.config.ts",
+    "../../packages/renderer-core/src/**/*.d.ts"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@docvi/server",
+  "version": "0.4.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "description": "docvi 服务层共享实现：MCP 协议 / 语料检索 / 分享登记与代理 / HTTP 原语（容器 deployer 与桌面服务进程共用）",
+  "exports": {
+    "./corpus": "./src/corpus.mjs",
+    "./http-kit": "./src/http-kit.mjs",
+    "./mcp": "./src/mcp.mjs",
+    "./shares": "./src/shares.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\""
+  },
+  "dependencies": {
+    "yaml": "^2.4.0"
+  }
+}

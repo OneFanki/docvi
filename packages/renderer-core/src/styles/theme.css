@@ -1,0 +1,659 @@
+/**
+ * docvi 主题系统：三个维度 + 一个组件契约。
+ *
+ * ══ 为什么必须分维度 ══
+ * 「主题」在本产品里是**三个互不相同的对象**，各有各的适用面：
+ *
+ *   1. UI 主题（chrome）        --dv-ui-*   标题栏、侧栏、按钮、弹层、状态栏
+ *   2. 文档主题（渲染）          --dv-doc-*  正文、标题、表格、代码块、引用、术语块
+ *   3. 编辑器主题（CM6）         --dv-ed-*   编辑区底色、光标、选区、行号、语法高亮
+ *
+ * 三者可以独立选择：白天用浅色 chrome + 深色文档主题（夜间阅读）是完全合理的组合。
+ * 若合并成一套变量，用户就没法只要「正文护眼」而不改整个应用外观。
+ *
+ * ══ 组件配色契约（第三方插件必须遵守）══
+ * 组件**不得写死颜色**，只允许消费 --dv-c-* 角色 token：
+ *
+ *   --dv-c-surface / -surface-2 / -border / -border-strong
+ *   --dv-c-text / -text-2 / -text-muted
+ *   --dv-c-accent / -accent-soft / -accent-contrast
+ *   --dv-c-ok / -warn / -danger / -info
+ *   --dv-c-cat-1..6   分类色（图表多系列）
+ *   --dv-c-code-bg / -highlight / -highlight-border
+ *   --dv-c-font-sans / -font-mono / -radius-* / -shadow-*
+ *
+ * 角色 token 由**文档主题**提供（组件渲染在正文流里，必须与正文同源），
+ * 因此「组件是红色、文档是蓝色」这类割裂在结构上不可能发生——
+ * 组件的红只能来自 --dv-c-danger，而 --dv-c-danger 由当前文档主题给出配色。
+ *
+ * 语义色（ok/warn/danger/info）跨主题保持**色相稳定**（危险永远是红系、
+ * 警告永远是琥珀系），只调明度与饱和以适配深浅底。这样组件表达「危险」
+ * 的含义在任何主题下都读得懂，同时不会和正文抢色。
+ *
+ * ══ 兼容层 ══
+ * 旧组件包使用 --at-* 命名。它们在 `.doc-surface` 作用域内被别名到 --dv-c-*，
+ * 因此 25 个存量组件零改动即可跟随文档主题。新代码一律用 --dv-c-*；
+ * 存量组件迁移完成后删除别名块（见 docs/design/docvi目标架构与实施总案.md）。
+ */
+
+/* ══════════════ 全局常量（与主题无关） ══════════════ */
+
+:root {
+  --dv-font-sans:
+    'Inter', 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+  /* ⚠️ 等宽栈末尾必须显式给中文无衬线回退：Consolas 没有中文字形，
+     Windows 会落到宋体（衬线），等宽块里的中文看起来像印刷体。 */
+  --dv-font-mono:
+    'JetBrains Mono', 'Cascadia Mono', 'SFMono-Regular', Consolas, 'Liberation Mono',
+    'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', monospace;
+
+  --dv-radius-sm: 5px;
+  --dv-radius-md: 7px;
+  --dv-radius-lg: 9px;
+
+  --dv-dur-1: 120ms;
+  --dv-dur-2: 180ms;
+  --dv-ease: cubic-bezier(0.2, 0, 0.13, 1);
+
+  /*
+   * UI 层别名。
+   *
+   * 窗口 chrome 的 CSS 用 `--dv-ui-*` 前缀书写（与 `--dv-ui-bg` 这类主题值同一族），
+   * 而尺度与动效是**与主题无关的常量**，只在上面定义一次。缺了这层别名，
+   * `border-radius: var(--dv-ui-radius-sm)` 会解析成非法值静默失效——
+   * 表现是「写了圆角但哪儿都不圆」，没有任何报错，很难靠肉眼追到原因。
+   */
+  --dv-ui-radius-sm: var(--dv-radius-sm);
+  --dv-ui-radius-md: var(--dv-radius-md);
+  --dv-ui-radius-lg: var(--dv-radius-lg);
+  --dv-ui-dur-1: var(--dv-dur-1);
+  --dv-ui-dur-2: var(--dv-dur-2);
+  --dv-ui-ease: var(--dv-ease);
+  --dv-ui-ok: var(--dv-ui-success);
+}
+
+/* ══════════════ 1. UI 主题（chrome） ══════════════
+   `data-theme` 挂在 html 上，由宿主（app / web）控制。这里定义深浅两套完整值：
+   renderer-core 单独用于 web 宿主时也有完整外观。
+
+   每组选择器都带一个 **`data-appearance` 基底**分支。原因：插件主题可能只覆盖
+   局部变量（比如只改正文配色），未声明的部分必须从「同样明暗」的内置主题继承，
+   而不是一律落到 `:root` 的深色默认——否则一个外观为浅色的插件主题会拼出
+   「浅色正文 + 深色窗口」的半截外观。同一明暗两条选择器权重相同，靠书写顺序
+   让 light 组在后（覆盖 dark 组）即可。 */
+
+:root,
+:root[data-theme='graphite'],
+:root[data-appearance='dark'] {
+  color-scheme: dark;
+
+  --dv-ui-bg: #14161a;
+  --dv-ui-surface-1: #171a1f;
+  --dv-ui-surface-2: #1d2127;
+  --dv-ui-surface-3: #23282f;
+  --dv-ui-line: #2c323a;
+  --dv-ui-line-soft: #22272e;
+
+  --dv-ui-text: #e8e5de;
+  --dv-ui-text-2: #c9c6bf;
+  --dv-ui-text-muted: #9a978f;
+  --dv-ui-text-dim: #7b7873;
+
+  --dv-ui-accent: #d9a05b;
+  --dv-ui-accent-strong: #e6b174;
+  --dv-ui-accent-fg: #1a1305;
+  --dv-ui-danger: #d9736a;
+  --dv-ui-success: #6cae8f;
+  --dv-ui-focus: #d9a05b;
+
+  --dv-ui-shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
+  --dv-ui-shadow-2: 0 8px 24px rgb(0 0 0 / 45%);
+
+  /* 目录树图标：三种语义各一色，明度与 --dv-ui-text-muted 接近，不抢标题 */
+  --dv-tree-file: #7f9cc4;
+  --dv-tree-page: #c9a468;
+  --dv-tree-folder: #8b8f98;
+}
+
+:root[data-theme='paper'],
+:root[data-appearance='light'] {
+  color-scheme: light;
+
+  --dv-ui-bg: #f7f4ee;
+  --dv-ui-surface-1: #faf8f3;
+  --dv-ui-surface-2: #f0ece3;
+  --dv-ui-surface-3: #e7e1d5;
+  --dv-ui-line: #d8d0c2;
+  --dv-ui-line-soft: #e8e2d6;
+
+  --dv-ui-text: #1b1915;
+  --dv-ui-text-2: #38332b;
+  --dv-ui-text-muted: #6b6459;
+  --dv-ui-text-dim: #8a8275;
+
+  --dv-ui-accent: #833d20;
+  --dv-ui-accent-strong: #6f3319;
+  --dv-ui-accent-fg: #fffaf5;
+  --dv-ui-danger: #a8402c;
+  --dv-ui-success: #2f7268;
+  --dv-ui-focus: #833d20;
+
+  --dv-ui-shadow-1: 0 1px 2px rgb(60 48 32 / 10%);
+  --dv-ui-shadow-2: 0 8px 24px rgb(60 48 32 / 14%);
+
+  --dv-tree-file: #4a6f9e;
+  --dv-tree-page: #a8762a;
+  --dv-tree-folder: #8a8275;
+}
+
+/* ══════════════ 2. 文档主题（渲染） ══════════════
+   与 UI 主题共用同一个 `data-theme`：一个主题就是一套完整变量，
+   不再拆「界面 / 文档 / 编辑器」三个可独立选择的维度（详见总案 7.5）。 */
+
+:root,
+:root[data-theme='graphite'],
+:root[data-appearance='dark'] {
+  color-scheme: dark;
+  --dv-doc-bg: #14161a;
+  --dv-doc-surface: #171a1f;
+  --dv-doc-surface-2: #1d2127;
+  --dv-doc-border: #2c323a;
+  --dv-doc-border-strong: #3a414a;
+  --dv-doc-text: #e8e5de;
+  --dv-doc-text-2: #c9c6bf;
+  --dv-doc-text-muted: #9a978f;
+  --dv-doc-text-body: #c9c6bf;
+  --dv-doc-accent: #d9a05b;
+  --dv-doc-accent-strong: #e6b174;
+  --dv-doc-accent-soft: rgb(217 160 91 / 16%);
+  --dv-doc-accent-contrast: #1a1305;
+  --dv-doc-code-bg: #1d2127;
+  --dv-doc-highlight: rgb(217 160 91 / 20%);
+  /* 选中底色：正文用强调色的低透明度，深底上也能一眼看出选区 */
+  --dv-doc-selection: rgb(217 160 91 / 38%);
+  --dv-doc-highlight-border: rgb(217 160 91 / 55%);
+  --dv-doc-ok: #6cae8f;
+  --dv-doc-warn: #d9a05b;
+  --dv-doc-danger: #d9736a;
+  --dv-doc-info: #85a8f0;
+  --dv-doc-tree-folder: #d9a94a;
+  /* 图形组件专用：画布压深让卡片浮起来，连线保持 ≥3:1 非文本对比度 */
+  --dv-doc-graph-canvas: #171a1f;
+  --dv-doc-graph-grid: #232830;
+  --dv-doc-graph-line: #333b45;
+  --dv-doc-graph-wire: #46505c;
+  --dv-doc-graph-pill: #1d2127;
+  --dv-doc-graph-badge: #232830;
+  --dv-doc-shadow-sm: 0 1px 2px rgb(0 0 0 / 35%);
+  --dv-doc-shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 14px rgb(0 0 0 / 45%);
+
+  /* 分类色（图表多系列）：与正文同源、彼此区分度足够 */
+  --dv-c-cat-1: #6cae8f;
+  --dv-c-cat-2: #a396ff;
+  --dv-c-cat-3: #e88a9d;
+  --dv-c-cat-4: #85a8f0;
+  --dv-c-cat-5: #d9a05b;
+  --dv-c-cat-6: #98a2b0;
+}
+
+:root[data-theme='paper'],
+:root[data-appearance='light'] {
+  color-scheme: light;
+  --dv-doc-bg: #f7f4ee;
+  --dv-doc-surface: #faf8f3;
+  --dv-doc-surface-2: #f0ece3;
+  --dv-doc-border: #d8d0c2;
+  --dv-doc-border-strong: #c9bfae;
+  --dv-doc-text: #1b1915;
+  --dv-doc-text-2: #38332b;
+  --dv-doc-text-muted: #6b6459;
+  --dv-doc-text-body: #1f1d19;
+  /* 强调色实测 7.21:1（WCAG AAA）；原 #9a4f2d 只有 5.42:1，不够长文阅读 */
+  --dv-doc-accent: #833d20;
+  --dv-doc-accent-strong: #6f3319;
+  --dv-doc-accent-soft: rgb(131 61 32 / 10%);
+  --dv-doc-accent-contrast: #fffaf5;
+  --dv-doc-code-bg: #efeade;
+  --dv-doc-highlight: rgb(131 61 32 / 14%);
+  --dv-doc-selection: rgb(131 61 32 / 30%);
+  --dv-doc-highlight-border: rgb(131 61 32 / 40%);
+  --dv-doc-ok: #2f7268;
+  --dv-doc-warn: #8a6720;
+  --dv-doc-danger: #a8402c;
+  --dv-doc-info: #335c8f;
+  --dv-doc-tree-folder: #b8862a;
+  --dv-doc-graph-canvas: #eae4d8;
+  --dv-doc-graph-grid: #ded5c6;
+  --dv-doc-graph-line: #b8ab95;
+  --dv-doc-graph-wire: #8a7c66;
+  --dv-doc-graph-pill: #fffdf8;
+  --dv-doc-graph-badge: #e7e0d2;
+  --dv-doc-shadow-sm: 0 1px 2px rgb(60 48 32 / 10%);
+  --dv-doc-shadow: 0 1px 2px rgb(60 48 32 / 8%), 0 4px 14px rgb(60 48 32 / 12%);
+  --dv-c-cat-1: #2f7268;
+  --dv-c-cat-2: #5f4f9c;
+  --dv-c-cat-3: #96394f;
+  --dv-c-cat-4: #335c8f;
+  --dv-c-cat-5: #8a6720;
+  --dv-c-cat-6: #6b6459;
+}
+
+/* 正文容器：只负责底色与排版基线，颜色全部来自上面的主题变量 */
+.doc-surface {
+  --dv-doc-measure: 68ch;
+  --dv-doc-font-size: 16px;
+  --dv-doc-line-height: 1.8;
+  background: var(--dv-doc-bg);
+  color: var(--dv-doc-text-body);
+}
+
+/* ══════════════ 组件角色 token（= 文档主题的投影） ══════════════ */
+
+.doc-surface {
+  --dv-c-surface: var(--dv-doc-surface);
+  --dv-c-surface-2: var(--dv-doc-surface-2);
+  --dv-c-border: var(--dv-doc-border);
+  --dv-c-border-strong: var(--dv-doc-border-strong);
+  --dv-c-text: var(--dv-doc-text);
+  --dv-c-text-2: var(--dv-doc-text-2);
+  --dv-c-text-muted: var(--dv-doc-text-muted);
+  --dv-c-text-body: var(--dv-doc-text-body);
+  --dv-c-accent: var(--dv-doc-accent);
+  --dv-c-accent-strong: var(--dv-doc-accent-strong);
+  --dv-c-accent-soft: var(--dv-doc-accent-soft);
+  --dv-c-accent-contrast: var(--dv-doc-accent-contrast);
+  --dv-c-ok: var(--dv-doc-ok);
+  --dv-c-warn: var(--dv-doc-warn);
+  --dv-c-danger: var(--dv-doc-danger);
+  --dv-c-info: var(--dv-doc-info);
+  --dv-c-code-bg: var(--dv-doc-code-bg);
+  --dv-c-highlight: var(--dv-doc-highlight);
+  --dv-c-highlight-border: var(--dv-doc-highlight-border);
+  --dv-c-graph-canvas: var(--dv-doc-graph-canvas);
+  --dv-c-graph-grid: var(--dv-doc-graph-grid);
+  --dv-c-graph-line: var(--dv-doc-graph-line);
+  --dv-c-graph-wire: var(--dv-doc-graph-wire);
+  --dv-c-graph-pill: var(--dv-doc-graph-pill);
+  --dv-c-graph-badge: var(--dv-doc-graph-badge);
+  --dv-c-tree-folder: var(--dv-doc-tree-folder);
+  --dv-c-shadow-sm: var(--dv-doc-shadow-sm);
+  --dv-c-shadow: var(--dv-doc-shadow);
+  --dv-c-font-sans: var(--dv-font-sans);
+  --dv-c-font-mono: var(--dv-font-mono);
+  --dv-c-radius-sm: var(--dv-radius-sm);
+  --dv-c-radius-md: var(--dv-radius-md);
+  --dv-c-radius-lg: var(--dv-radius-lg);
+
+  /* ── 旧组件包兼容别名（v1）：全部指向 --dv-c-*，迁移完成后删除 ── */
+  --at-bg: var(--dv-doc-bg);
+  --at-surface: var(--dv-c-surface);
+  --at-surface-2: var(--dv-c-surface-2);
+  --at-border: var(--dv-c-border);
+  --at-border-strong: var(--dv-c-border-strong);
+  --at-text: var(--dv-c-text);
+  --at-text-2: var(--dv-c-text-2);
+  --at-text-muted: var(--dv-c-text-muted);
+  --at-text-body: var(--dv-c-text-body);
+  --at-accent: var(--dv-c-accent);
+  --at-accent-strong: var(--dv-c-accent-strong);
+  --at-accent-soft: var(--dv-c-accent-soft);
+  --at-accent-contrast: var(--dv-c-accent-contrast);
+  --at-ok: var(--dv-c-ok);
+  --at-warn: var(--dv-c-warn);
+  --at-danger: var(--dv-c-danger);
+  --at-code-bg: var(--dv-c-code-bg);
+  --at-highlight: var(--dv-c-highlight);
+  --at-highlight-border: var(--dv-c-highlight-border);
+  --at-graph-canvas: var(--dv-c-graph-canvas);
+  --at-graph-grid: var(--dv-c-graph-grid);
+  --at-graph-line: var(--dv-c-graph-line);
+  --at-graph-wire: var(--dv-c-graph-wire);
+  --at-graph-pill: var(--dv-c-graph-pill);
+  --at-graph-badge: var(--dv-c-graph-badge);
+  --at-tree-folder: var(--dv-c-tree-folder);
+  --at-shadow-sm: var(--dv-c-shadow-sm);
+  --at-shadow: var(--dv-c-shadow);
+  --at-font-sans: var(--dv-font-sans);
+  --at-font-mono: var(--dv-font-mono);
+  --at-radius-sm: var(--dv-radius-sm);
+  --at-radius-md: var(--dv-radius-md);
+  --at-radius-lg: var(--dv-radius-lg);
+  --at-dur-1: var(--dv-dur-1);
+  --at-dur-2: var(--dv-dur-2);
+  --at-ease: var(--dv-ease);
+}
+
+/* ══════════════ 3. 编辑器主题（CM6） ══════════════
+   语法色只在这里定义，不散落到文档 CSS；同样跟随 data-theme。 */
+
+:root[data-theme='graphite'],
+:root[data-appearance='dark'] {
+  --dv-ed-bg: #14161a;
+  --dv-ed-text: #c9c6bf;
+  --dv-ed-caret: #d9a05b;
+  /* 选中：必须明显可见。原 #2b3442 在 #14161a 上几乎看不出选区 */
+  --dv-ed-selection: rgb(217 160 91 / 42%);
+  --dv-ed-selection-match: rgb(217 160 91 / 30%);
+  --dv-ed-active-line: #191d23;
+  --dv-ed-line-number: #5c6470;
+  --dv-ed-active-line-number: #d9a05b;
+  /* 行号槽比正文底色略深一档：源码模式靠这个色差 + 右侧分界线划出「行号区」，
+     否则缩进宽度与行号间隙混在一起，看不出这一行前面到底有没有空格。
+     分界线必须真的看得见：#22272e 落在 #101216 上实测几乎消失，这里提亮一档。 */
+  --dv-ed-gutter-bg: #101216;
+  --dv-ed-gutter-border: #2b323b;
+  /* 行首空白点：比正文弱一档，能数清但不抢字的位置 */
+  --dv-ed-whitespace-dot: #4a525e;
+  --dv-ed-panel: #171a1f;
+  --dv-ed-panel-border: #2c323a;
+  --dv-ed-search-match: rgb(217 160 91 / 28%);
+  --dv-ed-search-match-selected: rgb(217 160 91 / 45%);
+  --dv-ed-matching-bracket: #2b3442;
+
+  --dv-ed-syntax-keyword: #c98fdb;
+  --dv-ed-syntax-string: #9fc98f;
+  --dv-ed-syntax-number: #e0a35b;
+  --dv-ed-syntax-comment: #6b727e;
+  --dv-ed-syntax-function: #8ab4d8;
+  --dv-ed-syntax-type: #e0c07a;
+  --dv-ed-syntax-operator: #c9c6bf;
+  --dv-ed-syntax-tag: #e08f8f;
+  --dv-ed-syntax-attr: #d9a05b;
+  --dv-ed-syntax-punctuation: #8a9099;
+
+  /* Markdown 结构色（Live Preview 用）：与语法色分家——标题/引用不是代码 token */
+  --dv-ed-md-heading: #e6e2d9;
+  --dv-ed-md-strong: #f0ece2;
+  --dv-ed-md-emphasis: #cfcabf;
+  --dv-ed-md-link: #7fb0d9;
+  --dv-ed-md-code: #d9a05b;
+  --dv-ed-md-quote: #8f97a3;
+  --dv-ed-md-marker: #5c6470;
+  --dv-ed-gutter-text: #5c6470;
+  --dv-ed-gutter-active: #d9a05b;
+  --dv-ed-placeholder: #5c6470;
+  --dv-ed-font:
+    'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+}
+
+:root[data-theme='paper'],
+:root[data-appearance='light'] {
+  --dv-ed-bg: #f7f4ee;
+  --dv-ed-text: #1f1d19;
+  --dv-ed-caret: #833d20;
+  --dv-ed-selection: rgb(131 61 32 / 30%);
+  --dv-ed-selection-match: rgb(131 61 32 / 24%);
+  --dv-ed-active-line: #f1ece1;
+  --dv-ed-line-number: #a09889;
+  --dv-ed-active-line-number: #833d20;
+  --dv-ed-gutter-bg: #f0ebe1;
+  /* 浅色下 #e8e2d6 与槽底色几乎同灰，分界线等于不存在；压深到能看出边界 */
+  --dv-ed-gutter-border: #d6ccba;
+  --dv-ed-whitespace-dot: #c4b8a4;
+  --dv-ed-panel: #faf8f3;
+  --dv-ed-panel-border: #d8d0c2;
+  --dv-ed-search-match: rgb(131 61 32 / 16%);
+  --dv-ed-search-match-selected: rgb(131 61 32 / 32%);
+  --dv-ed-matching-bracket: #e3d8c6;
+
+  --dv-ed-syntax-keyword: #8b3a8f;
+  --dv-ed-syntax-string: #3f6b2f;
+  --dv-ed-syntax-number: #8a5220;
+  --dv-ed-syntax-comment: #8a8275;
+  --dv-ed-syntax-function: #2f5f8f;
+  --dv-ed-syntax-type: #7a5a1a;
+  --dv-ed-syntax-operator: #38332b;
+  --dv-ed-syntax-tag: #a8402c;
+  --dv-ed-syntax-attr: #833d20;
+  --dv-ed-syntax-punctuation: #6b6459;
+
+  --dv-ed-md-heading: #1b1915;
+  --dv-ed-md-strong: #14120f;
+  --dv-ed-md-emphasis: #38332b;
+  --dv-ed-md-link: #2f5f8f;
+  --dv-ed-md-code: #8a5220;
+  --dv-ed-md-quote: #6b6459;
+  --dv-ed-md-marker: #a09889;
+  --dv-ed-gutter-text: #a09889;
+  --dv-ed-gutter-active: #833d20;
+  --dv-ed-placeholder: #a09889;
+  --dv-ed-font:
+    'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+}
+
+/* ══════════════ 1b. 中性主题（slate / mist） ══════════════
+   用户反馈「默认主题太黄了，浅色也整体都是黄的」——graphite / paper 都是暖色
+   底（偏棕的深灰与米色），大段中文正文长时间读会发闷。这两套是**中性灰**：
+   底色取冷灰，强调色取低饱和蓝，其余角色色相应下调饱和度，避免整屏泛黄。
+
+   与内置两套同名同位：同样的变量名、同样的 `data-appearance` 基底语义，
+   所以插件主题、组件、编辑器都无需感知多出来的这两套。 */
+
+:root[data-theme='slate'] {
+  color-scheme: dark;
+  --dv-ui-bg: #14161a;
+  --dv-ui-surface-1: #181a1f;
+  --dv-ui-surface-2: #1e2126;
+  --dv-ui-surface-3: #24282e;
+  --dv-ui-line: #2d3138;
+  --dv-ui-line-soft: #23262b;
+  --dv-ui-text: #e6e8ec;
+  --dv-ui-text-2: #c3c7ce;
+  --dv-ui-text-muted: #9298a2;
+  --dv-ui-text-dim: #767c86;
+  --dv-ui-accent: #6f9fd8;
+  --dv-ui-accent-strong: #8ab5e8;
+  --dv-ui-accent-fg: #0f1620;
+  --dv-ui-danger: #d9736a;
+  --dv-ui-success: #63ab8b;
+  --dv-ui-focus: #6f9fd8;
+  --dv-ui-shadow-1: 0 1px 2px rgb(0 0 0 / 38%);
+  --dv-ui-shadow-2: 0 8px 24px rgb(0 0 0 / 44%);
+  --dv-tree-file: #7f9cc4;
+  --dv-tree-page: #9aa4b2;
+  --dv-tree-folder: #878d97;
+
+  --dv-doc-bg: #14161a;
+  --dv-doc-surface: #181a1f;
+  --dv-doc-surface-2: #1e2126;
+  --dv-doc-border: #2d3138;
+  --dv-doc-border-strong: #3b4048;
+  --dv-doc-text: #e6e8ec;
+  --dv-doc-text-2: #c3c7ce;
+  --dv-doc-text-muted: #9298a2;
+  /* 正文比加粗暗一档：暗底浅字有光渗效应，同亮度时字重差会被吃掉 */
+  --dv-doc-text-body: #b9bfc8;
+  --dv-doc-accent: #6f9fd8;
+  --dv-doc-accent-strong: #8ab5e8;
+  --dv-doc-accent-soft: rgb(111 159 216 / 16%);
+  --dv-doc-accent-contrast: #0f1620;
+  --dv-doc-code-bg: #1e2126;
+  --dv-doc-highlight: rgb(111 159 216 / 20%);
+  --dv-doc-selection: rgb(111 159 216 / 38%);
+  --dv-doc-highlight-border: rgb(111 159 216 / 55%);
+  --dv-doc-ok: #63ab8b;
+  --dv-doc-warn: #cba45f;
+  --dv-doc-danger: #d9736a;
+  --dv-doc-info: #7fa9e0;
+  --dv-doc-tree-folder: #9aa4b2;
+  --dv-doc-graph-canvas: #181a1f;
+  --dv-doc-graph-grid: #24282e;
+  --dv-doc-graph-line: #343941;
+  --dv-doc-graph-wire: #474d57;
+  --dv-doc-graph-pill: #1e2126;
+  --dv-doc-graph-badge: #24282e;
+  --dv-doc-shadow-sm: 0 1px 2px rgb(0 0 0 / 35%);
+  --dv-doc-shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 14px rgb(0 0 0 / 45%);
+  --dv-c-cat-1: #63ab8b;
+  --dv-c-cat-2: #9d95e8;
+  --dv-c-cat-3: #d9899b;
+  --dv-c-cat-4: #7fa9e0;
+  --dv-c-cat-5: #cba45f;
+  --dv-c-cat-6: #949aa4;
+
+  --dv-ed-bg: #14161a;
+  --dv-ed-text: #c3c7ce;
+  --dv-ed-caret: #6f9fd8;
+  --dv-ed-selection: rgb(111 159 216 / 42%);
+  --dv-ed-selection-match: rgb(111 159 216 / 30%);
+  --dv-ed-active-line: #191c21;
+  --dv-ed-line-number: #5b626c;
+  --dv-ed-active-line-number: #8ab5e8;
+  --dv-ed-gutter-bg: #101216;
+  --dv-ed-gutter-border: #2a2e35;
+  --dv-ed-whitespace-dot: #4a5058;
+  --dv-ed-panel: #181a1f;
+  --dv-ed-panel-border: #2d3138;
+  --dv-ed-search-match: rgb(111 159 216 / 28%);
+  --dv-ed-search-match-selected: rgb(111 159 216 / 45%);
+  --dv-ed-matching-bracket: #2c333d;
+  --dv-ed-syntax-keyword: #c094dd;
+  --dv-ed-syntax-string: #94c48c;
+  --dv-ed-syntax-number: #d8a866;
+  --dv-ed-syntax-comment: #6b727c;
+  --dv-ed-syntax-function: #85aed4;
+  --dv-ed-syntax-type: #d6c07f;
+  --dv-ed-syntax-operator: #c3c7ce;
+  --dv-ed-syntax-tag: #d78c8c;
+  --dv-ed-syntax-attr: #8ab5e8;
+  --dv-ed-syntax-punctuation: #8a9099;
+  --dv-ed-md-heading: #e6e8ec;
+  --dv-ed-md-strong: #f2f4f7;
+  --dv-ed-md-emphasis: #c8ccd3;
+  --dv-ed-md-link: #85b3e3;
+  --dv-ed-md-code: #8ab5e8;
+  --dv-ed-md-quote: #9298a2;
+  --dv-ed-md-marker: #5b626c;
+  --dv-ed-gutter-text: #5b626c;
+  --dv-ed-gutter-active: #8ab5e8;
+  --dv-ed-placeholder: #5b626c;
+  --dv-ed-font:
+    'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+}
+
+:root[data-theme='mist'] {
+  color-scheme: light;
+  --dv-ui-bg: #f7f8fa;
+  --dv-ui-surface-1: #ffffff;
+  --dv-ui-surface-2: #eef0f4;
+  --dv-ui-surface-3: #e3e6ec;
+  --dv-ui-line: #d7dbe2;
+  --dv-ui-line-soft: #e6e9ee;
+  --dv-ui-text: #1a1d22;
+  --dv-ui-text-2: #3c424c;
+  --dv-ui-text-muted: #626a76;
+  --dv-ui-text-dim: #868d99;
+  --dv-ui-accent: #2f6ba8;
+  --dv-ui-accent-strong: #235185;
+  --dv-ui-accent-fg: #ffffff;
+  --dv-ui-danger: #b0432f;
+  --dv-ui-success: #2c7266;
+  --dv-ui-focus: #2f6ba8;
+  --dv-ui-shadow-1: 0 1px 2px rgb(24 30 40 / 8%);
+  --dv-ui-shadow-2: 0 8px 24px rgb(24 30 40 / 12%);
+  --dv-tree-file: #4a6f9e;
+  --dv-tree-page: #5d6b7d;
+  --dv-tree-folder: #7d8590;
+
+  --dv-doc-bg: #f7f8fa;
+  --dv-doc-surface: #ffffff;
+  --dv-doc-surface-2: #eef0f4;
+  --dv-doc-border: #d7dbe2;
+  --dv-doc-border-strong: #c2c8d2;
+  --dv-doc-text: #1a1d22;
+  --dv-doc-text-2: #3c424c;
+  --dv-doc-text-muted: #626a76;
+  --dv-doc-text-body: #23272e;
+  --dv-doc-accent: #2f6ba8;
+  --dv-doc-accent-strong: #235185;
+  --dv-doc-accent-soft: rgb(47 107 168 / 10%);
+  --dv-doc-accent-contrast: #ffffff;
+  --dv-doc-code-bg: #eff1f5;
+  --dv-doc-highlight: rgb(47 107 168 / 14%);
+  --dv-doc-selection: rgb(47 107 168 / 30%);
+  --dv-doc-highlight-border: rgb(47 107 168 / 40%);
+  --dv-doc-ok: #2c7266;
+  --dv-doc-warn: #8a6420;
+  --dv-doc-danger: #b0432f;
+  --dv-doc-info: #2f5f8f;
+  --dv-doc-tree-folder: #6b7787;
+  --dv-doc-graph-canvas: #eef0f4;
+  --dv-doc-graph-grid: #e1e5eb;
+  --dv-doc-graph-line: #b9c0ca;
+  --dv-doc-graph-wire: #8b939f;
+  --dv-doc-graph-pill: #ffffff;
+  --dv-doc-graph-badge: #e8ebf0;
+  --dv-doc-shadow-sm: 0 1px 2px rgb(24 30 40 / 8%);
+  --dv-doc-shadow: 0 1px 2px rgb(24 30 40 / 6%), 0 4px 14px rgb(24 30 40 / 10%);
+  --dv-c-cat-1: #2c7266;
+  --dv-c-cat-2: #5a4b9c;
+  --dv-c-cat-3: #96394f;
+  --dv-c-cat-4: #2f5f8f;
+  --dv-c-cat-5: #8a6420;
+  --dv-c-cat-6: #626a76;
+
+  --dv-ed-bg: #f7f8fa;
+  --dv-ed-text: #23272e;
+  --dv-ed-caret: #2f6ba8;
+  --dv-ed-selection: rgb(47 107 168 / 30%);
+  --dv-ed-selection-match: rgb(47 107 168 / 24%);
+  --dv-ed-active-line: #eff1f5;
+  --dv-ed-line-number: #9aa1ac;
+  --dv-ed-active-line-number: #2f6ba8;
+  --dv-ed-gutter-bg: #eff1f5;
+  --dv-ed-gutter-border: #d3d8e0;
+  --dv-ed-whitespace-dot: #c0c7d1;
+  --dv-ed-panel: #ffffff;
+  --dv-ed-panel-border: #d7dbe2;
+  --dv-ed-search-match: rgb(47 107 168 / 16%);
+  --dv-ed-search-match-selected: rgb(47 107 168 / 32%);
+  --dv-ed-matching-bracket: #dfe4ec;
+  --dv-ed-syntax-keyword: #8b3a8f;
+  --dv-ed-syntax-string: #3f6b2f;
+  --dv-ed-syntax-number: #8a5220;
+  --dv-ed-syntax-comment: #868d99;
+  --dv-ed-syntax-function: #2f5f8f;
+  --dv-ed-syntax-type: #7a5a1a;
+  --dv-ed-syntax-operator: #3c424c;
+  --dv-ed-syntax-tag: #b0432f;
+  --dv-ed-syntax-attr: #2f6ba8;
+  --dv-ed-syntax-punctuation: #626a76;
+  --dv-ed-md-heading: #1a1d22;
+  --dv-ed-md-strong: #14171b;
+  --dv-ed-md-emphasis: #3c424c;
+  --dv-ed-md-link: #2f5f8f;
+  --dv-ed-md-code: #8a5220;
+  --dv-ed-md-quote: #626a76;
+  --dv-ed-md-marker: #9aa1ac;
+  --dv-ed-gutter-text: #9aa1ac;
+  --dv-ed-gutter-active: #2f6ba8;
+  --dv-ed-placeholder: #9aa1ac;
+  --dv-ed-font:
+    'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+}
+
+/* 代码高亮：Shiki 双主题产物（defaultColor:false）按文档主题取色 */
+.doc-surface .shiki,
+.doc-surface .shiki span {
+  color: var(--shiki-light);
+  background-color: transparent;
+}
+
+:root[data-theme='graphite'] .doc-surface .shiki,
+:root[data-theme='graphite'] .doc-surface .shiki span,
+:root[data-appearance='dark'] .doc-surface .shiki,
+:root[data-appearance='dark'] .doc-surface .shiki span {
+  color: var(--shiki-dark);
+}
+
+/* 文档内查找高亮：CSS Custom Highlight API（不改 DOM）。
+   自定义属性从命中文本所在的 .doc-surface 继承，因此自动跟随文档主题。 */
+::highlight(docvi-find) {
+  background-color: color-mix(in srgb, var(--dv-doc-accent, #d9a05b) 28%, transparent);
+}
+
+::highlight(docvi-find-current) {
+  background-color: var(--dv-doc-accent, #d9a05b);
+  color: var(--dv-doc-bg, #14161a);
+}

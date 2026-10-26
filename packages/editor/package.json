@@ -1,0 +1,29 @@
+{
+  "name": "@docvi/editor",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "description": "docvi 编辑器内核：CodeMirror 6 封装、Live Preview 装饰层、块级 Widget（只依赖 renderer-core，零 Electron / 零 Node）",
+  "exports": {
+    ".": "./src/index.ts",
+    "./editor.css": "./src/styles/editor.css"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.9.0",
+    "@codemirror/lang-markdown": "^6.3.4",
+    "@codemirror/language": "^6.11.3",
+    "@codemirror/search": "^6.5.11",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.6",
+    "@lezer/markdown": "^1.4.3",
+    "@docvi/renderer-core": "workspace:*"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vue": "3.5.41"
+  }
+}
