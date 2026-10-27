@@ -16,16 +16,24 @@ import {
 } from 'lucide-vue-next'
 
 import { groupItems, type InsertItem } from '../lib/insert-menu'
+import {
+  buildRows,
+  moveHorizontal as navHorizontal,
+  moveToEdge as navToEdge,
+  moveVertical as navVertical,
+  rowOffsets as computeRowOffsets,
+} from '../lib/slash-nav'
 
 /**
  * 斜杠插入工具条。
  *
- * 形态取舍：**图标按钮 + 悬停提示**，不是一个带说明文字的竖列表。
+ * 形态取舍：**首行纯图标 + 组件单列，右侧带「表单 / 手写」标记**。
  *  - 标准 Markdown 项都是通用语法，图标足以自明（列表 / 引用 / 代码块），
  *    再写「无序列表 · 标准 Markdown · 列表」只会让面板又宽又吵；
  *  - 富组件是这台应用特有的东西，图标不能自明，所以**保留文字标签**——
  *    这里恰恰是用户最需要知道「这是什么、会写出什么」的地方；
- *  - 因此面板是横向工具条：上排图标、下排组件 chip，必要时换行。
+ *  - 组件为什么独占一行：右侧要标「插入后能不能开表单改」，横排排不下；
+ *    单列还让「按一下下键 = 下一条」与视觉上的下一行严格对应。
  *
  * 键盘完全归菜单：打开期间方向键 / Enter / Tab / Esc 在 window 捕获阶段被吃掉，
  * 否则方向键会同时移动编辑器光标，菜单与文档各动一半。
@@ -111,77 +119,26 @@ watch(
   },
 )
 
-/**
+/*
  * 键盘模型：**上下键跨行、左右键行内移动**。
  *
- * 布局是「第一行基础 Markdown 图标 + 之后每行一个增强组件」，所以导航必须按
- * 二维来想。早先上下键与左右键都映射成 `move(±1)`（一维平铺），结果是：用户按
- * 下键想跳到下一行的组件，实际只是横向挪一格，要连按好几次穿过整排图标才到。
- *
- * 现在的规则：
- *  - ↑ / ↓：换到相邻**行**，列号尽量保持（越界则贴到该行末尾）；
- *  - ← / →：同一行内左右移动，到头不跨行（跨行交给上下键，符合二维直觉）；
- *  - Home / End：跳到当前行的首/尾。
+ * 规则本身与边界情况（列号保持、越界贴边、到头不跨行）都在
+ * `lib/slash-nav.ts` 里，那是纯函数、能被 node 测试直接覆盖——
+ * 这类「差一个维度」的错误肉眼审代码几乎看不出来。
  */
-const rows = computed(() => {
-  const markdownRow = props.items.filter(item => item.group === 'markdown')
-  const componentRows = props.items.filter(item => item.group === 'component')
-  return [...(markdownRow.length ? [markdownRow] : []), ...componentRows.map(item => [item])]
-})
-
-/** 每一行在 flat 里的起始下标，用于把 (row, col) 与 flat 下标互转 */
-const rowOffsets = computed(() => {
-  const offsets: number[] = []
-  let acc = 0
-  for (const row of rows.value) {
-    offsets.push(acc)
-    acc += row.length
-  }
-  return offsets
-})
-
-/** flat 下标 → { row, col } */
-function locate(index: number): { row: number; col: number } {
-  const offsets = rowOffsets.value
-  let row = 0
-  for (let i = 0; i < offsets.length; i += 1) {
-    const start = offsets[i]
-    if (start === undefined) break
-    if (index >= start) row = i
-    else break
-  }
-  return { row, col: index - (offsets[row] ?? 0) }
-}
+const rows = computed(() => buildRows(props.items))
+const rowOffsets = computed(() => computeRowOffsets(rows.value))
 
 function moveVertical(delta: number): void {
-  const layout = rows.value
-  if (!layout.length) return
-  const { row, col } = locate(cursor.value)
-  const nextRow = Math.min(layout.length - 1, Math.max(0, row + delta))
-  if (nextRow === row) return
-  // 列号尽量保持；目标行更短时贴到末尾
-  const targetRow = layout[nextRow] ?? []
-  const targetCol = Math.min(col, Math.max(0, targetRow.length - 1))
-  cursor.value = (rowOffsets.value[nextRow] ?? 0) + targetCol
+  cursor.value = navVertical(rows.value, rowOffsets.value, cursor.value, delta)
 }
 
 function moveHorizontal(delta: number): void {
-  const layout = rows.value
-  if (!layout.length) return
-  const { row, col } = locate(cursor.value)
-  const width = layout[row]?.length ?? 0
-  if (!width) return
-  const nextCol = Math.min(width - 1, Math.max(0, col + delta))
-  cursor.value = (rowOffsets.value[row] ?? 0) + nextCol
+  cursor.value = navHorizontal(rows.value, rowOffsets.value, cursor.value, delta)
 }
 
 function moveToEdge(edge: 'start' | 'end'): void {
-  const layout = rows.value
-  if (!layout.length) return
-  const { row } = locate(cursor.value)
-  const width = layout[row]?.length ?? 0
-  if (!width) return
-  cursor.value = (rowOffsets.value[row] ?? 0) + (edge === 'start' ? 0 : width - 1)
+  cursor.value = navToEdge(rows.value, rowOffsets.value, cursor.value, edge)
 }
 
 function choose(): void {
