@@ -149,3 +149,21 @@ test('三处版本号必须一致（根 / 桌面包 / 更新清单）', () => {
   assert.equal(desktopVersion, rootVersion, 'apps/desktop 的 version 必须与根 package.json 一致')
   assert.equal(manifestVersion, rootVersion, 'latest.json 的 version 必须与根 package.json 一致')
 })
+
+test('package.json 声明 repository（electron-builder 靠它解析发布目标）', () => {
+  /*
+   * electron-builder.yml 里 publish.provider=github 时，仓库地址只从
+   * package.json 的 repository 字段或 .git/config 推断。CI 检出的是浅克隆，
+   * 拿不到远端信息，于是三平台构建全部在打包最后一步报
+   * "Cannot detect repository by .git/config"——前面几十分钟编译全部作废。
+   */
+  const rootRepo = readJson('package.json').repository?.url
+  assert.ok(rootRepo, '根 package.json 必须声明 repository.url')
+  assert.match(rootRepo, /github\.com[:/][^/]+\/[^/]+?(\.git)?$/, 'repository.url 必须是 GitHub 仓库地址')
+  assert.equal(
+    readJson('apps', 'desktop', 'package.json').repository?.url,
+    rootRepo,
+    'apps/desktop 的 repository 必须与根 package.json 一致'
+  )
+  assert.match(read('.github', 'workflows', 'release.yml'), /pnpm docvi:dist/, '发布工作流必须走同一个构建入口')
+})

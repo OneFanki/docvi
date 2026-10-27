@@ -8,6 +8,10 @@
   },
   "packageManager": "pnpm@12.10.1",
   "description": "docvi：任意 Markdown 目录 → 可浏览 / 可搜索 / 可交互的文档应用（单一渲染层 · 桌面与容器两宿主）",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OneFanki/docvi.git"
+  },
   "type": "module",
   "scripts": {
     "build:plugins": "node scripts/build-plugins.mjs",

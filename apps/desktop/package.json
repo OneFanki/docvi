@@ -6,6 +6,10 @@
   "private": true,
   "type": "module",
   "description": "docvi 桌面应用：主进程、preload 与渲染进程（app 为唯一完整宿主）",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OneFanki/docvi.git"
+  },
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
