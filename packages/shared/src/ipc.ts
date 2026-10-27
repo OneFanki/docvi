@@ -14,6 +14,14 @@ export const IPC = {
   appOpenExternal: 'docvi:app:open-external',
   /** 检查更新（读发布清单，比对版本） */
   appUpdateCheck: 'docvi:app:update-check',
+  /** 下载并校验本机平台的安装包（走 Chromium 网络栈，沿用系统代理） */
+  appUpdateDownload: 'docvi:app:update-download',
+  /** 取消正在进行的下载 */
+  appUpdateCancel: 'docvi:app:update-cancel',
+  /** 启动已下载并校验通过的安装包（应用会先退出） */
+  appUpdateInstall: 'docvi:app:update-install',
+  /** 主进程 → 渲染进程：下载 / 校验 / 安装进度 */
+  appUpdateProgress: 'docvi:app:update-progress',
   /** 关于面板需要的运行时与构建信息 */
   appRuntimeInfo: 'docvi:app:runtime-info',
   /** 主进程 → 渲染进程：命令行 / 二次启动 / 文件关联带来的待打开文件 */
@@ -104,6 +112,16 @@ export const IPC = {
   /** 订阅/退订某个文件的磁盘变化（编辑态启用） */
   docWatch: 'docvi:doc:watch',
   docUnwatch: 'docvi:doc:unwatch',
+  /**
+   * 目录树变化：递归监视内容根，让 AI / git 新建、删除、改名的文件自动出现在侧栏。
+   *
+   * 与 `docExternalChange` 分开：那条是「某个已打开的文档内容变了」，
+   * 这条是「目录结构变了」。两者的渲染层处理完全不同（前者换缓冲区，
+   * 后者重扫树并作废搜索索引）。
+   */
+  workspaceWatch: 'docvi:workspace:watch',
+  workspaceUnwatch: 'docvi:workspace:unwatch',
+  workspaceFilesChanged: 'docvi:workspace:files-changed',
 
   /** 插件：列表 / 安装 / 卸载 / 启停；以及「按插件 id 读资源」的路径解析 */
   pluginList: 'docvi:plugin:list',
@@ -203,6 +221,23 @@ export interface RuntimeInfo {
 }
 
 /**
+ * 一个可下载的发布资产。
+ *
+ * `sha256` 是**必填才有资格被下载**（不是可选优化）：待执行的安装包必须能
+ * 校验，拿不到校验值的版本只能引导用户去下载页手动处理。
+ */
+export interface UpdateAsset {
+  /** 发布时的文件名（同时用作本地落盘名，只保留安全字符） */
+  name: string
+  /** 直链（HTTPS） */
+  url: string
+  /** 字节数；缺失时进度条按不确定态显示 */
+  size?: number
+  /** 小写十六进制 SHA-256（GitHub Release 的 digest 字段） */
+  sha256?: string
+}
+
+/**
  * 检查更新结果。
  *
  * three 态：latest（最新）/ outdated（有新版）/ unavailable（源不可达或未配置）。
@@ -212,12 +247,36 @@ export interface UpdateCheckResult {
   status: 'latest' | 'outdated' | 'unavailable'
   current: string
   latest?: string
-  /** 新版下载页（交给系统浏览器打开，不由应用自己下载） */
+  /** 新版下载页（浏览器打开；应用内下载不可用时的回退） */
   downloadUrl?: string
   notes?: string
   /** 检查失败 / 未配置时的可读原因 */
   message?: string
   checkedAt: number
+  /** 与本机平台 + 架构匹配的资产；缺失 = 只能去下载页 */
+  asset?: UpdateAsset
+}
+
+/** 更新镜像的阶段：UI 按阶段换文案，不必猜 */
+export type UpdatePhase = 'idle' | 'downloading' | 'verifying' | 'ready' | 'installing' | 'error'
+
+export interface UpdateProgress {
+  phase: UpdatePhase
+  /** 正在处理的版本 */
+  version?: string
+  /** 已下载字节 */
+  received?: number
+  /** 总字节（服务端没给 Content-Length 时缺失） */
+  total?: number
+  /** error 阶段的可读原因 */
+  message?: string
+}
+
+/** 安装包已下载并校验通过，可以交给安装程序 */
+export interface UpdateDownloaded {
+  version: string
+  /** 文件名（仅用于展示，不暴露磁盘路径） */
+  fileName: string
 }
 
 export interface AppInfo {
@@ -225,6 +284,18 @@ export interface AppInfo {
   version: string
   platform: string
   dataDir: string
+}
+
+/**
+ * 内容根里的文件变化（一次批量，已防抖）。
+ *
+ * 不逐条推送事件：`git checkout` 或批量生成会瞬间产生成百上千条，
+ * 每条约一次整树重扫会让界面卡死。主进程按批收拢后只报一条。
+ */
+export interface WorkspaceFilesChange {
+  workspaceId: string
+  /** 本批次变化过的相对路径（正斜杠）；平台不提供时为单个空串 */
+  paths: string[]
 }
 
 export interface WorkspaceEntry {
@@ -346,6 +417,14 @@ export interface DocPayload {
   text: string
   mtime: number
   size: number
+  /**
+   * 正文图片的资产前缀（桌面单文件才有）。
+   *
+   * 工作区文档由宿主按「当前工作区」统一推导前缀；单文件没有内容根，只能由
+   * 主进程在读取时登记它的所在目录并回传 `docvi://local/<id>`。缺省表示
+   * 「用宿主默认推导」，不是「没有图片」。
+   */
+  assetPrefix?: string
 }
 
 /**
@@ -526,13 +605,35 @@ export interface DocviApi {
   appOpenExternal(url: string): Promise<Result<null>>
   /** 关于面板：运行时版本、构建信息、数据目录 */
   appRuntimeInfo(): Promise<Result<RuntimeInfo>>
-  /**
-   * 检查更新（只检查并给出下载入口）。
-   *
-   * 不做静默下载安装：安装包未签名、发布渠道尚未确定时，静默执行下载来的
-   * 可执行文件会把安全边界变成口头承诺。等渠道与签名就绪再接自动安装。
-   */
+  /** 检查更新：读发布清单，并解析出与本机平台匹配的安装包 */
   appUpdateCheck(): Promise<Result<UpdateCheckResult>>
+  /**
+   * 下载并校验更新包。
+   *
+   * 传入的是上一次 `appUpdateCheck` 返回的资产与版本（主进程会再校验一遍地址
+   * 与校验和，不信任渲染层传来的任何字段）。
+   *
+   * 下载走 Chromium 网络栈，因此**沿用系统代理**——这正是它不能换成 Node
+   * 全局 fetch 的原因：Node 的 fetch 不读系统代理，在必须挂代理才能访问
+   * GitHub 的网络里会直接超时，用户看到的是「点了没反应」。
+   *
+   * 校验不通过只会删掉临时文件并返回失败，绝不会把未校验的文件交出去。
+   */
+  appUpdateDownload(request: {
+    asset: UpdateAsset
+    version: string
+  }): Promise<Result<UpdateDownloaded>>
+  /** 取消正在进行的下载（没有下载在执行时是空操作） */
+  appUpdateCancel(): Promise<Result<null>>
+  /**
+   * 安装已下载并校验通过的更新。
+   *
+   * 应用会先退出再交给安装程序：Windows 不允许覆盖正在运行的 exe。
+   * 返回成功不代表已经启动完成——真正的启动发生在本进程退出之后。
+   */
+  appUpdateInstall(): Promise<Result<null>>
+  /** 订阅下载 / 校验 / 安装进度；返回取消订阅函数 */
+  onUpdateProgress(callback: (progress: UpdateProgress) => void): () => void
   /** 取走启动排队的待打开文件（调用即视为渲染进程已就绪） */
   appPendingPaths(): Promise<Result<string[]>>
 
@@ -660,6 +761,17 @@ export interface DocviApi {
   /** 开始/停止监视某个文件（编辑态启用，阅读态不占句柄） */
   docWatch(absolutePath: string): Promise<Result<null>>
   docUnwatch(absolutePath: string): Promise<Result<null>>
+
+  /**
+   * 订阅「内容根里的文件被外部新建 / 删除 / 改名」；返回取消订阅函数。
+   *
+   * 与 `onExternalChange` 的区别：那条讲的是某个**已打开文档**的内容变了，
+   * 这条讲的是**目录结构变了**——侧栏要重扫，搜索索引要作废。
+   */
+  onWorkspaceFilesChanged(callback: (change: WorkspaceFilesChange) => void): () => void
+  /** 开始/停止递归监视一个工作区的内容根 */
+  workspaceWatch(workspaceId: string): Promise<Result<null>>
+  workspaceUnwatch(workspaceId: string): Promise<Result<null>>
 
   pluginList(): Promise<Result<PluginRecordView[]>>
   /**

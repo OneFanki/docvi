@@ -6,6 +6,7 @@ import {
   type DocviApi,
   type GitProgressEvent,
   type ServiceState,
+  type UpdateProgress,
 } from '@docvi/shared'
 
 /**
@@ -29,6 +30,17 @@ const api: DocviApi = {
   appOpenExternal: url => ipcRenderer.invoke(IPC.appOpenExternal, url),
   appRuntimeInfo: () => ipcRenderer.invoke(IPC.appRuntimeInfo),
   appUpdateCheck: () => ipcRenderer.invoke(IPC.appUpdateCheck),
+  appUpdateDownload: request => ipcRenderer.invoke(IPC.appUpdateDownload, request),
+  appUpdateCancel: () => ipcRenderer.invoke(IPC.appUpdateCancel),
+  appUpdateInstall: () => ipcRenderer.invoke(IPC.appUpdateInstall),
+  onUpdateProgress: callback => {
+    const listener = (_event: unknown, payload: unknown): void => {
+      // 形状在这里收口：渲染层永远拿到一个对象，不会因为主进程多传字段就崩
+      if (payload && typeof payload === 'object') callback(payload as UpdateProgress)
+    }
+    ipcRenderer.on(IPC.appUpdateProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.appUpdateProgress, listener)
+  },
   appPendingPaths: () => ipcRenderer.invoke(IPC.appPendingPaths),
 
   workspaceList: () => ipcRenderer.invoke(IPC.workspaceList),
@@ -124,6 +136,23 @@ const api: DocviApi = {
 
   docWatch: absolutePath => ipcRenderer.invoke(IPC.docWatch, absolutePath),
   docUnwatch: absolutePath => ipcRenderer.invoke(IPC.docUnwatch, absolutePath),
+
+  /** 目录结构变化订阅：同样只透传形状，渲染层永远拿到对象 */
+  onWorkspaceFilesChanged: callback => {
+    const listener = (_event: unknown, payload: unknown): void => {
+      if (!payload || typeof payload !== 'object') return
+      const change = payload as { workspaceId?: unknown; paths?: unknown }
+      if (typeof change.workspaceId !== 'string' || !change.workspaceId) return
+      callback({
+        workspaceId: change.workspaceId,
+        paths: Array.isArray(change.paths) ? change.paths.filter(p => typeof p === 'string') : [],
+      })
+    }
+    ipcRenderer.on(IPC.workspaceFilesChanged, listener)
+    return () => ipcRenderer.removeListener(IPC.workspaceFilesChanged, listener)
+  },
+  workspaceWatch: workspaceId => ipcRenderer.invoke(IPC.workspaceWatch, workspaceId),
+  workspaceUnwatch: workspaceId => ipcRenderer.invoke(IPC.workspaceUnwatch, workspaceId),
 
   pluginList: () => ipcRenderer.invoke(IPC.pluginList),
   pluginMarket: options => ipcRenderer.invoke(IPC.pluginMarket, options),

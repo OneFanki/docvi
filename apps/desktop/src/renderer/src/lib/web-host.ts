@@ -358,6 +358,25 @@ export function createWebHost(options: WebHostOptions = {}): DocviApi {
       })
     },
 
+    /*
+     * 更新下载 / 安装：容器版没有这套流程，一律 deny。
+     *
+     * 不给「静默成功」的空实现：那会让关于页显示「已下载」，而磁盘上什么都没有。
+     * 宿主能力缺失就要明确失败，UI 才能据此只显示「联系运维升级」。
+     */
+    async appUpdateDownload() {
+      return deny('容器版不支持应用内更新')
+    },
+    async appUpdateCancel(): Promise<Result<null>> {
+      return ok(null)
+    },
+    async appUpdateInstall() {
+      return deny('容器版不支持应用内更新')
+    },
+    onUpdateProgress(): () => void {
+      return () => undefined
+    },
+
     /**
      * 容器版外链：新标签打开，并立刻切断 opener。
      *
@@ -791,6 +810,21 @@ export function createWebHost(options: WebHostOptions = {}): DocviApi {
       return ok(null)
     },
     async docUnwatch(): Promise<Result<null>> {
+      return ok(null)
+    },
+
+    /*
+     * 容器版的目录结构由服务端仓库决定，读者面没有本地文件系统可监视。
+     * 订阅返回空函数（没有事件可发），watch/unwatch 是空操作——不是 deny：
+     * 渲染层无差别调用时不该因此报错。
+     */
+    onWorkspaceFilesChanged(): () => void {
+      return () => undefined
+    },
+    async workspaceWatch(): Promise<Result<null>> {
+      return ok(null)
+    },
+    async workspaceUnwatch(): Promise<Result<null>> {
       return ok(null)
     },
 
