@@ -10,37 +10,60 @@
   color: var(--dv-ed-md-heading);
 }
 
+/*
+ * 标题尺寸**与 doc.css 逐项对齐**（h1 32/40、h2 24/32、h3 20/30、h4 17/26、
+ * h5 16/24、h6 15/22）。
+ *
+ * 原来用 1.9em / 1.5em / 1.25em 相对基准字号推算，而基准又是硬编码的 15.5px，
+ * 于是 h1 算出 29.45px（阅读态 32px）、h2 算出 23.25px（阅读态 24px）——
+ * 切模式时标题会明显缩一下。改用绝对值，与阅读态同源，改字号时两边一起改。
+ *
+ * 纵向间距仍用 padding 近似（CM6 的行没有外边距）：阅读态的 h1 是
+ * `margin-bottom 16px + padding-bottom 12px`，这里合成 padding-bottom。
+ */
 .cm-lp-h1 {
-  font-size: 1.9em;
-  line-height: 1.35;
-  padding-top: 0.5em;
-  padding-bottom: 0.2em;
+  font-size: 32px;
+  line-height: 40px;
+  padding-top: 8px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--dv-doc-border);
 }
 
 .cm-lp-h2 {
-  font-size: 1.5em;
-  line-height: 1.4;
-  padding-top: 0.6em;
-  padding-bottom: 0.15em;
+  font-size: 24px;
+  line-height: 32px;
+  padding-top: 32px;
+  padding-bottom: 12px;
+  border-top: 1px solid var(--dv-doc-border);
 }
 
 .cm-lp-h3 {
-  font-size: 1.25em;
-  line-height: 1.45;
-  padding-top: 0.5em;
+  font-size: 20px;
+  line-height: 30px;
+  padding-top: 24px;
+  padding-bottom: 8px;
 }
 
 .cm-lp-h4 {
-  font-size: 1.08em;
+  font-size: 17px;
+  line-height: 26px;
+  padding-top: 16px;
+  padding-bottom: 6px;
 }
 
 .cm-lp-h5 {
-  font-size: 1em;
+  font-size: 16px;
+  line-height: 24px;
+  padding-top: 14px;
+  padding-bottom: 4px;
   letter-spacing: 0.01em;
 }
 
 .cm-lp-h6 {
-  font-size: 0.94em;
+  font-size: 15px;
+  line-height: 22px;
+  padding-top: 12px;
+  padding-bottom: 4px;
   letter-spacing: 0.04em;
   color: var(--dv-ed-md-quote);
 }
@@ -155,30 +178,32 @@
  * 列表缩进：按嵌套深度给行加左内边距。
  *
  * 六级封顶：再深的 Markdown 列表本来就该改结构，多余级别共用一档也不会误导。
- * 步长 1.6em 对齐「项目符号 + 一个空格」的自然宽度，嵌套看起来才像同一套网格。
+ * **步长 1.5em 对齐阅读态的 `.at-doc ul/ol { padding-left: 1.5em }`**——两边必须
+ * 用同一个值，否则切模式时列表整体左右挪（原先这里是 1.6em）。
+ * 基准 32px 与正文文字左边缘一致（行内 padding 已是 32px，这里再加级数偏移）。
  *
  * 选择器写成 `.cm-line.cm-lp-li-N`：`.cm-line` 的基础内边距由 CM6 主题注入，
  * 单类选择器与它同权重，谁后加载谁生效——加上 .cm-line 才稳定压住。
  */
 .cm-line.cm-lp-li-1 {
-  padding-left: calc(14px + 1.6em);
+  padding-left: calc(14px + 1.5em);
 }
 
 .cm-line.cm-lp-li-2 {
-  padding-left: calc(14px + 3.2em);
+  padding-left: calc(14px + 3em);
 }
 
 .cm-line.cm-lp-li-3 {
-  padding-left: calc(14px + 4.8em);
+  padding-left: calc(14px + 4.5em);
 }
 
 .cm-line.cm-lp-li-4 {
-  padding-left: calc(14px + 6.4em);
+  padding-left: calc(14px + 6em);
 }
 
 .cm-line.cm-lp-li-5,
 .cm-line.cm-lp-li-6 {
-  padding-left: calc(14px + 8em);
+  padding-left: calc(14px + 7.5em);
 }
 
 .cm-lp-strong {
@@ -198,6 +223,22 @@
   color: var(--dv-ed-md-code);
   font-family: var(--dv-doc-font-mono, ui-monospace, 'Cascadia Code', Consolas, monospace);
   font-size: 0.92em;
+  /*
+   * 行高显式继承父元素，避免用自身更小的字号重算出一套不同的行盒。
+   *
+   * 不锁的话：正文 16px × 1.8 = 28.8px，行内代码 14.72px × 1.8 = 26.5px，
+   * 两者行盒不等高，色块会在行内浮出一个不一样的高度。
+   */
+  line-height: inherit;
+  /*
+   * 上移 0.1em 让色块中心与周围文字中心重合。
+   *
+   * 行内代码是 0.92em 的小字，`vertical-align: baseline` 只对齐基线，小字盒比
+   * 大字盒矮一截，中心自然偏低（实测 delta=1.5px）。逐档实测：0.04em→0.92px、
+   * 0.08em→0.33px、**0.10em→0.03px**、0.12em→-0.27px，取 0.1em。
+   * 这不是视觉微调，是让两个字号的盒中心真正对齐。
+   */
+  vertical-align: 0.1em;
 }
 
 .cm-lp-link {
@@ -260,15 +301,21 @@
 /* ================= 标题悬浮徽标 ================= */
 
 /*
- * live 模式给正文左侧多留 10px：徽标要站在行首字符左侧，现有的 14px 行内边距
- * 塞不下一个 18px 的徽标（不留白会被编辑器边界裁掉，或压到文字上）。
+ * live 模式给正文左侧多留白，让**文字左边缘与阅读态完全重合**。
+ *
+ * 阅读态是 `.reader__page` 的 32px 左内边距；这里由「内容区 padding-left +
+ * 行内 padding-left」合起来凑同样 32px。此前是 10 + 14 = 24px，比阅读态少
+ * 8px，切模式时整篇正文会横向跳一下（实测文字左边缘 284 → 292）。
+ *
+ * 徽标宽 22px + 3px 间隙 = 25px，需要站在文字左侧：文字左边缘 32px 时徽标起点
+ * 约 7px，仍在容器内（`placeBadge` 另有 `Math.max(2, …)` 兜底防裁切）。
  * 只加在插件挂载后的 `[data-lp-badge-host]` 上，源码模式与阅读视图完全不受影响。
  *
  * 用 data 属性而不是 class：CM6 每次 updateAttrs 都会整体重写 .cm-editor 的 class，
  * 追加的 class 会在第一次更新时被冲掉（表现为「样式规则莫名失效」）。
  */
 .cm-editor[data-lp-badge-host] .cm-content {
-  padding-left: 10px;
+  padding-left: 18px;
 }
 
 /*

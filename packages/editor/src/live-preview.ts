@@ -284,15 +284,22 @@ class TaskBoxWidget extends WidgetType {
 }
 
 /** ListItem 的嵌套深度：外层每多一个 ListItem 就 +1 */
+/**
+ * 列表嵌套层级，**1 基**（最外层 = 1）。
+ *
+ * 必须返回 1 而不是 0：行装饰产出的类名是 `cm-lp-li-<depth>`，而 editor.css 里
+ * 只定义了 `cm-lp-li-1` … `cm-lp-li-6`。此前最外层返回 0，落到 `cm-lp-li-0`——
+ * 没有任何规则匹配，于是**第一级列表完全没有缩进**（实测 padding-left 停在
+ * 基础值 14px，与阅读态的 1.5em 缩进对不上）。嵌套一层的项同样整体差一级。
+ */
 function listDepth(node: { parent: { name: string; parent: unknown } | null }): number {
-  let depth = -1
+  let depth = 0
   let current = node.parent as { name: string; parent: unknown } | null
   while (current) {
     if (current.name === 'ListItem') depth += 1
     current = current.parent as typeof current
   }
-  // 最外层 li 的 parent 链里没有 ListItem：从 0 开始
-  return Math.max(0, depth + 1)
+  return depth + 1
 }
 
 /* ---------- frontmatter 解析（编辑态需要它给组件卡片喂数据） ---------- */

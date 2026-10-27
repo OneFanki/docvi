@@ -71,14 +71,20 @@ const markdownHighlight = HighlightStyle.define([
 /**
  * 编辑器主题：颜色全部取自 `--dv-ed-*`，由 `:root[data-theme]` 提供。
  *
- * 字号与行高跟正文接近（16px / 1.75）——编辑的是文档不是代码，
- * 用 IDE 那种 13px 等宽会立刻让用户觉得「这是程序员工具」。
+ * 字号与行高**直接读正文令牌**（`--dv-content-font-size` / `--dv-content-line-height`），
+ * 不写字面量。编辑的是文档不是代码，用 IDE 那种 13px 等宽会立刻让用户觉得
+ * 「这是程序员工具」。
+ *
+ * ⚠️ 这两个值必须与阅读态同一个来源。此前这里硬编码 15.5px / 1.75，而阅读态
+ * 用 16px / 1.8，切模式时整篇文字会跳一下字号、行距与左边距（实测正文左边缘
+ * 差 8px、行高差 1.7px），用户观感是「实时预览没对准」。tokens.css 里本来就有
+ * 这两个令牌，只是没人消费——现在接上。
  */
 const editorTheme = EditorView.theme({
   '&': {
     color: 'var(--dv-ed-text)',
     backgroundColor: 'var(--dv-ed-bg)',
-    fontSize: '15.5px',
+    fontSize: 'var(--dv-content-font-size, 16px)',
     height: '100%',
   },
   /*
@@ -91,14 +97,15 @@ const editorTheme = EditorView.theme({
    */
   '.cm-scroller': {
     fontFamily: 'var(--dv-ed-font)',
-    lineHeight: '1.75',
+    lineHeight: 'var(--dv-content-line-height, 1.8)',
     overflow: 'auto',
     width: '100%',
     maxWidth: 'var(--dv-content-max, none)',
     margin: '0 auto',
   },
   '.cm-content': {
-    padding: '32px 0 40vh',
+    // 上留白与阅读态的 `.reader__page` 同为 40px，切模式时首行不上下跳
+    padding: '40px 0 40vh',
     caretColor: 'var(--dv-ed-caret)',
   },
   // 左侧留白收窄到 14px：缩进（每级 2 个空格）必须能在分界线附近看出来。
