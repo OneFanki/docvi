@@ -21,6 +21,13 @@ export interface InsertItem {
   group: 'markdown' | 'component'
   /** 搜索用的额外关键词 */
   keywords: string
+  /**
+   * 插入后是否有可视化表单编辑（表格网格编辑器这类）。
+   *
+   * 有表单的项在菜单里会标出来：用户选之前就该知道「这个插进去能点开改」，
+   * 而不是插完再自己发现。声明式富组件目前全是手写 YAML，一律没有。
+   */
+  form?: boolean
   /** 生成插入文本；`cursorOffset` 是插入后光标相对插入块的偏移 */
   render: (ctx: InsertContext) => { text: string; cursorOffset?: number }
 }

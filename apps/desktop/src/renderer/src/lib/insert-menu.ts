@@ -1,6 +1,11 @@
 import { computed, reactive } from 'vue'
 
-import { collectComponentKeys, type InsertItem, type InsertPlan, planInsert } from './insert-plan'
+import {
+  collectComponentKeys,
+  type InsertItem,
+  type InsertPlan,
+  planInsert,
+} from './insert-plan.ts'
 
 /**
  * 斜杠插入文件：把「要插入什么」和「插进去长什么样」收在一处。
@@ -37,6 +42,8 @@ const MARKDOWN_ITEMS: InsertItem[] = [
     label: '表格',
     group: 'markdown',
     keywords: 'table 表格 grid',
+    // 原生 Markdown 表格有网格编辑器（TableEditorDialog）：插进去点卡片上的「编辑表格」就能改
+    form: true,
     render: () => ({
       text: '| 列 1 | 列 2 |\n| --- | --- |\n|  |  |\n',
       cursorOffset: 2,

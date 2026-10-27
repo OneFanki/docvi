@@ -83,3 +83,34 @@ test('collectComponentKeys 只认 components 段内的两级键', () => {
   assert.deepEqual(collectComponentKeys(doc), ['a', 'b'])
   assert.deepEqual(collectComponentKeys('没有文件头'), [])
 })
+
+/* ---------- 斜杠菜单的结构与标记 ---------- */
+
+const menu = await import('../apps/desktop/src/renderer/src/lib/insert-menu.ts')
+
+test('第一行是基础 Markdown，其余每行一个增强组件', () => {
+  const markdown = menu.INSERT_ITEMS.filter(item => item.group === 'markdown')
+  const components = menu.INSERT_ITEMS.filter(item => item.group === 'component')
+  assert.ok(markdown.length >= 5, '第一行基础 Markdown 项不应过少')
+  assert.ok(components.length >= 3, '增强组件不应过少')
+  // 分组顺序决定菜单结构：基础项必须排在最前（同组内保持声明顺序）
+  const firstComponent = menu.INSERT_ITEMS.findIndex(item => item.group === 'component')
+  const lastMarkdown = menu.INSERT_ITEMS.map(i => i.group).lastIndexOf('markdown')
+  assert.ok(lastMarkdown < firstComponent, '基础 Markdown 必须全部排在组件之前')
+})
+
+test('表格声明支持表单编辑，富组件一律没有', () => {
+  const table = menu.INSERT_ITEMS.find(item => item.id === 'table')
+  assert.ok(table, '缺少表格插入项')
+  assert.equal(table.form, true, '表格有网格编辑器，必须标记 form: true')
+
+  for (const item of menu.INSERT_ITEMS.filter(i => i.group === 'component')) {
+    assert.notEqual(item.form, true, `增强组件 ${item.label} 目前没有表单编辑，不应标 form`)
+  }
+})
+
+test('每个增强组件都有说明文案，供条目标题右侧展示', () => {
+  for (const item of menu.INSERT_ITEMS.filter(i => i.group === 'component')) {
+    assert.ok(item.hint && item.hint.length > 0, `组件 ${item.label} 缺少 hint`)
+  }
+})
