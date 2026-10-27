@@ -44,6 +44,11 @@ docvi 把任意 Markdown 目录变成**可浏览 / 可搜索 / 可交互**的文
 - **同一份 `index.html` 跨路径深度复用时，相对资产必须给显式基准**：`/s/<id>/` 这类前缀路由下
   相对资产会被解析到前缀里，服务端回落 HTML → 模块脚本拿到 `text/html` → 白屏。
   分享路由回落的入口必须注入 `<base href="/">`（并注意 `<base>` 只对其后的元素生效）。
+- **复用 CodeMirror `EditorState` 必须同时重配扩展**：state 里装的是**旧配置**，
+  回调型扩展（斜杠/选区上报、表格与图片入口、onChange）全是旧组件实例的闭包，
+  切视图后它们写进已销毁实例的 ref，界面毫无反应且日志零报错。
+  统一走 `state.update({ effects: StateEffect.reconfigure.of(extensions) }).state`
+  （保留文档/选区/history，只换扩展）。
 
 ### 安全
 
