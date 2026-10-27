@@ -54,6 +54,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ['Mod', 'F'], action: '在文档中查找' },
       { keys: ['Mod', 'E'], action: '进入 / 退出实时预览编辑' },
       { keys: ['Mod', 'S'], action: '保存（编辑态）' },
+      { keys: ['F5'], action: '重新载入当前文档（读取磁盘最新内容）' },
       { keys: ['↑', '↓'], action: '目录树移动（焦点在目录树时）' },
       { keys: ['→', '←'], action: '目录树展开 / 折叠' },
     ],

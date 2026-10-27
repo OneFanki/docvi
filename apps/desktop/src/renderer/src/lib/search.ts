@@ -69,6 +69,16 @@ export function useSearchIndex() {
   let queue: string[] = []
   let running: Promise<void> | null = null
 
+  /**
+   * 外部改动后的延迟重建定时器（按工作区）。
+   *
+   * AI 写一篇文档常常连着触发好几种事件；每批都全库重读 + 重建，会让索引队列
+   * 一直跑、底栏任务反复闪。合并成「安静一段时间后重建一次」。
+   */
+  const reindexTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** 每个工作区外部重读的世代号（并发重读时只接受最新一次的结果） */
+  const refreshSeq = new Map<string, number>()
+
   function ensureWorker(): Worker {
     if (worker) return worker
     worker = new Worker(new URL('../workers/search.worker.ts', import.meta.url), {
@@ -81,6 +91,14 @@ export function useSearchIndex() {
         state.count = message.count
         state.indexing = false
         state.ready = true
+        /*
+         * 重建完成后补一次查询。
+         *
+         * 索引重建期间用户可能已经敲了几个字：那次查询跑在旧索引上（甚至是空索引），
+         * 结果为空且**不会自己再变**——表现为「搜索框明明有关键词，结果区一直空着」，
+         * 直到用户再多按一个键才发现内容其实在。这里是唯一的补救点。
+         */
+        if (state.query.trim()) search(state.query)
         return
       }
       // 丢弃过期查询的结果
@@ -242,6 +260,8 @@ export function useSearchIndex() {
   }
 
   function clear(): void {
+    for (const timer of reindexTimers.values()) clearTimeout(timer)
+    reindexTimers.clear()
     indexed.clear()
     corpus.clear()
     queue = []
@@ -266,12 +286,72 @@ export function useSearchIndex() {
     rebuild()
   }
 
+  /**
+   * 外部改动后的延迟重建。
+   *
+   * 与 `invalidate` 的区别有两点：
+   *  1. **等安静下来再重建**。AI 一次批量写十几个文件会连着推好几批事件，
+   *     每批都整库重读会让索引任务一直在跑、底栏与面板反复闪。1.2s 内没有
+   *     新事件才动手，一批写盘只读一遍。
+   *  2. **旧索引不提前丢弃**。搜索在重建完成前仍能命中旧内容——短暂搜到旧结果，
+   *     远好过「输入关键词、结果区空了 1.2 秒再出现」。
+   *
+   * 重建期间可能又来一批事件（用户连续保存）：按世代号丢弃过期的读取结果，
+   * 否则先发起、后返回的那次会用更旧的语料覆盖新语料。
+   */
+  function invalidateSoon(workspaceId: string, delay = 1200): void {
+    if (usesHostIndex) return
+    const existing = reindexTimers.get(workspaceId)
+    if (existing) clearTimeout(existing)
+    reindexTimers.set(
+      workspaceId,
+      setTimeout(() => {
+        reindexTimers.delete(workspaceId)
+        void refresh(workspaceId)
+      }, delay),
+    )
+  }
+
+  /** 重读某个工作区的语料并整体替换（成功后一次性重建，不留空窗） */
+  async function refresh(workspaceId: string): Promise<void> {
+    refreshSeq.set(workspaceId, (refreshSeq.get(workspaceId) ?? 0) + 1)
+    const seq = refreshSeq.get(workspaceId) ?? 0
+    state.indexing = true
+    const result = await window.docvi.searchCorpus(workspaceId)
+    // 期间又发起了更新的一次：这次结果已过时
+    if (seq !== refreshSeq.get(workspaceId)) return
+    if (!result.ok) {
+      state.error = result.error.message
+      state.indexing = false
+      return
+    }
+    indexed.add(workspaceId)
+    corpus.set(
+      workspaceId,
+      result.data.map(doc => ({ workspaceId, path: doc.path, text: doc.text })),
+    )
+    state.indexedWorkspaces = indexed.size
+    rebuild()
+  }
+
   function dispose(): void {
+    for (const timer of reindexTimers.values()) clearTimeout(timer)
+    reindexTimers.clear()
     worker?.terminate()
     worker = null
   }
 
-  return { state, index, indexRest, search, clear, invalidate, dispose, setLabels }
+  return {
+    state,
+    index,
+    indexRest,
+    search,
+    clear,
+    invalidate,
+    invalidateSoon,
+    dispose,
+    setLabels,
+  }
 }
 
 /** 全应用共享一份索引：切换面板不重建 */

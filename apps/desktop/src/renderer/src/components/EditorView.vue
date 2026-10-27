@@ -530,8 +530,6 @@ function mountEditor(): void {
       })
     }
   }
-
-  void window.docvi.docWatch(props.absolutePath)
 }
 
 onMounted(() => {
@@ -576,7 +574,7 @@ watch(
 
 onBeforeUnmount(() => {
   if (draftTimer !== null) window.clearTimeout(draftTimer)
-  void window.docvi.docUnwatch(props.absolutePath)
+  // 监视由 App 按「当前文档」统一持有：切视图不能让编辑器把监视带走
   // 离开编辑态时落一次草稿：切回阅读或换标签都能恢复
   const current = record.value
   if (current && dirty.value) void window.docvi.draftWrite(props.absolutePath, current.text)
@@ -594,6 +592,8 @@ defineExpose({
   save: () => save(),
   focus: () => editor?.focus(),
   getText: () => record.value?.text ?? '',
+  /** 手动刷新后把磁盘正文换成编辑器正文（缓冲区已由文档模型更新） */
+  setText: (text: string) => editor?.setText(text),
   isDirty: () => dirty.value,
   /** 分屏同步滚动用：取编辑区的当前滚动位置 */
   getScroll: () => editor?.getScroll() ?? 0,
@@ -605,6 +605,16 @@ defineExpose({
   scrollToLine: (line: number) => editor?.scrollToLine(line),
   /** 编辑器状态快照（含撤销栈）：宿主切视图前取走 */
   getState: () => editor?.getState() ?? null,
+  /**
+   * 主动弹冲突框。
+   *
+   * 宿主手动刷新时用：`record.conflict` 一旦为 true 就不再变化（用户按过
+   * 「稍后处理」也只是关框、不重置标志），watch 不会再触发——不主动调这里，
+   * 用户再点刷新会觉得按钮毫无反应。
+   */
+  showConflict: () => {
+    if (record.value?.conflict) conflictOpen.value = true
+  },
 })
 </script>
 

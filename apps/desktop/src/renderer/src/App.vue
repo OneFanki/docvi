@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { AlertCircle, CheckCircle2, FilePlus2, FolderPlus, Link2, X } from 'lucide-vue-next'
-import type { DocPayload, ExportFormat, PortalWorkspace, WorkspaceEntry } from '@docvi/shared'
+import type {
+  DocPayload,
+  ExportFormat,
+  PortalWorkspace,
+  WorkspaceEntry,
+  WorkspaceFilesChange,
+} from '@docvi/shared'
+import { isStandaloneDoc } from '@docvi/shared'
 import { ComponentRegistry, type OutlineEntry } from '@docvi/renderer-core'
 
 import { useAppStore, useThemeStore } from './stores/app'
@@ -16,6 +23,8 @@ import { usePluginStore } from './stores/plugins'
 import { useServiceStore } from './stores/service'
 import { useI18n, applyExternalLocale, migrateLegacyLocale } from './lib/i18n'
 import { isReadOnlyHost, isWebHost } from './lib/host'
+import { sameDocumentPath } from './lib/external-change'
+import { affectsDocument, affectsTree } from './lib/workspace-change'
 import {
   createHandoff,
   forgetDocument,
@@ -191,7 +200,21 @@ const currentDoc = computed<DocPayload | null>(() => {
     text: record.text,
     mtime: record.mtime,
     size: record.size,
+    ...(record.assetPrefix ? { assetPrefix: record.assetPrefix } : {}),
   }
+})
+
+/**
+ * 正文里相对资源的解析基准（编辑器的图片预览、链接解析都读它）。
+ *
+ * 单文件必须只给文件名：`relPath` 此时等于绝对路径，拿它当基准会把
+ * `C:/Users/…` 拼进图片 URL（见 ReaderView 的 renderPath 说明）。
+ */
+const docBasePath = computed(() => {
+  const record = currentRecord.value
+  if (!record) return ''
+  const standalone = isStandaloneDoc({ path: record.relPath, absolutePath: record.absolutePath })
+  return standalone ? record.name : record.relPath
 })
 
 const dirty = computed(() => {
@@ -285,14 +308,15 @@ const docLinkPrefix = computed(() => {
  * 路径（`/img/a.png`），留空就会被浏览器解析到 `docvi://app/img/a.png`——
  * 渲染产物目录里没有这篇文档的图片，结果是破图。主进程按登记的工作区 id
  * 把根目录换出来，URL 里不出现任何磁盘路径。
+ *
+ * 单文件文档没有工作区 id，它的前缀由主进程在 `fileRead` 时登记并回传
+ * （`docvi://local/<id>`）——没有这一条，单文件里的相对图片全部是破图。
  */
 const docAssetPrefix = computed(() => {
-  if (!isWebHost) {
-    const id = activeTab.value?.workspaceId
-    return id ? `docvi://asset/${id}` : ''
-  }
   const id = activeTab.value?.workspaceId
-  return id ? `/${id}` : ''
+  if (isWebHost) return id ? `/${id}` : ''
+  if (id) return `docvi://asset/${id}`
+  return currentRecord.value?.assetPrefix ?? ''
 })
 
 const unregisters: Array<() => void> = []
@@ -498,6 +522,12 @@ onMounted(async () => {
 
   const unsubscribe = window.docvi.onOpenPath(path => void openStandalone(path))
   unregisters.push(unsubscribe)
+  // 外部改动：主进程 watcher 只推路径，读盘与「采用 / 冲突」判定都在渲染层
+  unregisters.push(window.docvi.onExternalChange(path => void onExternalChange(path)))
+  // 目录结构变化：AI / git 新建或删了文件，侧栏与搜索索引都要跟上
+  unregisters.push(
+    window.docvi.onWorkspaceFilesChanged(change => void onWorkspaceFilesChanged(change)),
+  )
   const pending = await window.docvi.appPendingPaths()
   if (pending.ok) {
     for (const path of pending.data) await openStandalone(path)
@@ -506,8 +536,76 @@ onMounted(async () => {
   registerCommands()
 })
 
+/**
+ * 监视「当前正在看的**单文件**文档」（工作区外的）。
+ *
+ * 归属收在 App 而不是 EditorView：阅读态也要能看到外部改动，而编辑器实例
+ * 在阅读态根本不存在。两处都调 docWatch 会被主进程按路径去重，但任一方卸载
+ * 时的 unwatch 会把另一方的监视一起关掉——只有一处调用才可维护。
+ *
+ * 工作区内的文档不在这里挂句柄：整棵内容根已有递归监视（见
+ * `syncWorkspaceWatchers`），再挂一个单文件 watcher 会让同一次改盘走两条链路，
+ * 结果是读两遍盘、弹两条「已在磁盘上更新」。
+ */
+watch(
+  () => activeRef.value?.absolutePath ?? null,
+  async (path, previous) => {
+    // 切走时解除：主进程按路径去重，但累计的 watcher 会一直占句柄
+    if (previous && (!path || !sameDocumentPath(previous, path))) {
+      void window.docvi.docUnwatch(previous)
+    }
+    if (!path) return
+    if (!activeRef.value?.workspaceId) void window.docvi.docWatch(path)
+    // 切回已装载的文档：先补读一次。后台标签期间收不到事件（只监视当前文档），
+    // 不补读就会看到别人改过之前的旧正文
+    if (documents.get(path)) await onExternalChange(path)
+  },
+  { immediate: true },
+)
+
+/**
+ * 工作区级监视：开着标签的工作区都要盯住整个内容根。
+ *
+ * 用「打开中的标签集合」做引用计数：同一工作区开两个标签不会建两个 watcher
+ * （主进程也按 id 幂等），全部关掉才解除，句柄不会随开关标签累积。
+ *
+ * 只盯「开着的工作区」而不是全部：递归 watcher 在大仓库上要占不少句柄，
+ * 用户看不见的内容根没有实时刷新的价值（下次打开时会重扫）。
+ */
+const watchingWorkspaces = new Set<string>()
+
+async function syncWorkspaceWatchers(): Promise<void> {
+  const desired = new Set<string>()
+  for (const tab of tabs.tabs) {
+    if (tab.kind === 'workspace' && tab.workspaceId) desired.add(tab.workspaceId)
+  }
+  for (const id of [...watchingWorkspaces]) {
+    if (desired.has(id)) continue
+    watchingWorkspaces.delete(id)
+    void window.docvi.workspaceUnwatch(id)
+  }
+  for (const id of desired) {
+    if (watchingWorkspaces.has(id)) continue
+    watchingWorkspaces.add(id)
+    const result = await window.docvi.workspaceWatch(id)
+    // 监视不可用（句柄耗尽 / 目录已删）静默降级：手动刷新仍然可用
+    if (!result.ok) watchingWorkspaces.delete(id)
+  }
+}
+
+watch(
+  // 只看「哪些工作区开着」：标签内切换文档、滚动、展开都不该重配监视
+  () => tabs.tabs.map(tab => (tab.kind === 'workspace' ? (tab.workspaceId ?? '') : '')).join('|'),
+  () => void syncWorkspaceWatchers(),
+  { immediate: true },
+)
+
 onBeforeUnmount(() => {
   for (const off of unregisters) off()
+  const current = activeRef.value
+  if (current) void window.docvi.docUnwatch(current.absolutePath)
+  for (const id of watchingWorkspaces) void window.docvi.workspaceUnwatch(id)
+  watchingWorkspaces.clear()
   for (const off of themeCommandUnregisters) off()
   searchIndex.dispose()
   if (errorTimer) clearTimeout(errorTimer)
@@ -526,6 +624,218 @@ async function ensureDocLoaded(ref: DocRef): Promise<boolean> {
   // 工作区文档要记回 workspaceId（DocPayload.path 是相对路径）
   if (ref.workspaceId) record.workspaceId = ref.workspaceId
   return true
+}
+
+/* ---------- 磁盘外部改动 ---------- */
+
+/**
+ * 找到某个绝对路径对应的标签引用。
+ *
+ * 读盘必须走 `workspaceId + relPath` 或绝对路径两条之一，取决于这份文档当初
+ * 是怎么打开的（工作区文档 / 单文件 / 容器站点）。路径反推归属不可靠——
+ * 容器版的 `absolutePath` 是站点内的虚拟路径，磁盘上并不存在——所以从标签
+ * 历史里取回原始引用。
+ */
+function docRefOf(absolutePath: string): DocRef | null {
+  for (const tab of tabs.tabs) {
+    const found = tab.history.find(ref => sameDocumentPath(ref.absolutePath, absolutePath))
+    if (found) return found
+  }
+  return null
+}
+
+/**
+ * 按磁盘（容器版是服务端）重读一篇已装载文档，交给文档模型裁决。
+ *
+ * 三种来源共用这一条路径：主进程 watcher 推送、手动刷新、切回标签时补读。
+ * 各写一套必然出现「同一个文件在不同入口下处理不一致」。
+ *
+ * 读失败返回 null 而不写 store.error：自动路径上的失败常常是「写入方正在
+ * 临时文件 + rename」，260ms 后多半已恢复，弹一条错误属于打扰。手动刷新
+ * 由调用方按需报错。
+ */
+async function readLatest(absolutePath: string): Promise<DocPayload | null> {
+  const record = documents.get(absolutePath)
+  if (!record) return null
+  const ref = docRefOf(record.absolutePath)
+  const result = ref?.workspaceId
+    ? await window.docvi.docRead(ref.workspaceId, ref.relPath)
+    : await window.docvi.fileRead(record.absolutePath)
+  return result.ok ? result.data : null
+}
+
+type ExternalVerdict = 'adopted' | 'conflict' | 'ignored' | 'failed'
+
+async function applyExternalChange(absolutePath: string): Promise<ExternalVerdict> {
+  const record = documents.get(absolutePath)
+  if (!record) return 'ignored'
+  const payload = await readLatest(record.absolutePath)
+  if (!payload) return 'failed'
+  return documents.applyExternal(record.absolutePath, {
+    text: payload.text,
+    mtime: payload.mtime,
+    size: payload.size,
+  })
+}
+
+/**
+ * watcher 推送的处理。
+ *
+ * 编辑态下冲突框由 EditorView 自己弹（它监听 record.conflict）；阅读态没有
+ * 编辑器实例，必须在这里说一句，否则用户面对的是「磁盘变了但界面不动」的
+ * 假象。静默采用（缓冲区干净）时也给一条轻提示：文件在眼前自己变了却不作声，
+ * 用户会怀疑是不是自己看错了。
+ */
+async function onExternalChange(absolutePath: string): Promise<void> {
+  const active = activeRef.value
+  const isVisible = active ? sameDocumentPath(active.absolutePath, absolutePath) : false
+  const verdict = await applyExternalChange(absolutePath)
+  if (!isVisible) return
+  if (verdict === 'adopted') showNotice(t('doc.externalAdopted', { name: active?.title ?? '' }))
+  else if (verdict === 'conflict' && !editing.value) {
+    store.setError(t('doc.externalConflict', { name: active?.title ?? '' }))
+  } else if (verdict === 'failed') {
+    // 可见文档读不到磁盘内容：多半是文件被移走/删除。保持沉默会让界面一直显示旧内容
+    store.setError(t('doc.reloadFailed'))
+  }
+}
+
+/**
+ * 目录结构变化的处理（AI / git / 外部编辑器写盘）。
+ *
+ * 与 `onExternalChange` 的分工：那条回答「当前这一篇变了吗」，覆盖工作区外的
+ * 单文件；这条覆盖**整个工作区**——侧栏树、搜索索引、以及所有已打开文档的
+ * 缓冲区。三件事必须一起做：只刷树会「搜不到刚新建的文件」；只刷当前文档会
+ * 「切到别的标签还是旧正文」；只作废索引不重扫树会「树是新的、点开是空的」。
+ */
+async function onWorkspaceFilesChanged(change: WorkspaceFilesChange): Promise<void> {
+  // 工作区刚被移除：主进程的监视也会随之关闭，这里什么都不必做
+  if (!store.workspaces.some(item => item.id === change.workspaceId)) return
+
+  /*
+   * 只有目录树/索引关心的路径才有前两步的成本。
+   * 图片、附件写进来不改变树的形状，也不进搜索语料——为其整树重扫 + 全库重建
+   * 索引是纯浪费（大库上一次扫描要几百毫秒）。已打开文档仍要逐篇判断：
+   * 图片改了，引用它的文档不需要重读（正文没变）。
+   */
+  if (affectsTree(change.paths)) {
+    // 1) 侧栏目录树。树是单槽位：显示的是最近打开的工作区，不是它就不必重扫
+    if (store.treeWorkspaceId === change.workspaceId) {
+      await store.loadTree(change.workspaceId, { quiet: true })
+    }
+    // 2) 搜索索引：先作废，等这批写盘安静下来再重建
+    searchIndex.invalidateSoon(change.workspaceId)
+  }
+
+  // 3) 已打开文档的缓冲区。按路径过滤，只重读真正受影响的
+  const activePath = activeRef.value?.absolutePath ?? null
+  const seen = new Set<string>()
+  const missing: string[] = []
+  for (const tab of tabs.tabs) {
+    for (const ref of tab.history) {
+      if (ref.workspaceId !== change.workspaceId) continue
+      if (!affectsDocument(ref.relPath, change.paths)) continue
+      const record = documents.get(ref.absolutePath)
+      if (!record) continue
+      // 同一篇文档可能出现在多个标签的历史里：只读一次
+      const key = record.absolutePath.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+
+      const payload = await readLatest(record.absolutePath)
+      if (!payload) {
+        // 读不到 = 被删或改名。标签保留、内容停在旧版本，但必须让用户知道
+        missing.push(ref.title)
+        continue
+      }
+      const verdict = documents.applyExternal(record.absolutePath, {
+        text: payload.text,
+        mtime: payload.mtime,
+        size: payload.size,
+      })
+      const isVisible = activePath ? sameDocumentPath(activePath, record.absolutePath) : false
+      if (!isVisible) continue
+      /*
+       * 只有可见文档才提示：
+       *  - 采用成功给一条轻提示（文件在眼前自己变了却不作声，用户会怀疑看错）；
+       *  - 冲突在阅读态说一句，编辑态由 EditorView 监听 record.conflict 自己弹框。
+       */
+      if (verdict === 'adopted') showNotice(t('doc.externalAdopted', { name: ref.title }))
+      else if (verdict === 'conflict' && !editing.value) {
+        store.setError(t('doc.externalConflict', { name: ref.title }))
+      }
+    }
+  }
+
+  if (missing.length) {
+    const list = [...new Set(missing)].slice(0, 3).join('、')
+    store.setError(t('doc.filesGone', { list }))
+  }
+}
+
+/**
+ * 手动刷新：重读当前文档，并把目录树一起对齐磁盘。
+ *
+ * 与 watcher 的区别不只是「按一下」：外部工具可能新增/删除/改名了别的文件，
+ * 而 watcher 只盯着当前这一篇。所以这里无条件重扫目录树——用户按刷新，
+ * 期待的是「看到磁盘现在的样子」，不是「再确认一次这篇没变」。
+ */ const reloading = ref(false)
+async function reloadCurrentDoc(): Promise<void> {
+  const ref = activeRef.value
+  if (!ref || reloading.value) return
+  const record = documents.get(ref.absolutePath)
+  if (!record) return
+  reloading.value = true
+  try {
+    if (ref.workspaceId) await store.loadTree(ref.workspaceId)
+    const payload = await readLatest(record.absolutePath)
+    if (!payload) {
+      store.setError(t('doc.reloadFailed'))
+      return
+    }
+    const latest = documents.applyExternal(record.absolutePath, {
+      text: payload.text,
+      mtime: payload.mtime,
+      size: payload.size,
+    })
+    /*
+     * 是否需要问用户，看的是「缓冲区脏不脏」，不是 applyExternal 的返回值。
+     *
+     * 两者会分叉：用户按过「稍后处理」之后，磁盘快照（diskText）已经是最新的，
+     * 再刷新时 applyExternal 返回 ignored——但缓冲区仍是脏的，直接采用就是丢改动。
+     * 刷新的语义是「我要看磁盘上的版本」，所以脏就必须让用户决定一次。
+     */
+    const dirtyBuffer = record.text !== record.savedText
+    if (dirtyBuffer && payload.text !== record.text) {
+      /*
+       * 编辑态复用编辑器自己的三选框（重新载入 / 覆盖 / 稍后处理）。不能在这里
+       * 另弹一个：`record.conflict` 一旦为 true 就不再变化，watch 不会触发，
+       * 所以必须主动叫它弹。
+       */
+      if (editing.value) {
+        editorRef.value?.showConflict()
+        return
+      }
+      // 阅读态没有编辑器实例，用通用确认框
+      const choice = await askConfirm(
+        t('doc.reloadTitle'),
+        t('doc.reloadMessage', { name: ref.title }),
+        [
+          { id: 'reload', label: t('doc.reloadConfirm'), tone: 'danger' },
+          { id: 'keep', label: t('doc.reloadCancel'), tone: 'primary' },
+        ],
+      )
+      if (choice === 'reload') {
+        documents.reloadFromDisk(record.absolutePath)
+        showNotice(t('doc.externalAdopted', { name: ref.title }))
+      }
+      return
+    }
+    if (latest === 'ignored') showNotice(t('doc.upToDate'))
+    else showNotice(t('doc.externalAdopted', { name: ref.title }))
+  } finally {
+    reloading.value = false
+  }
 }
 
 /**
@@ -2085,6 +2395,14 @@ function registerCommands(): void {
       run: () => (editing.value ? editorRef.value?.save() : undefined),
     },
     {
+      id: 'doc.reload',
+      title: t('cmd.reload'),
+      keywords: 'reload refresh disk 刷新 载入 重新加载',
+      group: t('group.document'),
+      hint: 'F5',
+      run: () => void reloadCurrentDoc(),
+    },
+    {
       id: 'doc.share',
       title: t('cmd.share'),
       keywords: 'share link 分享 链接',
@@ -2459,6 +2777,18 @@ function onKeydown(event: KeyboardEvent): void {
     void openFileDialog()
     return
   }
+  /*
+   * F5：按磁盘重读当前文档。
+   *
+   * 不放 Ctrl+R：那是「刷新整个界面」的习惯键位，而这个动作只影响当前文档。
+   * 也不拦 F5 的默认行为以外的东西——Electron 里 F5 默认会 reload 整个渲染进程，
+   * 那会丢掉所有未保存的缓冲区，必须 preventDefault 改成文档级刷新。
+   */
+  if (event.key === 'F5' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault()
+    void reloadCurrentDoc()
+    return
+  }
   if (isMod(event) && event.shiftKey && event.key.toLowerCase() === 'l') {
     event.preventDefault()
     // 主题超过两套，「翻到下一套」没有明确语义；这个键改为直接展开选择器
@@ -2680,7 +3010,7 @@ onBeforeUnmount(() => {
               :doc-theme="theme.theme"
               :wrap="theme.editorWrap === 'wrap'"
               :workspace-id="activeTab?.workspaceId ?? null"
-              :doc-path="currentDoc.path"
+              :doc-path="docBasePath"
               :initial-state="currentEditorState"
               :restore-to-line="restoreAnchor"
               @error="store.setError($event)"
@@ -2738,7 +3068,7 @@ onBeforeUnmount(() => {
           :mode="docMode === 'source' ? 'source' : 'live'"
           :doc-theme="theme.theme"
           :wrap="theme.editorWrap === 'wrap'"
-          :doc-path="currentDoc.path"
+          :doc-path="docBasePath"
           :asset-prefix="docAssetPrefix"
           :workspace-id="activeTab?.workspaceId ?? null"
           :initial-state="currentEditorState"
@@ -2765,8 +3095,10 @@ onBeforeUnmount(() => {
       :content-width="theme.contentWidth"
       :editor-wrap="theme.editorWrap"
       :readonly="isReadOnlyHost"
+      :reloading="reloading"
       @select-theme="theme.setTheme($event)"
       @set-mode="setDocMode"
+      @reload="reloadCurrentDoc"
       @open-service="openSettings('service')"
       @toggle-content-width="toggleContentWidth()"
       @toggle-editor-wrap="toggleEditorWrap()"

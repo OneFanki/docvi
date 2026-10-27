@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 
 import type { DocPayload } from '@docvi/shared'
 
+import { decideExternalChange } from '../lib/external-change'
+
 /**
  * 文档模型：同一文件在所有视图里共享一份缓冲区（单一真相源）。
  *
@@ -31,8 +33,23 @@ export interface DocumentRecord {
   savedText: string
   /** 磁盘内容 */
   diskText: string
+  /**
+   * 写入冲突的基线（对应 savedText）。
+   *
+   * 用户有未保存改动、磁盘又被外部改过时，这里**故意停在旧值**：下一次普通保存
+   * 仍会被主进程判成冲突，而不是静默覆盖别人的改动。
+   */
   mtime: number
+  /** 最后一次读到的磁盘 mtime（与 diskText 严格配对） */
+  diskMtime: number
   size: number
+  /**
+   * 正文图片的资产前缀（单文件才有；工作区文档由宿主推导）。
+   *
+   * 单文件没有内容根，图片相对路径只能靠主进程登记的目录落位——
+   * 这个值必须跟着记录走，否则切标签回来图片又变成破图。
+   */
+  assetPrefix?: string
   /** 磁盘在编辑期间被外部改动 */
   conflict: boolean
   /** 是否加载中 */
@@ -70,22 +87,26 @@ export const useDocumentStore = defineStore('documents', () => {
       // 已存在：只在磁盘版本确实变化时更新基线；
       // 缓冲区若干净则同步采用磁盘内容，脏则保留用户输入并标记可能冲突
       const diskChanged =
-        Math.abs(existing.mtime - payload.mtime) > 1 || existing.diskText !== payload.text
+        Math.abs(existing.diskMtime - payload.mtime) > 1 || existing.diskText !== payload.text
       if (diskChanged) {
         existing.diskText = payload.text
-        existing.mtime = payload.mtime
+        existing.diskMtime = payload.mtime
         existing.size = payload.size
         if (existing.text === existing.savedText) {
           existing.text = payload.text
           existing.savedText = payload.text
+          existing.mtime = payload.mtime
           existing.conflict = false
         } else {
+          // 有未保存改动：mtime 基线故意停在旧值，下一次普通保存仍会被判成冲突
           existing.conflict = true
         }
       }
       existing.name = payload.title || existing.name
       existing.relPath = payload.path || existing.relPath
       existing.workspaceId = payload.path === payload.absolutePath ? null : existing.workspaceId
+      // 单文件每次重读都会拿到（可能不同的）资产前缀：以最新一次为准
+      if (payload.assetPrefix) existing.assetPrefix = payload.assetPrefix
       return existing
     }
     const record: DocumentRecord = {
@@ -97,7 +118,9 @@ export const useDocumentStore = defineStore('documents', () => {
       savedText: payload.text,
       diskText: payload.text,
       mtime: payload.mtime,
+      diskMtime: payload.mtime,
       size: payload.size,
+      ...(payload.assetPrefix ? { assetPrefix: payload.assetPrefix } : {}),
       conflict: false,
       loading: false,
     }
@@ -122,15 +145,16 @@ export const useDocumentStore = defineStore('documents', () => {
     record.savedText = payload.text
     record.diskText = payload.text
     record.mtime = payload.mtime
+    record.diskMtime = payload.mtime
     record.size = payload.size
     record.conflict = false
   }
 
   /**
-   * 磁盘外部变更。
+   * 磁盘外部变更（watcher 事件 / 手动刷新）。
    *
-   * 返回 'adopted'（缓冲区干净，已静默采用磁盘内容）或 'conflict'（有未保存改动，
-   * 需要用户决定）。调用方决定是否弹框。
+   * 返回 'ignored'（内容没变，只对齐基线）/'adopted'（缓冲区干净，已静默采用）
+   * 或 'conflict'（有未保存改动，需要用户决定）。调用方决定是否弹框。
    */
   function applyExternal(
     absolutePath: string,
@@ -138,21 +162,24 @@ export const useDocumentStore = defineStore('documents', () => {
   ): 'adopted' | 'conflict' | 'ignored' {
     const record = get(absolutePath)
     if (!record) return 'ignored'
-    // mtime 与基线一致 = 自己刚保存触发的 watcher 事件
-    if (Math.abs(payload.mtime - record.mtime) <= 1 && payload.text === record.diskText) {
-      return 'ignored'
-    }
+    const verdict = decideExternalChange(record, payload)
     record.diskText = payload.text
-    if (record.text === record.savedText) {
+    record.diskMtime = payload.mtime
+    record.size = payload.size
+    if (verdict === 'conflict') {
+      // 保留旧 mtime：后续普通保存仍会被主进程判成冲突，而不是静默覆盖外部改动
+      record.conflict = true
+      return 'conflict'
+    }
+    // 内容一致（自己保存的 watcher 回响 / 只是 mtime 变了）与「缓冲区干净」都要对齐基线，
+    // 否则下一次保存会被主进程按 mtime 误判成冲突
+    record.mtime = payload.mtime
+    if (verdict === 'adopted') {
       record.text = payload.text
       record.savedText = payload.text
-      record.mtime = payload.mtime
-      record.size = payload.size
       record.conflict = false
-      return 'adopted'
     }
-    record.conflict = true
-    return 'conflict'
+    return verdict
   }
 
   /** 用户选择「丢弃缓冲区，采用磁盘版本」 */
@@ -161,6 +188,8 @@ export const useDocumentStore = defineStore('documents', () => {
     if (!record) return
     record.text = record.diskText
     record.savedText = record.diskText
+    // 基线必须跟着磁盘走：否则重载后的第一次保存会再报一次「磁盘变了」
+    record.mtime = record.diskMtime
     record.conflict = false
   }
 

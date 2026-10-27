@@ -1,4 +1,12 @@
-import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import {
+  closeSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
 import type { DocPayload, SearchDoc, TreeNode } from '@docvi/shared'
@@ -45,6 +53,26 @@ function isDirExcluded(name: string): boolean {
   return name.startsWith('.') || EXCLUDED_DIRS.has(name) || HIDDEN_DIRS.has(name)
 }
 
+/**
+ * 目录监视用：这个相对路径的变化会不会影响内容（树 / 搜索语料）。
+ *
+ * 扫描时本来就把 `.git` / `node_modules` / 点开头目录排除在外；监视器必须用同一份
+ * 规则过滤，否则 `git status` 刷新 `.git/index`、`git checkout` 写对象库都会被当成
+ * 「内容变了」，每隔几百毫秒就整树重扫 + 重建一次搜索索引。
+ *
+ * 末段单独处理：监听到的路径无法区分「目录」与「文件」，而 `.hidden.md` 是合法
+ * 文档（`isDirExcluded` 的「点开头」只该作用于目录），所以末段只按精确的目录名排除。
+ *
+ * 空路径表示平台没给文件名（目录被整体替换等），保守上报。
+ */
+export function isContentRelPath(relPath: string): boolean {
+  const segments = relPath.split('/').filter(Boolean)
+  if (!segments.length) return true
+  if (segments.slice(0, -1).some(isDirExcluded)) return false
+  const last = segments[segments.length - 1] ?? ''
+  return !EXCLUDED_DIRS.has(last) && !HIDDEN_DIRS.has(last)
+}
+
 interface RawNode {
   name: string
   type: 'dir' | 'doc'
@@ -55,9 +83,22 @@ interface RawNode {
 }
 
 /** 读首个 H1 与 frontmatter order（只读文件头，大文件不做全文解析） */
+/**
+ * 目录树只需要 Markdown 开头的元信息：frontmatter 的 `order` 决定同层排序。
+ *
+ * 读前 4KB 而不是整篇：目录变化现在会自动触发重扫（AI 写文件、每次保存都会
+ * 落一批事件），整篇读盘会让扫描成本随「库里的总字数」而不是「文档数」增长——
+ * 一个夹着几篇大文档的库，保存一次就要读几十 MB 只为取一个 order。
+ */
+const META_HEAD_BYTES = 4096
+
 function readDocMeta(absPath: string): { title: string | null; order: number | null } {
+  let fd: number | null = null
   try {
-    const text = readFileSync(absPath, 'utf8')
+    fd = openSync(absPath, 'r')
+    const buffer = Buffer.allocUnsafe(META_HEAD_BYTES)
+    const read = readSync(fd, buffer, 0, META_HEAD_BYTES, 0)
+    const text = buffer.subarray(0, read).toString('utf8')
     const title = /^#\s+(.+)$/m.exec(text)?.[1]?.trim() ?? null
     let order: number | null = null
     const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
@@ -66,6 +107,14 @@ function readDocMeta(absPath: string): { title: string | null; order: number | n
     return { title, order }
   } catch {
     return { title: null, order: null }
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd)
+      } catch {
+        // 关闭失败不影响已读到的内容
+      }
+    }
   }
 }
 

@@ -100,6 +100,22 @@ const wordCount = computed(() => {
 const readingMinutes = computed(() => Math.max(1, Math.round(wordCount.value / 400)))
 
 /**
+ * 渲染用的文档路径（相对链接与图片的解析基准）。
+ *
+ * 工作区文档用库内相对路径；**单文件必须只给文件名**：它的 `path` 是绝对路径，
+ * 拿它当基准会让 `toRootRelative` 把盘符一起带进结果，最终拼出
+ * `docvi://local/<id>/C:/Users/…/images/a.png`——图片能显示，但绝对磁盘路径
+ * 进了 DOM 属性与截图（URL 里不该出现本机路径）。只给文件名时基准目录为空，
+ * 结果就是干净的 `/images/a.png`。
+ */
+const renderPath = computed(() => {
+  const doc = props.doc
+  if (!doc) return ''
+  if (!isStandaloneDoc(doc)) return doc.path
+  return doc.path.split(/[/\\]/).pop() ?? doc.path
+})
+
+/**
  * 面包屑：工作区文档按库内路径逐段拆开；单文件把目录合并成一段。
  *
  * 单文件的 path 是绝对路径，逐段拆开会得到 `C: / Users / <用户名> / AppData / …`，
@@ -273,7 +289,7 @@ watch(
     }
 
     const current = ++generation
-    const result = renderMarkdown(doc.text, doc.path, {
+    const result = renderMarkdown(doc.text, renderPath.value, {
       // 插件声明的容器语法（::: merged 之类）：渲染成占位块，挂载交给 mountPluginBlocks
       containerSyntax: plugins.syntax.map(item => ({
         name: item.name,

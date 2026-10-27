@@ -364,15 +364,41 @@ export const useAppStore = defineStore('app', () => {
     await loadTree(id)
   }
 
-  async function loadTree(workspaceId: string): Promise<void> {
-    loading.value = true
-    error.value = null
+  /**
+   * 目录扫描的世代号：**最后一次调用胜出**。
+   *
+   * 目录监视会在后台触发重扫，可能与用户切换工作区并发：先发起的扫描后返回时
+   * 会把新工作区的树覆盖成旧工作区的。树是单槽位数据，只能让最新一次落地。
+   */
+  let treeSeq = 0
+
+  /**
+   * 重扫目录树。
+   *
+   * `quiet` 用于后台自动刷新（目录监视推送）：不点亮全局 loading——那是给
+   * 「用户点了打开、界面还没内容」准备的；保存一次文档就闪一下加载态是噪音。
+   *
+   * 结构没变时**保持原数组引用**：目录树是嵌套的响应式数据，每次保存都换一份
+   * 新对象会让整棵树重新 diff（大库上肉眼可见地卡一下），而绝大多数保存
+   * （正文改动、frontmatter 没动 order）根本不改变树的形状。
+   */
+  async function loadTree(workspaceId: string, options: { quiet?: boolean } = {}): Promise<void> {
+    const seq = ++treeSeq
+    const quiet = options.quiet === true
+    if (!quiet) loading.value = true
+    if (!quiet) error.value = null
     try {
-      const nodes = unwrap(await window.docvi.treeList(workspaceId))
-      tree.value = nodes ?? []
+      const result = await window.docvi.treeList(workspaceId)
+      // 期间又发起了新的扫描：这次结果已经过时，丢弃（含错误）
+      if (seq !== treeSeq) return
+      const nodes = unwrap(result) ?? []
+      const sameShape =
+        treeWorkspaceId.value === workspaceId &&
+        JSON.stringify(tree.value) === JSON.stringify(nodes)
+      if (!sameShape) tree.value = nodes
       treeWorkspaceId.value = workspaceId
     } finally {
-      loading.value = false
+      if (seq === treeSeq && !quiet) loading.value = false
     }
   }
 

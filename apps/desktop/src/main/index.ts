@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, protocol, net, shell } from 'electron'
+import { realpathSync } from 'node:fs'
 import { join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -6,8 +7,11 @@ import { IPC } from '@docvi/shared'
 
 import { registerIpc, createStore, createRecent, type DesktopHostOptions } from './ipc.ts'
 import type { WorkspaceStore } from './store.ts'
+import { createLocalAssetRegistry, type LocalAssetRegistry } from './local-assets.ts'
+import { pruneUpdateCache } from './update.ts'
 import { readAutostart, writeAutostart } from './autostart.ts'
 import { createFileWatcher } from './fs-watch.ts'
+import { isContentRelPath } from './content.ts'
 import { createPluginStore, resolvePluginAsset, type PluginStore } from './plugin-store.ts'
 import { createServiceManager, serviceEntryPath } from './service.ts'
 import { createServiceBridge } from './service-bridge.ts'
@@ -315,11 +319,58 @@ async function handleAssetRequest(url: URL, workspaces: WorkspaceStore): Promise
   return net.fetch(pathToFileURL(target).toString())
 }
 
-function registerProtocol(plugins: PluginStore, workspaces: WorkspaceStore): void {
+/**
+ * 单文件文档的资产请求：`docvi://local/<id>/<文件名>`。
+ *
+ * id 由主进程在 `fileRead` 时登记（见 local-assets.ts），协议侧只做反查 +
+ * containment。渲染层无法凭空构造一个可访问的根：id 是路径摘要，猜不出来，
+ * 且只登记用户真正打开过的文档。
+ */
+async function handleLocalAssetRequest(
+  url: URL,
+  localAssets: LocalAssetRegistry,
+): Promise<Response> {
+  const segments = url.pathname.split('/').filter(Boolean)
+  const id = segments.shift()
+  if (!id) return new Response('Not Found', { status: 404 })
+  const root = localAssets.rootOf(decodeURIComponent(id))
+  if (!root) return new Response('Not Found', { status: 404 })
+
+  const rel = segments.map(segment => decodeURIComponent(segment)).join('/')
+  if (!rel) return new Response('Not Found', { status: 404 })
+  const target = resolve(root, rel)
+  if (target !== root && !target.startsWith(root + sep)) {
+    return new Response('Forbidden', { status: 403 })
+  }
+  // 解析真实路径再判一次：拦住「符号链接指到资产根外」这类逃逸
+  let real: string
+  try {
+    real = realpathSync(target)
+  } catch {
+    return new Response('Not Found', { status: 404 })
+  }
+  let realRoot: string
+  try {
+    realRoot = realpathSync(root)
+  } catch {
+    return new Response('Not Found', { status: 404 })
+  }
+  if (real !== realRoot && !real.startsWith(realRoot + sep)) {
+    return new Response('Forbidden', { status: 403 })
+  }
+  return net.fetch(pathToFileURL(real).toString())
+}
+
+function registerProtocol(
+  plugins: PluginStore,
+  workspaces: WorkspaceStore,
+  localAssets: LocalAssetRegistry,
+): void {
   protocol.handle('docvi', request => {
     const url = new URL(request.url)
     if (url.host === 'plugin') return handlePluginRequest(url, plugins)
     if (url.host === 'asset') return handleAssetRequest(url, workspaces)
+    if (url.host === 'local') return handleLocalAssetRequest(url, localAssets)
     if (url.host !== 'app') return new Response('Not Found', { status: 404 })
 
     const rel = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, '')
@@ -345,6 +396,12 @@ app.on('open-file', (event, path) => {
 })
 
 app.whenReady().then(() => {
+  /*
+   * 清理上一次更新留下的半成品（`.part` / 安装脚本）。
+   * 必须早于任何窗口创建：这些文件只是临时产物，留着占空间还容易被误点。
+   */
+  pruneUpdateCache()
+
   const plugins = createPluginStore({
     // dev：仓库 plugins/；打包后：resources/plugins
     builtinDir: app.isPackaged
@@ -356,13 +413,30 @@ app.whenReady().then(() => {
 
   // 工作区表要在协议注册前建好：`docvi://asset/<id>/…` 靠它把 id 换成根目录
   const workspaces = createStore()
+  // 单文件文档的资产根：同样必须在协议注册前存在
+  const localAssets = createLocalAssetRegistry()
 
-  registerProtocol(plugins, workspaces)
+  registerProtocol(plugins, workspaces, localAssets)
 
-  const watcher = createFileWatcher(path => {
-    // 只推给窗口：由渲染层判断「缓冲区是否有改动」，主进程不持有编辑状态
-    mainWindow?.webContents.send(IPC.docExternalChange, path)
-  })
+  const watcher = createFileWatcher(
+    path => {
+      // 只推给窗口：由渲染层判断「缓冲区是否有改动」，主进程不持有编辑状态
+      mainWindow?.webContents.send(IPC.docExternalChange, path)
+    },
+    change => {
+      /*
+       * 目录结构变化：推给所有窗口。
+       *
+       * 用 getAllWindows 而不是 mainWindow：ipc.ts 里 settings 的同类推送也这么做，
+       * 主进程不该假设「哪个窗口是主窗口」。多窗口时每个都要重扫自己的树。
+       */
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send(IPC.workspaceFilesChanged, change)
+      }
+    },
+    // 排除规则必须与目录扫描共用一份：否则 .git 里的写入会触发整树重扫
+    { isRelevant: isContentRelPath },
+  )
 
   const settings = createSettingsStore({
     settingsFile: settingsFilePath(dataDir()),
@@ -476,7 +550,16 @@ app.whenReady().then(() => {
     },
   }
 
-  registerIpc(workspaces, createRecent(), watcher, plugins, service, settings, desktopHost)
+  registerIpc(
+    workspaces,
+    createRecent(),
+    watcher,
+    plugins,
+    service,
+    settings,
+    desktopHost,
+    localAssets,
+  )
 
   // preload 在窗口创建前同步取一次设置：避免首帧用默认主题再切回来（闪一下）。
   // 这是唯一一个同步 IPC：只发生在进程启动阶段，且返回值极小。
