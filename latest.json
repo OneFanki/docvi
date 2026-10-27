@@ -1,6 +1,6 @@
 {
-  "version": "0.2.1",
+  "version": "0.2.2",
   "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
-  "notes": "表格可视化编辑入口不再隐藏：悬停表格即可见「编辑表格」，斜杠插入表格后直接打开网格编辑器。斜杠菜单上下键按行跳转，可直接进入增强组件区。",
+  "notes": "表格与图片有了真正的可视化编辑：点表格直接开网格编辑器、行和列都能在任意位置插入；图片支持选择、粘贴与拖拽。切视图不再丢失阅读位置和撤销记录，删除线、勾选框、分割线等预览缺陷一并修好，并新增 macOS 与 Linux 安装包。",
   "homepage": "https://github.com/OneFanki/docvi"
 }
