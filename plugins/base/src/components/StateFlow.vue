@@ -756,10 +756,11 @@ function kindClass(kind: StateNode['kind']): string {
   height: 100%;
 }
 
-/* 覆盖层：居中模态（四周留白 + 圆角），不铺满整屏贴底 */
+/* 覆盖层：居中模态（四周留白 + 圆角），不铺满整屏贴底。
+   顶边额外让出标题栏：窗口按钮画在那条带上（Windows 右上 / macOS 左上）。 */
 .at-stateflow.is-overlay {
   position: fixed;
-  inset: 3vh 4vw;
+  inset: calc(var(--at-overlay-top, 0px) + 3vh) 4vw 3vh;
   z-index: 1000;
   border: 1px solid var(--at-border);
   border-radius: var(--at-radius-lg);

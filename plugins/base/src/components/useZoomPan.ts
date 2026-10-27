@@ -31,8 +31,10 @@ export interface ZoomPanOptions {
    * 内容远大于视口时，纯「装下」会算出 40% 这类比例——图是完整了但字读不了。
    * 设为 0.6 后，fit 至少保留 60%，超出的部分交给拖拽/滚轮（本组件本来就支持平移）。
    * 图表类内容（小字 + 密集标注）必须给下限；纯色块类可以不给。
+   *
+   * 传函数表示下限随内容类型变化（灯箱里图片要「装下」、SVG 图不能比正文里更小）。
    */
-  fitFloor?: number
+  fitFloor?: number | (() => number)
 }
 
 export function useZoomPan(
@@ -42,7 +44,8 @@ export function useZoomPan(
 ) {
   const min = options.min ?? 0.35
   const max = options.max ?? 3
-  const fitFloor = options.fitFloor ?? 0
+  const floorOf = (): number =>
+    typeof options.fitFloor === 'function' ? options.fitFloor() : (options.fitFloor ?? 0)
   const scale = ref(1)
   const tx = ref(0)
   const ty = ref(0)
@@ -94,8 +97,14 @@ export function useZoomPan(
     touched = false
   }
 
-  /** 缩放到刚好装下（全屏时调用；超大图会缩到 min 为止） */
-  function fit(padding = 24) {
+  /**
+   * 缩放到刚好装下（全屏时调用；超大图会缩到 min 为止）。
+   *
+   * `honorFloor = false` 用于「适应」按钮：用户点它就是要看全貌，此时可读下限
+   * 该让位。打开时的自动适配保留下限——一进来就把图缩成看不清的比例，
+   * 等于「大图查看」比正文还小。
+   */
+  function fit(padding = 24, honorFloor = true) {
     const viewport = viewportRef.value
     const content = contentRef.value
     if (!viewport || !content) return
@@ -113,7 +122,7 @@ export function useZoomPan(
     // 结果高度方向被裁掉（2026-10-19 实测）。「适应」的语义是「装下」，不是「填满」。
     // 下限 = fitFloor：装下所需比例低于可读阈值时，宁可装不下也要保住字。
     const computed = Math.min(1, clamp(Math.min(vw / cw, vh / ch)))
-    scale.value = Math.max(computed, Math.min(1, fitFloor))
+    scale.value = honorFloor ? Math.max(computed, Math.min(1, floorOf())) : computed
     // 装不下时不能居中（会把内容左半截挤到视口外），改为贴左上
     const fits = cw * scale.value <= vw && ch * scale.value <= vh
     tx.value = fits ? (vpW - cw * scale.value) / 2 : padding
@@ -149,6 +158,26 @@ export function useZoomPan(
     zoomAt(next, event.clientX - rect.left, event.clientY - rect.top)
   }
 
+  /**
+   * 拖拽期间禁止文本选中。
+   *
+   * 直接改 `document.body.style.userSelect`，不走「加一个 body class」：
+   * 旧实现加的是 `.at-drag-lock`，而全仓**没有任何一条规则**定义它——
+   * 类名加上去了、样式不存在，拖动照样选中一片文字，日志与报错一概没有。
+   * 内联样式自己生效，不依赖某个样式表被谁引入。
+   */
+  let previousUserSelect = ''
+
+  function lockSelection(lock: boolean): void {
+    const body = document.body
+    if (lock) {
+      previousUserSelect = body.style.userSelect
+      body.style.userSelect = 'none'
+      return
+    }
+    body.style.userSelect = previousUserSelect
+  }
+
   function onPointerDown(event: PointerEvent) {
     if (event.button !== 0) return
     const target = event.target as Element | null
@@ -156,8 +185,7 @@ export function useZoomPan(
     if (target?.closest('button, a, input, select, textarea, [role="tab"]')) return
     const viewport = viewportRef.value
     if (!viewport) return
-    // 拖拽期间禁止文本选中：否则拖动会选中 SVG 文字 / 卡片文字，松手后满屏蓝底
-    document.body.classList.add('at-drag-lock')
+    lockSelection(true)
     pointerId = event.pointerId
     startX = event.clientX
     startY = event.clientY
@@ -165,6 +193,8 @@ export function useZoomPan(
     originTy = ty.value
     moved = false
     dragging.value = true
+    // preventDefault 让浏览器不再把它当成选区的起点（触屏同理）
+    event.preventDefault()
     viewport.setPointerCapture(event.pointerId)
   }
 
@@ -184,7 +214,7 @@ export function useZoomPan(
     if (!dragging.value || event.pointerId !== pointerId) return
     dragging.value = false
     pointerId = -1
-    document.body.classList.remove('at-drag-lock')
+    lockSelection(false)
     const viewport = viewportRef.value
     if (viewport?.hasPointerCapture(event.pointerId)) {
       viewport.releasePointerCapture(event.pointerId)

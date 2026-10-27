@@ -694,9 +694,10 @@ watch(isFullscreen, value => {
   height: 100%;
 }
 
+/* 顶边额外让出标题栏：窗口按钮画在那条带上（Windows 右上 / macOS 左上） */
 .at-tablegraph.is-overlay {
   position: fixed;
-  inset: 3vh 4vw;
+  inset: calc(var(--at-overlay-top, 0px) + 3vh) 4vw 3vh;
   z-index: 1000;
   border: 1px solid var(--at-border);
   border-radius: var(--at-radius-lg);

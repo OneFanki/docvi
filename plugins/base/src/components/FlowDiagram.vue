@@ -671,10 +671,11 @@ watch(isFullscreen, value => {
 }
 
 /* 覆盖层：居中模态（上下留白、圆角），不再铺满整屏贴底——
-   大屏上铺满会把内容顶到最上、控制条沉到最下，反而难读（2026-10-19 用户反馈）。 */
+   大屏上铺满会把内容顶到最上、控制条沉到最下，反而难读（2026-10-19 用户反馈）。
+   顶边再加标题栏高度：右上角是窗口按钮，压过来时顶栏的缩放/关闭点不到。 */
 .at-flow.is-overlay {
   position: fixed;
-  inset: 3vh 4vw;
+  inset: calc(var(--at-overlay-top, 0px) + 3vh) 4vw 3vh;
   z-index: 1000;
   border: 1px solid var(--at-border);
   border-radius: var(--at-radius-lg);

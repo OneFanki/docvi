@@ -15,6 +15,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import { useZoomPan } from './useZoomPan'
+import { pinSize } from './svg-size'
 import ZoomBar from './ZoomBar.vue'
 
 const props = defineProps<{
@@ -34,12 +35,79 @@ const emit = defineEmits<{ close: [] }>()
 const viewportRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 const closeRef = ref<HTMLButtonElement | null>(null)
-const { percent, dragging, style, fit, zoomBy, reset } = useZoomPan(viewportRef, contentRef, {
+const {
+  percent,
+  dragging,
+  style,
+  fit: fitZoom,
+  zoomBy,
+  reset,
+} = useZoomPan(viewportRef, contentRef, {
   min: 0.1,
   max: 8,
+  /*
+   * 图表不能比正文里更小：正文里的 mermaid 是按内容宽度完整排版的，
+   * 一进大图就被「装下」压到 85% 会**比刚才还难读**——那正是用户说的
+   * 「大图查看看不清」。这里给 100% 下限，装不下就交给拖拽与滚轮。
+   * 图片（位图）不设下限：照片装得下才是重点。
+   */
+  fitFloor: () => (props.kind === 'svg' ? 1 : 0),
 })
 
+/** 「适应」按钮：用户明确要看全貌，可读下限让位 */
+function fit(): void {
+  fitZoom(24, false)
+}
+
 const svgMarkup = computed(() => (props.kind === 'svg' ? (props.src ?? '') : ''))
+
+/**
+ * mermaid 产物把根 `<svg>` 写成 `width="100%"`（配 `max-width: 原宽px`）。
+ *
+ * 这在正文里是对的——跟随阅读列自适应。但放进灯箱的 `width: max-content`
+ * 容器后，百分比宽度失去可参照的包含块，浏览器回落到 SVG 的初始值 300px：
+ * 800×949 的图被排成 300×356，再被「适应」放大，字糊成一团（实测就是这个）。
+ *
+ * 所以打开时把宽度**钉成 viewBox 的实际尺寸**，让「100%」变成确定值。
+ */
+function pinSvgSize(): void {
+  const svg = contentRef.value?.querySelector('svg')
+  if (!svg) return
+  const box = svg.getAttribute('viewBox')
+  const size = pinSize(svg.getAttribute('width'), box)
+  if (!size) return
+  svg.setAttribute('width', String(size.width))
+  svg.setAttribute('height', String(size.height))
+  // 正文那条 max-width 会把钉好的宽度压回去，必须清掉
+  svg.style.maxWidth = 'none'
+  /*
+   * 变换必须落在 `<svg>` 自身，不能落在 HTML 包裹层：Chromium 对「HTML 包裹层
+   * 带 transform + 内含 SVG」有绘制缺陷——`<rect>` 跟着缩放、`<text>` 不跟，
+   * 放大后框和字完全错位（useZoomPan 顶部注释里有完整记录）。
+   */
+  svg.style.transform = style.value.transform
+  svg.style.transformOrigin = style.value.transformOrigin
+}
+
+// 开着灯箱时换了图源（连点两张图）：重新钉尺寸并适配，否则沿用上一张的比例
+watch(
+  () => props.src,
+  async () => {
+    if (!props.open) return
+    await nextTick()
+    pinSvgSize()
+    await nextTick()
+    fitZoom()
+  },
+)
+
+// 缩放/平移变化时同步到 SVG 自身
+watch(style, value => {
+  const svg = contentRef.value?.querySelector('svg')
+  if (!svg) return
+  svg.style.transform = value.transform
+  svg.style.transformOrigin = value.transformOrigin
+})
 
 function close(): void {
   emit('close')
@@ -87,7 +155,10 @@ watch(
           img.addEventListener('error', () => resolve(), { once: true })
         })
       }
-      fit()
+      // SVG 先钉死尺寸再算适应：百分比宽度在 max-content 容器里没有参照
+      pinSvgSize()
+      await nextTick()
+      fitZoom()
       closeRef.value?.focus()
       return
     }
@@ -99,9 +170,15 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
+  <!--
+    `doc-surface` 是必需类名，不是装饰：组件配色用的 `--at-*` / `--dv-c-*`
+    token 只在 `.doc-surface` 上定义（见 renderer-core 的 theme.css）。灯箱挂在
+    阅读滚动容器的**兄弟节点**上，不声明的后果是所有颜色变量都是 undefined——
+    背景变透明、正文从底下透出来，按钮边框与文字色也全部失效。
+  -->
   <div
     v-if="open && src"
-    class="lightbox"
+    class="lightbox doc-surface"
     role="dialog"
     aria-modal="true"
     :aria-label="title || '查看大图'"
@@ -146,7 +223,11 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
       :class="{ 'is-dragging': dragging }"
       @click.self="close"
     >
-      <div ref="contentRef" class="lightbox__content" :style="style">
+      <!--
+        SVG 的变换挂在 svg 自身（见 pinSvgSize 与 useZoomPan 顶部注释），
+        所以包裹层只对位图应用 transform；两层都挂会缩放两次。
+      -->
+      <div ref="contentRef" class="lightbox__content" :style="kind === 'svg' ? undefined : style">
         <!-- eslint-disable-next-line vue/no-v-html -- SVG 来自 mermaid 渲染产物，非用户输入 -->
         <div v-if="kind === 'svg'" class="lightbox__svg" v-html="svgMarkup" />
         <img v-else :src="src" :alt="title || ''" class="lightbox__img" draggable="false" />
@@ -162,8 +243,27 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   z-index: 1200;
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--at-bg) 96%, transparent);
-  backdrop-filter: blur(2px);
+  /*
+   * 顶部让出窗口按钮带，**铺满其余全部窗口**。
+   *
+   * 窗口按钮由系统画在标题栏那一条上：Windows 在右上（最小化/最大化/关闭），
+   * macOS 在左上（红绿灯）。灯箱要是不让位，自己的功能按钮就落进同一条带里
+   * ——最右那个关闭按钮会被窗口的 ✕ 盖住，点下去关的是窗口而不是大图。
+   *
+   * 让位方式是把**头栏**下移一个标题栏高度，而不是把整个覆盖层往下缩：
+   * 后者会让应用标题栏（搜索框、面板开关）浮在大图上方，全屏看图时非常割裂。
+   * 现在覆盖层仍铺满全窗，顶部那条带只有系统按钮，没有我们的控件。
+   */
+  padding-top: var(--at-overlay-top, 0px);
+  /*
+   * 必须完全不透明。
+   *
+   * 旧实现是「96% 底色 + backdrop-filter: blur(2px)」——那层模糊只在 4% 的
+   * 空隙里起作用，结果正文与侧栏在图表背后糊成一片灰影，读图时始终有一层
+   * 干扰纹理（mermaid 图尤其明显：图形本身就是细线稿）。大图查看的前提是
+   * 眼睛只看这一张图，所以这里用实底。
+   */
+  background: var(--at-bg);
 }
 
 .lightbox__head {
@@ -231,6 +331,8 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 .lightbox__content {
   transform-origin: 0 0;
   width: max-content;
+  /* 拖拽是这里的主动作，任何位置都不该出选区（拖完满屏蓝底） */
+  user-select: none;
 }
 
 .lightbox__img {
@@ -238,6 +340,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   /* 防止超大图在 100% 下把内存打爆：只做上限约束，不参与缩放计算 */
   max-width: none;
   user-select: none;
+  -webkit-user-drag: none;
 }
 
 .lightbox__svg {
@@ -248,5 +351,11 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   display: block;
   max-width: none !important;
   max-height: none !important;
+  /*
+   * 变换由脚本写在 svg 自身（Chromium 下 svg 文字不跟随 HTML 包裹层缩放）。
+   * 这里只声明变换原点，与脚本的 transform 配合。
+   */
+  transform-origin: 0 0;
+  user-select: none;
 }
 </style>

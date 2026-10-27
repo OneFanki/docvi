@@ -416,10 +416,12 @@ async function openInNewWindow() {
   color: var(--at-danger, #e5484d);
 }
 
-/* 覆盖层（Teleport 到 body，不受组件裁剪；scoped 样式因 Teleport 仍跟随组件 hash） */
+/* 覆盖层（Teleport 到 body，不受组件裁剪；scoped 样式因 Teleport 仍跟随组件 hash）。
+   顶边让到标题栏以下：窗口按钮画在那条带上（Windows 右上 / macOS 左上），
+   覆盖层自己的「关闭」按钮会与之重叠。 */
 .at-htmlembed-overlay {
   position: fixed;
-  inset: 0;
+  inset: var(--at-overlay-top, 0px) 0 0 0;
   z-index: 1000;
   display: flex;
   flex-direction: column;
