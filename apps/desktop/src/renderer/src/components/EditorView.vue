@@ -17,6 +17,7 @@ import { useDocumentStore } from '../stores/documents'
 import { usePluginStore } from '../stores/plugins'
 import { useI18n } from '../lib/i18n'
 import { buildInsertPlan, filterItems, type InsertItem } from '../lib/insert-menu'
+import { insertedBlockRange } from '../lib/insert-plan'
 import SlashMenu from './SlashMenu.vue'
 import SelectionToolbar from './SelectionToolbar.vue'
 import TableEditorDialog from './TableEditorDialog.vue'
@@ -141,15 +142,11 @@ function insertItem(item: InsertItem): void {
    * 插入的是空表（表头 + 一行空格），网格编辑器正好是它的自然续写。
    */
   if (item.id !== 'table') return
-  const last = plan.changes[plan.changes.length - 1]
-  if (!last) return
-  // 前面的变更（富组件写文件头）会把正文后推，位置要按增长量换算
-  const shift = plan.changes
-    .slice(0, -1)
-    .reduce((acc, change) => acc + change.insert.length - (change.to - change.from), 0)
-  const from = last.from + shift
-  const model = parseTable(last.insert)
-  if (model) tableEditor.value = { open: true, model, from, to: from + last.insert.length }
+  const range = insertedBlockRange(plan)
+  if (!range) return
+  const model = parseTable(range.text)
+  if (!model) return
+  tableEditor.value = { open: true, model, from: range.from, to: range.to }
 }
 
 function dismissSlash(): void {

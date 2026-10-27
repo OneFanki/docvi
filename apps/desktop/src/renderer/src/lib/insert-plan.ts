@@ -130,3 +130,26 @@ export function planInsert(
   const offset = rendered.cursorOffset ?? rendered.text.length
   return { changes, caretAfter: from + delta + offset }
 }
+
+/**
+ * 插入完成后，正文块在**新文档**里的区间（不含结尾换行）。
+ *
+ * 用途：插入表格后立刻打开网格编辑器，用户填完要把模型写回这一段原文。
+ * 两个容易算错的地方都在这里收口：
+ *  1. 富组件插入会先写文件头，正文整体后推，直接用原始的 `from` 会落错位置；
+ *  2. 插入文本以换行结尾（否则会和后一段粘住），但回写时 `serializeTable`
+ *     产出的原文**不带**结尾换行——区间若含那个换行，回写就会把表格与下一段
+ *     粘成一行。与「编辑表格」按钮那条路径对齐：区间端点落在最后一行的行尾。
+ */
+export function insertedBlockRange(
+  plan: InsertPlan,
+): { from: number; to: number; text: string } | null {
+  const body = plan.changes[plan.changes.length - 1]
+  if (!body || body.insert.length === 0) return null
+  const shift = plan.changes
+    .slice(0, -1)
+    .reduce((acc, change) => acc + change.insert.length - (change.to - change.from), 0)
+  const from = body.from + shift
+  const text = body.insert.replace(/(?:\r?\n)+$/, '')
+  return { from, to: from + text.length, text }
+}

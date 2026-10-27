@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-const { planInsert, collectComponentKeys, componentInsertion } =
+const { planInsert, collectComponentKeys, componentInsertion, insertedBlockRange } =
   await import('../apps/desktop/src/renderer/src/lib/insert-plan.ts')
 
 const plainItem = {
@@ -113,4 +113,40 @@ test('每个增强组件都有说明文案，供条目标题右侧展示', () =>
   for (const item of menu.INSERT_ITEMS.filter(i => i.group === 'component')) {
     assert.ok(item.hint && item.hint.length > 0, `组件 ${item.label} 缺少 hint`)
   }
+})
+
+test('insertedBlockRange：区间不含结尾换行，回写不会把表格与下一段粘连', () => {
+  /*
+   * 实测缺陷：斜杠插入表格后直接打开网格编辑器，保存时用 `to: from + 插入长度`
+   * 整段替换。插入文本以换行结尾，而 serializeTable 的产物不带换行——回写后
+   * 表格最后一行会和后面那段文字并成一行，Markdown 结构当场坏掉。
+   */
+  const doc = '正文\n\n/table\n'
+  const tableItem = {
+    id: 'table',
+    label: '表格',
+    group: 'markdown',
+    keywords: '',
+    render: () => ({ text: '| a | b |\n| --- | --- |\n|  |  |\n', cursorOffset: 2 }),
+  }
+  const plan = planInsert(doc, tableItem, 4, 10, null)
+  const range = insertedBlockRange(plan)
+  assert.ok(range, '标准项也要能算出行内块区间')
+  assert.equal(range.text, '| a | b |\n| --- | --- |\n|  |  |', '区间文本必须是去掉结尾换行的原文')
+  assert.equal(range.to - range.from, range.text.length)
+  // 区间落在新文档里，且右边界正好是插入块最后一行的行尾
+  const applied = '正文\n\n' + plan.changes.at(-1).insert
+  assert.equal(applied.slice(range.from, range.to), range.text)
+  assert.equal(applied[range.to], '\n', '右边界之后应当还是换行，而不是下一段的正文')
+})
+
+test('insertedBlockRange：富组件插入时，区间要跨过新写入的文件头', () => {
+  const plan = planInsert('正文\n', richItem, 3, 3, 'timeline:\n  kind: timeline')
+  const range = insertedBlockRange(plan)
+  assert.ok(range)
+  // 拼接出应用变更后的新文档，区间必须正好落在 <at-*> 引用上
+  const fmInsert = plan.changes[0].insert
+  const next = fmInsert + '正文\n' + plan.changes[1].insert
+  assert.equal(next.slice(range.from, range.to), range.text)
+  assert.match(range.text, /^<at-timeline/)
 })
