@@ -1,8 +1,11 @@
-# docvi 安装包配置（Windows NSIS 为主，mac/linux 目标保留但未验证）
+# docvi 安装包配置（三平台：Windows NSIS / macOS dmg / Linux AppImage + deb）
 #
-# 打包前必须做完两件事（见根 package.json 的 desktop:dist）：
-#   1. pnpm --filter @docvi/desktop build —— 产出 out/{main,preload,renderer}
-#   2. node scripts/assemble-plugins.mjs --out apps/desktop/build/plugins
+# 打包链（见根 package.json）：
+#   pnpm docvi:dist      本机打当前平台包
+#   pnpm docvi:dist:ci   CI 用，显式 --publish never
+#
+# 主体前置步骤由脚本串好（build → 插件产物 → electron-builder），不要手工只跑
+# electron-builder：缺 out/ 或 build/plugins 会打出一个空壳安装包。
 #
 # 主进程与服务进程的依赖已全部打进 bundle（yaml / renderer-core / shared），
 # 因此安装包内**不含 node_modules**：pnpm 的 workspace 软链跟进 asar 既不可靠，
@@ -19,6 +22,15 @@ copyright: Copyright © docvi contributors
 # executableName，所以这个问题只在 mac/linux 上暴露，本地打 Windows 包看不出来。
 executableName: docvi
 
+# 只保留界面实际用到的两套 Chromium 语言包（壳 i18n 也只有 zh / en）。
+# 缺省会把 Electron 自带的几十套 locale 一起打进包，每个平台白涨十几 MB。
+electronLanguages:
+  - zh-CN
+  - en-US
+
+# 最大压缩（Slow，但对分发体积最划算；三平台各自的打包时间都在可接受范围）
+compression: maximum
+
 directories:
   output: release
   buildResources: build
@@ -33,6 +45,9 @@ files:
 asar: true
 # 主进程产物整体落到真实磁盘：rollup 多入口会把共享代码拆成 out/main/chunks/*，
 # 只 unpack service.js 会导致它 import 的 chunk 仍留在 asar 里、Node 解析失败。
+#
+# 图标**不在这里**：它们走 extraResources 直接落到 resources 根，本来就与 asar
+# 无关（nativeImage 从磁盘读，打进 asar 会读不到，mac 上表现为菜单栏空白）。
 asarUnpack:
   - out/main/**
 
@@ -40,6 +55,7 @@ extraResources:
   # 内置插件包：<包名>/<版本>/ 视图，由 assemble-plugins.mjs 生成
   - from: build/plugins
     to: plugins
+  # 托盘与关于面板共用的一张图（托盘在代码里缩到 16px）
   - from: build/icon.png
     to: icon.png
 
@@ -55,10 +71,14 @@ fileAssociations:
     description: Markdown 文档
     role: Viewer
 
-# 发布渠道：打 tag 时由 GitHub Actions 上传到 Release（本地 dist 不受影响）
-publish:
-  provider: github
-  releaseType: release
+# 发布由 .github/workflows/release.yml 的 publish job 用 gh 统一完成（三平台资产
+# 一次性挂到同一个 Release）。
+#
+# ⚠️ 这里必须是 null，不能是 `provider: github`：只要配置里有 publish 段，
+# electron-builder 在 CI 环境下生成完产物就会尝试发布，拿不到 token 直接报错——
+# 包其实已经打好了，却因为收尾失败被判为构建失败（实测三平台同时红）。
+# 靠「不给 GH_TOKEN」关不掉，只能显式设 null。
+publish: null
 
 win:
   target:
@@ -66,7 +86,7 @@ win:
       arch:
         - x64
   icon: build/icon.ico
-  artifactName: docvi-${version}-setup.${ext}
+  artifactName: docvi-${version}-win-${arch}-setup.${ext}
 
 nsis:
   oneClick: false
@@ -80,12 +100,45 @@ nsis:
 
 mac:
   target:
-    - dmg
+    - target: dmg
+      arch:
+        - x64
+        - arm64
   category: public.app-category.productivity
   icon: build/icon.icns
+  artifactName: docvi-${version}-mac-${arch}.${ext}
+  # 本项目没有购买证书，而 electron-builder 不会自动退回 ad-hoc 签名。
+  # Apple Silicon **拒绝运行未签名的 arm64 代码**，所以必须显式 opt-in。
+  # ad-hoc 仍然过不了 Gatekeeper（从网上下载的 dmg 会被拦一次），用户需
+  # 手动清除隔离属性；这是无证书分发能做到的上限。
+  identity: '-'
+  # 未做公证时开启 Hardened Runtime 会让 ad-hoc 签名拒绝 Electron 自带的
+  # 预签名框架（Team ID 不同），表现为应用启动即崩。必须关。
+  hardenedRuntime: false
+
+dmg:
+  # 拖拽式安装布局：左侧应用图标、右侧「应用程序」快捷方式
+  contents:
+    - x: 130
+      y: 220
+      type: file
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
 
 linux:
   target:
-    - AppImage
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
   category: Office
   icon: build/icon.png
+  artifactName: docvi-${version}-linux-${arch}.${ext}
+  # deb 包元信息：缺 maintainer 会让 dpkg 拒绝安装
+  maintainer: docvi contributors
+  synopsis: Markdown 文档浏览与编辑
+  description: 把任意 Markdown 目录变成可浏览、可搜索、可交互的文档站。

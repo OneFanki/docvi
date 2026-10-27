@@ -7,6 +7,9 @@
 #
 # ⚠️ 版本号唯一来源是**根 package.json**（apps/desktop 的 version 由它注入），
 # bump 只改那一处，避免两处版本对不上而发布了一个错版本号。
+#
+# ⚠️ Release 正文来自 CHANGELOG.md 的 `## [<版本号>]` 小节。缺小节时 version job
+# 直接失败——宁可发不出去，也不要发出一个只有提交标题、用户看不懂改了什么 的版本。
 name: 发版
 
 on:
@@ -53,6 +56,14 @@ jobs:
           fi
           echo "release=${release}" >> "$GITHUB_OUTPUT"
 
+          # 要发版就必须有写好的版本说明：缺小节时在这里失败，
+          # 而不是等三个平台各打二十分钟包之后再发出一个没说明的 Release。
+          if [[ "${release}" == "true" ]] &&
+            ! node scripts/release-notes.mjs "${version}" - >/dev/null; then
+            echo "::error::CHANGELOG.md 缺少 ${version} 的小节。先补「## [${version}] - <日期>」再发版。"
+            exit 1
+          fi
+
   verify:
     needs: version
     if: needs.version.outputs.release == 'true'
@@ -81,23 +92,32 @@ jobs:
         include:
           - os: windows-latest
             name: windows
+            # 显式给 --win：不写时电子构建器按宿主平台推导，一旦 runner 镜像
+            # 变化（历史上 macOS runner 从 x64 换到 arm64）产物会悄悄变样。
+            args: --win --x64
             # 只取安装包：release/*.exe 会把 NSIS 的临时 __uninstaller.exe 也捞进来
             artifacts: |
               apps/desktop/release/*-setup.exe
           - os: macos-latest
             name: macos
+            # x64 + arm64 双架构：配置里已列两个 arch，这里再显式声明一次，
+            # 避免「配置改了但 CI 没跟上」打出单架构包
+            args: --mac --x64 --arm64
             artifacts: |
               apps/desktop/release/*.dmg
           - os: ubuntu-latest
             name: linux
+            args: --linux --x64
             artifacts: |
               apps/desktop/release/*.AppImage
+              apps/desktop/release/*.deb
     runs-on: ${{ matrix.os }}
     env:
       # electron-builder 自带 Electron zip 下载，npm postinstall 的二进制用不上
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-      # 产物是未签名的：显式关掉身份发现，避免 runner 上残留的证书
-      # 产出一个「半签名」包——它的行为会与本地构建不一致，很难排查
+      # Windows / Linux 产物是未签名的：显式关掉身份发现，避免 runner 上残留的
+      # 证书产出一个「半签名」包——它的行为会与本地构建不一致，很难排查。
+      # macOS 走配置里的 identity: '-'（ad-hoc），它绕过身份发现，不受此变量影响。
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
@@ -109,15 +129,15 @@ jobs:
           node-version: 22.18
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # 复用与本地一致的打包链：先构建插件与两个壳变体，再出包。
+      # 复用与本地一致的打包链（build → 插件产物 → electron-builder），
+      # 平台参数由矩阵决定，经 pnpm 的 `--` 透传到链末的 electron-builder。
       #
-      # 走 `docvi:dist:ci` 而不是 `docvi:dist`：electron-builder 只要检测到 CI
-      # 环境变量且配置里有 publish 段，就会在**产物已生成之后**尝试发布，拿不到
-      # token 就整步报错——包其实已经打好了，却因为收尾失败被当作构建失败
-      # （实测三平台同时红）。`--publish never` 才是真正的开关，靠「不给 GH_TOKEN」
-      # 关不掉。发布统一由 publish job 做，三平台资产一次性挂到同一个 Release。
+      # 必须带 `--publish never`（脚本 docvi:dist:ci 里已写死）：electron-builder
+      # 只要检测到 CI 环境变量就会在**产物生成之后**尝试发布，拿不到 token 就整步
+      # 报错——包其实已经打好了，却因为收尾失败被判为构建失败（实测三平台同时红）。
+      # 配置里的 `publish: null` 是第一道闸，这是第二道。
       - name: 构建安装包
-        run: pnpm docvi:dist:ci
+        run: pnpm docvi:dist:ci -- ${{ matrix.args }}
       - uses: actions/upload-artifact@v4
         with:
           name: docvi-${{ matrix.name }}
@@ -138,15 +158,30 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: 取出本版本说明
+        id: notes
+        shell: bash
+        run: |
+          # 正文落文件而不是塞进 shell 变量：说明里有反引号、引号和 Markdown，
+          # 走变量传递迟早踩转义。version job 已保证这一节能取到，这里取不到
+          # 说明是异常（比如 publish 与 version 读到的不是同一个提交），直接失败。
+          if node scripts/release-notes.mjs "${TAG#v}" release-notes.md; then
+            echo "file=release-notes.md" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::取不到 ${TAG#v} 的版本说明，拒绝发出没有说明的 Release。"
+            exit 1
+          fi
       - name: 发布 GitHub Release
         shell: bash
         run: |
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            # 已有该 tag（重跑场景）：替换资产而不是失败
+            # 已有该 tag（重跑 / 补资产场景）：替换资产，并刷新正文，
+            # 这样事后修订过的更新日志也能补到已发布的 Release 上
             gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md
           else
             gh release create "$TAG" dist/* \
               --repo "$GITHUB_REPOSITORY" \
               --title "docvi ${TAG}" \
-              --generate-notes
+              --notes-file release-notes.md
           fi
