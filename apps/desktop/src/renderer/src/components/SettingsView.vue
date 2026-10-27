@@ -17,7 +17,7 @@ import {
   Wifi,
 } from 'lucide-vue-next'
 
-import type { DesktopPrefsState, RuntimeInfo, UpdateCheckResult } from '@docvi/shared'
+import type { DesktopPrefsState, RuntimeInfo, UpdateCheckResult, UpdatePhase } from '@docvi/shared'
 
 import { useServiceStore } from '../stores/service'
 import { useTabsStore } from '../stores/tabs'
@@ -102,14 +102,36 @@ async function loadAbout(): Promise<void> {
 }
 
 /**
+ * 更新流程状态：检查 → 下载 → 校验 → 可以安装。
+ *
+ * 三个阶段分开存，是因为用户的等待预期完全不同：检查是秒级、下载可能几分钟
+ * （取决于网络）、校验完后要明确告诉他「现在可以重启安装了」。
+ */
+const updateFlow = ref<{
+  phase: UpdatePhase
+  received: number
+  total: number | null
+  /** 已下载并校验通过的版本；有值时才显示「重启并安装」 */
+  readyVersion: string | null
+  fileName: string | null
+}>({ phase: 'idle', received: 0, total: null, readyVersion: null, fileName: null })
+
+let unsubscribeProgress: (() => void) | null = null
+
+/** 更新流程的错误：就地显示在更新区（见 downloadUpdate 的说明） */
+const updateError = ref<string | null>(null)
+
+/**
  * 检查更新。
  *
- * 只做「检查 + 打开下载页」：安装包未签名、发布渠道未定，静默下载执行会把
- * 安全边界降级成口头承诺（详见主进程 main/update.ts 顶部）。
+ * 除了比对版本，还会拿到本机平台对应的安装包信息（含 SHA-256）。拿不到资产
+ * 或没有校验值时，界面只给下载页——不引导用户走一条注定失败的自动更新。
  */
 async function checkUpdate(): Promise<void> {
   if (about.value.checking) return
   about.value = { ...about.value, checking: true }
+  // 重新检查时清掉上一轮的下载态：版本可能已经变了，旧包不该继续挂着
+  updateFlow.value = { phase: 'idle', received: 0, total: null, readyVersion: null, fileName: null }
   try {
     const result = await window.docvi.appUpdateCheck()
     if (result.ok) about.value = { ...about.value, update: result.data }
@@ -128,8 +150,79 @@ async function checkUpdate(): Promise<void> {
   }
 }
 
+/** 可以走应用内自动更新：有资产、有校验值、不是容器版 */
+const canAutoUpdate = computed(() => {
+  const asset = about.value.update?.asset
+  return Boolean(asset?.sha256) && !props.readonly
+})
+
+/** 下载 → 校验 → 就绪。进度由主进程推送，这里只更新本地状态 */
+async function downloadUpdate(): Promise<void> {
+  const update = about.value.update
+  if (!update?.asset || !update.latest) return
+  updateError.value = null
+  updateFlow.value = { ...updateFlow.value, phase: 'downloading', received: 0 }
+  const result = await window.docvi.appUpdateDownload({
+    asset: update.asset,
+    version: update.latest,
+  })
+  if (result.ok) {
+    updateFlow.value = {
+      phase: 'ready',
+      received: updateFlow.value.received,
+      total: updateFlow.value.total,
+      readyVersion: result.data.version,
+      fileName: result.data.fileName,
+    }
+    return
+  }
+  /*
+   * 错误就地显示在更新区，不丢进全局 toast：
+   * 关于页可能开着很久，用户回头看不到已经消失的提示；而下载失败的原因
+   * （校验不通过 / 网络 / 磁盘）恰恰需要停在那儿让他读完。
+   */
+  updateError.value = result.error.message
+  updateFlow.value = { ...updateFlow.value, phase: 'idle' }
+}
+
+function cancelDownload(): void {
+  void window.docvi.appUpdateCancel()
+}
+
+/** 重启并安装：应用会退出，安装程序接管 */
+async function installUpdate(): Promise<void> {
+  const version = updateFlow.value.readyVersion
+  if (!version) return
+  updateError.value = null
+  updateFlow.value = { ...updateFlow.value, phase: 'installing' }
+  const result = await window.docvi.appUpdateInstall()
+  if (!result.ok) {
+    updateError.value = result.error.message
+    updateFlow.value = { ...updateFlow.value, phase: 'ready' }
+  }
+}
+
+/** 下载进度百分比；没有总字节时返回 null（显示不确定态） */
+const downloadPercent = computed(() => {
+  const { received, total } = updateFlow.value
+  if (!total || total <= 0) return null
+  return Math.min(100, Math.round((received / total) * 100))
+})
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
 function openDownload(): void {
-  const url = about.value.update?.downloadUrl
+  const url = about.value.update?.downloadUrl ?? about.value.info?.homepage
+  if (url) void window.docvi.appOpenExternal(url)
+}
+
+/** 打开项目主页（GitHub） */
+function openHomepage(): void {
+  const url = about.value.info?.homepage
   if (url) void window.docvi.appOpenExternal(url)
 }
 
@@ -158,9 +251,25 @@ onMounted(() => {
   void loadDesktop()
   // 服务自己推状态（崩溃重启 / 端口顺延），这里不再轮询
   unsubscribe = store.subscribe()
+  // 下载进度由主进程按 ~200ms 节流推送；渲染层只负责把它落进状态
+  unsubscribeProgress = window.docvi.onUpdateProgress(progress => {
+    const flow = updateFlow.value
+    updateFlow.value = {
+      phase: progress.phase,
+      received: progress.received ?? flow.received,
+      total: progress.total ?? flow.total,
+      // ready 阶段主进程才知道最终文件名；其余阶段保留已有值
+      readyVersion:
+        progress.phase === 'ready' ? (progress.version ?? flow.readyVersion) : flow.readyVersion,
+      fileName: flow.fileName,
+    }
+  })
 })
 
-onUnmounted(() => unsubscribe?.())
+onUnmounted(() => {
+  unsubscribe?.()
+  unsubscribeProgress?.()
+})
 
 /** 复制并短暂高亮：用户要能确认「刚才那下生效了」 */
 async function copyField(key: string, text: string): Promise<void> {
@@ -752,6 +861,19 @@ async function openLogs(): Promise<void> {
             <span class="row__label">{{ t('about.version') }}</span>
             <span class="row__value mono">{{ about.info?.version ?? '—' }}</span>
           </div>
+          <!--
+            项目主页：开源仓是用户能找到源码、提 issue、看更新日志的地方，
+            必须有一个可点的入口，而不是让人自己去搜。
+          -->
+          <div v-if="about.info?.homepage" class="row">
+            <span class="row__label">{{ t('about.homepage') }}</span>
+            <span class="row__value">
+              <button class="about__link mono" type="button" @click="openHomepage">
+                {{ about.info.homepage }}
+                <ExternalLink :size="11" :stroke-width="1.8" aria-hidden="true" />
+              </button>
+            </span>
+          </div>
           <div v-if="about.info?.electron" class="row">
             <span class="row__label">Electron</span>
             <span class="row__value mono">{{ about.info.electron }}</span>
@@ -792,14 +914,88 @@ async function openLogs(): Promise<void> {
             {{ updateLabel }}
           </p>
           <p v-if="about.update?.notes" class="hint">{{ about.update.notes }}</p>
-          <button
-            v-if="about.update?.status === 'outdated' && about.update.downloadUrl"
-            class="btn btn--primary btn--sm about__download"
-            type="button"
-            @click="openDownload"
-          >
-            {{ t('about.openDownload') }}
-          </button>
+          <p v-if="updateError" class="hint hint--error">{{ updateError }}</p>
+
+          <!--
+            更新操作区：三种状态互斥，同一位置替换内容而不是并排堆按钮。
+            按钮位置稳定，用户在等哪一步都看得见当前处于哪一阶段。
+          -->
+          <div v-if="about.update?.status === 'outdated'" class="update-actions">
+            <!-- 就绪：已经下载并校验完，只等重启 -->
+            <template v-if="updateFlow.phase === 'ready'">
+              <div class="update-progress">
+                <span class="update-progress__label">
+                  {{
+                    t('about.readyToInstall', {
+                      version: updateFlow.readyVersion ?? about.update.latest ?? '',
+                    })
+                  }}
+                </span>
+                <span v-if="updateFlow.fileName" class="update-progress__file mono">
+                  {{ updateFlow.fileName }}
+                </span>
+              </div>
+              <button class="btn btn--primary btn--sm" type="button" @click="installUpdate">
+                {{ t('about.installNow') }}
+              </button>
+            </template>
+
+            <!-- 下载 / 校验中：进度条 + 取消 -->
+            <template
+              v-else-if="updateFlow.phase === 'downloading' || updateFlow.phase === 'verifying'"
+            >
+              <div class="update-progress">
+                <span class="update-progress__label">
+                  {{
+                    updateFlow.phase === 'verifying' ? t('about.verifying') : t('about.downloading')
+                  }}
+                  <template v-if="downloadPercent !== null">· {{ downloadPercent }}%</template>
+                  <template v-if="updateFlow.total">
+                    （{{ formatBytes(updateFlow.received) }} / {{ formatBytes(updateFlow.total) }}）
+                  </template>
+                </span>
+                <span class="update-progress__track" aria-hidden="true">
+                  <span
+                    class="update-progress__fill"
+                    :class="{ 'is-indeterminate': downloadPercent === null }"
+                    :style="downloadPercent === null ? undefined : { width: `${downloadPercent}%` }"
+                  />
+                </span>
+              </div>
+              <button
+                v-if="updateFlow.phase === 'downloading'"
+                class="btn btn--ghost btn--sm"
+                type="button"
+                @click="cancelDownload"
+              >
+                {{ t('about.cancelDownload') }}
+              </button>
+            </template>
+
+            <!-- 默认：可以下载 -->
+            <template v-else>
+              <button
+                v-if="canAutoUpdate"
+                class="btn btn--primary btn--sm"
+                type="button"
+                @click="downloadUpdate"
+              >
+                {{ t('about.downloadUpdate', { version: about.update.latest ?? '' }) }}
+              </button>
+              <button
+                v-if="about.update.downloadUrl"
+                class="btn btn--ghost btn--sm"
+                type="button"
+                @click="openDownload"
+              >
+                {{ t('about.openDownload') }}
+              </button>
+              <!-- 没有校验值 / 容器版：说明为什么只能手动下 -->
+              <span v-if="!canAutoUpdate" class="hint hint--inline">
+                {{ props.readonly ? t('about.webCannotUpdate') : t('about.noChecksum') }}
+              </span>
+            </template>
+          </div>
 
           <p class="hint">{{ t('about.updateNote') }}</p>
         </section>
@@ -830,8 +1026,93 @@ async function openLogs(): Promise<void> {
   overflow-wrap: anywhere;
 }
 
-.about__download {
-  margin-top: 8px;
+/* 项目主页链接：看起来是链接，但用 button 走宿主的外链通道（不能直接导航） */
+.about__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dv-ui-accent);
+  font-size: inherit;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.about__link:hover {
+  text-decoration: underline;
+}
+
+/* 更新操作区：按钮与进度在同一行，高度固定，切换阶段时不跳 */
+.update-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  min-height: 28px;
+}
+
+.update-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+
+.update-progress__label {
+  color: var(--dv-ui-text-muted);
+  font-size: 11.5px;
+}
+
+.update-progress__file {
+  color: var(--dv-ui-text-dim);
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-progress__track {
+  display: block;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--dv-ui-line-soft);
+  overflow: hidden;
+}
+
+.update-progress__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--dv-ui-accent);
+  transition: width 160ms linear;
+}
+
+/* 没有总字节：流动条，避免「0% 卡住」被读成卡死 */
+.update-progress__fill.is-indeterminate {
+  width: 35%;
+  animation: update-indeterminate 1.1s ease-in-out infinite;
+}
+
+@keyframes update-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.hint--inline {
+  margin: 0;
+}
+
+.hint--error {
+  color: var(--dv-ui-danger);
 }
 
 .hint--warn {

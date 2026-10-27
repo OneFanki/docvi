@@ -16,7 +16,9 @@ import {
   type PluginRecordView,
   type RecentEntry,
   type RuntimeInfo,
+  type UpdateAsset,
   type UpdateCheckResult,
+  type UpdateDownloaded,
   type Result,
   type ServiceState,
   type WorkspaceEntry,
@@ -36,9 +38,16 @@ import { clearDraft, readDraft, writeDoc, writeDraft } from './fs-write.ts'
 import { copyEntry, createEntry, moveEntry, renameEntry, resolveForTrash } from './fs-ops.ts'
 import { importImage } from './image-import.ts'
 import type { FileWatcher } from './fs-watch.ts'
+import type { LocalAssetRegistry } from './local-assets.ts'
 import { toView, type PluginStore } from './plugin-store.ts'
 import { loadMarket } from './plugin-market.ts'
-import { checkForUpdate, runtimeInfo } from './update.ts'
+import {
+  cancelUpdateDownload,
+  checkForUpdate,
+  downloadUpdate,
+  installUpdate,
+  runtimeInfo,
+} from './update.ts'
 import type { SettingsStore } from './settings-store.ts'
 import type { ServiceBridge } from './service-bridge.ts'
 import {
@@ -93,6 +102,7 @@ export function registerIpc(
   service: ServiceBridge,
   settings: SettingsStore,
   desktop: DesktopHostOptions,
+  localAssets: LocalAssetRegistry,
 ): void {
   // 各 handler 内部用这些短名，避免长链式调用刷屏
   const desktopPrefs = desktop.desktopPrefs
@@ -128,13 +138,53 @@ export function registerIpc(
   ipcMain.handle(IPC.appRuntimeInfo, (): Result<RuntimeInfo> => ok(runtimeInfo()))
 
   /**
-   * 检查更新：只比对版本并把下载页交给系统浏览器。
-   *
-   * 不在这里下载安装包——详见 main/update.ts 顶部对三件前提的说明。
+   * 检查更新：比对版本，并把本机平台对应的安装包信息一起返回。
    */
   ipcMain.handle(IPC.appUpdateCheck, async (): Promise<Result<UpdateCheckResult>> => {
     try {
       return ok(await checkForUpdate())
+    } catch (error) {
+      return toFailure(error)
+    }
+  })
+
+  /**
+   * 下载更新包：进度推到所有窗口，渲染层据此画进度条。
+   *
+   * 资产信息来自上一次 `appUpdateCheck`（渲染层原样回传），这里再校验一遍
+   * 地址与校验和——不信任渲染进程传来的任何字段，是这一层的固定纪律。
+   */
+  ipcMain.handle(
+    IPC.appUpdateDownload,
+    async (_event, raw: unknown): Promise<Result<UpdateDownloaded>> => {
+      try {
+        const payload = (raw ?? {}) as { asset?: unknown; version?: unknown }
+        const asset = payload.asset as UpdateAsset | undefined
+        const version = typeof payload.version === 'string' ? payload.version : ''
+        if (!asset || typeof asset.url !== 'string' || !version) {
+          return fail('E_INVALID', '下载请求缺少资产信息')
+        }
+        const done = await downloadUpdate(asset, version, progress => {
+          for (const window of BrowserWindow.getAllWindows()) {
+            window.webContents.send(IPC.appUpdateProgress, progress)
+          }
+        })
+        return ok(done)
+      } catch (error) {
+        return toFailure(error)
+      }
+    },
+  )
+
+  ipcMain.handle(IPC.appUpdateCancel, (): Result<null> => {
+    cancelUpdateDownload()
+    return ok(null)
+  })
+
+  ipcMain.handle(IPC.appUpdateInstall, async (): Promise<Result<null>> => {
+    try {
+      await installUpdate()
+      return ok(null)
     } catch (error) {
       return toFailure(error)
     }
@@ -218,6 +268,8 @@ export function registerIpc(
   ipcMain.handle(IPC.workspaceRemove, (_event, id: unknown): Result<null> => {
     if (typeof id !== 'string') return fail('E_INVALID', 'id 必须是字符串')
     if (!store.find(id)) return fail('E_NOT_FOUND', '工作区不存在')
+    // 监视句柄必须随工作区一起解除：留着会持续占 inotify 配额且再也无人消费
+    watcher.unwatchTree(id)
     store.remove(id)
     service.sync()
     return ok(null)
@@ -552,7 +604,13 @@ export function registerIpc(
       if (typeof absolutePath !== 'string' || !absolutePath) {
         return fail('E_INVALID', 'absolutePath 必须是非空字符串')
       }
-      return ok(readStandaloneDoc(absolutePath))
+      const doc = readStandaloneDoc(absolutePath)
+      /*
+       * 登记资产根并回传前缀：单文件没有内容根，图片的相对路径必须有地方落地。
+       * 不登记的话渲染层只能把 `images/a.png` 拼到 `docvi://app/`（渲染产物目录），
+       * 单文件里的图片会全部变成破图。
+       */
+      return ok({ ...doc, assetPrefix: localAssets.register(doc.absolutePath) })
     } catch (error) {
       return toFailure(error)
     }
@@ -686,6 +744,29 @@ export function registerIpc(
       return fail('E_INVALID', 'absolutePath 必须是非空字符串')
     }
     watcher.unwatch(absolutePath)
+    return ok(null)
+  })
+
+  /*
+   * 工作区目录监视：让 AI / git 新建、删除、改名的文件自动出现在侧栏。
+   *
+   * 只按 workspaceId 查根目录，不接受渲染层传路径——与所有其它 fs handler 同一条纪律。
+   */
+  ipcMain.handle(IPC.workspaceWatch, (_event, workspaceId: unknown) => {
+    if (typeof workspaceId !== 'string' || !workspaceId) {
+      return fail('E_INVALID', 'workspaceId 必须是非空字符串')
+    }
+    const entry = store.find(workspaceId)
+    if (!entry) return fail('E_NOT_FOUND', '工作区不存在')
+    watcher.watchTree(workspaceId, entry.root)
+    return ok(null)
+  })
+
+  ipcMain.handle(IPC.workspaceUnwatch, (_event, workspaceId: unknown) => {
+    if (typeof workspaceId !== 'string' || !workspaceId) {
+      return fail('E_INVALID', 'workspaceId 必须是非空字符串')
+    }
+    watcher.unwatchTree(workspaceId)
     return ok(null)
   })
 
