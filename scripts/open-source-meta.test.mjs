@@ -159,11 +159,19 @@ test('package.json 声明 repository（electron-builder 靠它解析发布目标
    */
   const rootRepo = readJson('package.json').repository?.url
   assert.ok(rootRepo, '根 package.json 必须声明 repository.url')
-  assert.match(rootRepo, /github\.com[:/][^/]+\/[^/]+?(\.git)?$/, 'repository.url 必须是 GitHub 仓库地址')
+  assert.match(
+    rootRepo,
+    /github\.com[:/][^/]+\/[^/]+?(\.git)?$/,
+    'repository.url 必须是 GitHub 仓库地址',
+  )
   assert.equal(
     readJson('apps', 'desktop', 'package.json').repository?.url,
     rootRepo,
-    'apps/desktop 的 repository 必须与根 package.json 一致'
+    'apps/desktop 的 repository 必须与根 package.json 一致',
   )
-  assert.match(read('.github', 'workflows', 'release.yml'), /pnpm docvi:dist/, '发布工作流必须走同一个构建入口')
+  assert.match(
+    read('.github', 'workflows', 'release.yml'),
+    /pnpm docvi:dist/,
+    '发布工作流必须走同一个构建入口',
+  )
 })
