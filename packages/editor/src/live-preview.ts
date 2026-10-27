@@ -1,4 +1,4 @@
-import { syntaxTree } from '@codemirror/language'
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language'
 import { StateEffect, StateField, type EditorState, type Extension } from '@codemirror/state'
 import {
   Decoration,
@@ -204,6 +204,22 @@ class RenderedBlockWidget extends WidgetType {
     cleanup?.()
   }
 
+  /*
+   * 高度估计必须给，且必须**明显大于一行**。
+   *
+   * ⚠️ 不实现这个 getter 时 CM6 用默认值（约一行高 20px）估算块 widget 的高度。
+   * 而组件卡片实际可能是 200~400px（表格、图、时间线），估算与真实的差值会一直
+   * 累积进高度预言机——表现为「表格之后的所有行，鼠标点到行中间偏下就跳到下一行」。
+   * 实测：表格块实际 219.9px、按 20px 估，其后的行只有上部 35% 能命中本行。
+   *
+   * 这个值不要求精确（真实高度渲染后 CM6 会自己量），但量级必须对：宁可高估也不
+   * 低估，低估会让点击坐标持续偏上。400px 覆盖绝大多数卡片，表格再多也只是让它
+   * 更早被修正。
+   */
+  override get estimatedHeight(): number {
+    return 400
+  }
+
   /** 让事件冒泡给 CM6：点击卡片 = 把光标放进对应源码行 */
   override ignoreEvent(): boolean {
     return false
@@ -230,7 +246,18 @@ class FrontmatterWidget extends WidgetType {
   }
 
   override toDOM(): HTMLElement {
-    const chip = document.createElement('span')
+    /*
+     * ⚠️ 这个 widget 是 `block: true` 的替换装饰，DOM **必须是块级**。
+     *
+     * 原来是 `<span>` 加 `display: inline-flex`——块级替换装饰里放行内元素时，
+     * CM6 的高度预言机按「一个块」记账，而真实 DOM 参与行内布局，两者口径不一致。
+     * 后果不是显示错位（看起来完全正常），而是**点击命中错行**：整篇文档里
+     * frontmatter 之后的所有行，鼠标点在行中间偏下就掉到下一行。
+     * 实测同一篇文档：带 frontmatter 时命中率 68%~89%，去掉 frontmatter 后 100%。
+     *
+     * 用 div + flex：块级元素参与块布局，与装饰的语义一致。外观由 CSS 保证。
+     */
+    const chip = document.createElement('div')
     chip.className = 'cm-lp-frontmatter'
     chip.textContent = this.keys.length
       ? `属性 · ${this.keys.length} 项（${this.keys.slice(0, 3).join('、')}${this.keys.length > 3 ? '…' : ''}）`
@@ -378,11 +405,11 @@ interface BuildResult {
  * ⚠️ 必须由 StateField 调用，不能由 ViewPlugin 提供——CM6 明确禁止插件提供
  * **块级**装饰（`Block decorations may not be specified via plugins`）：
  * 块装饰会改变行高与布局，必须由状态层持有才能在各视口重绘时保持一致。
- * 视口窗口化因此改成「ViewPlugin 检测视口变化 → 派发 StateEffect → 字段重建」。
+ *
+ * 构建区间恒为**全文**：不做视口窗口化（原因见 `decorationField` 的 update）。
  */
 function buildDecorations(
   state: EditorState,
-  viewport: { from: number; to: number },
   options: LivePreviewOptions,
   frontmatterInfo: FrontmatterInfo | null,
 ): BuildResult {
@@ -398,6 +425,26 @@ function buildDecorations(
   const atoms: Array<{ from: number; to: number; decoration: Decoration }> = []
   const doc = state.doc
   const text = doc.toString()
+
+  /*
+   * 拿到**整篇文档**的语法树。
+   *
+   * ⚠️ 两个陷阱叠在一起，这里都踩过：
+   *
+   * 1. **Lezer 是惰性增量解析**。它只保证当前视口附近的节点可用，文档其余
+   *    部分可能还没解析。`syntaxTree(state)` 返回的就是这棵「局部树」——实测
+   *    45KB 文档只拿到 3134 字符的树。用 `iterate` 遍历它，正文里的
+   *    ATXHeading / Emphasis / ListItem 根本不存在，装饰自然建不出来。
+   *
+   * 2. **`ensureSyntaxTree` 的返回值才是完整树，`syntaxTree()` 不会因此变成
+   *    完整树**。前者不会写回 state 缓存的视口树，只是额外解析并返回一份。
+   *    所以必须先调它、再用它的返回值遍历，不能「调完 continue 用 syntaxTree」。
+   *
+   * 症状：带大 frontmatter 的长文档切到实时预览后，正文仍是 `## 标题`、
+   * `**加粗**` 原样，点一下 / 滚动一下才逐渐渲染（交互挪了视口，解析器跟上）。
+   * 小文档或没有 frontmatter 时视口树恰好覆盖全文，所以看起来「时好时坏」。
+   */
+  const tree = ensureSyntaxTree(state, doc.length, 100) ?? syntaxTree(state)
 
   const lineHasCursor = (lineNumber: number): boolean => active.has(lineNumber)
   const rangeHasCursor = (from: number, to: number): boolean => {
@@ -505,13 +552,21 @@ function buildDecorations(
     })
   }
 
-  /* 视口窗口化：只处理可见范围 ±2000px（design 7.3 第 3 条） */
-  const viewportFrom = Math.max(frontmatterInfo?.end ?? 0, viewport.from - 2000)
-  const viewportTo = Math.min(doc.length, viewport.to + 2000)
-
-  syntaxTree(state).iterate({
-    from: viewportFrom,
-    to: viewportTo,
+  /*
+   * 遍历范围 = **全文**（frontmatter 之后）。
+   *
+   * 这里曾按 `viewport ± 2000px` 裁一段来遍历语法树，想把长文档的重建成本压
+   * 下来。但视口在编辑器刚挂载 / 刚切换模式时还没测量，读到的是 0 或极小值，
+   * 于是只遍历了文档开头——正文里的 `##`、`**`、列表全都保持源码形态。用户看到
+   * 的就是「切到实时预览还是源码，点一下才渲染」：点击产生选区变化触发重建，
+   * 而那次……同样被裁，只是起点变了，看起来「点一下就好了」。
+   *
+   * 实测 45KB 文档（1100+ 行）全文遍历后重建耗时仍在毫秒级，窗口化没有收益，
+   * 只有这类静默缺失。删除。
+   */
+  tree.iterate({
+    from: frontmatterInfo?.end ?? 0,
+    to: doc.length,
     enter: ref => {
       const node = ref.node
       const name = node.name
@@ -704,7 +759,6 @@ function buildDecorations(
   const componentTag = /^[ \t]*<at-([\w-]+)([\s\S]*?)\/?>[ \t]*$/
   for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber += 1) {
     const line = doc.line(lineNumber)
-    if (line.from < viewportFrom || line.to > viewportTo) continue
     const match = componentTag.exec(line.text)
     if (!match) continue
     block(line.from, line.to, 'component', line.text.trim())
@@ -727,7 +781,6 @@ function buildDecorations(
     for (const span of findPluginBlocks(lines, syntax)) {
       const startLine = doc.line(span.startLine + 1)
       const endLine = doc.line(span.endLine + 1)
-      if (startLine.from < viewportFrom || endLine.to > viewportTo) continue
       // kind 用 form 而不是语法名：Widget 按 'container' / 'fence' 决定怎么重新渲染块
       block(startLine.from, endLine.to, span.form, text.slice(startLine.from, endLine.to))
     }
@@ -793,16 +846,16 @@ function frontmatterField(): StateField<FrontmatterInfo | null> {
 }
 
 /**
- * 视口变化通知：StateField 拿不到 view，靠这个 effect 由 ViewPlugin 派发。
- * 模块级共享：只是值载体，不含实例状态，多编辑器共用安全。
+ * 装饰重建请求。
+ *
+ * 曾经携带 `{from, to}` 视口区间用于窗口化构建，那条路径已删除（视口在挂载/
+ * 切模式时尚未测量，会裁掉整篇装饰）。现在它只是一个「请重算」的信号。
  */
-const refreshEffect = StateEffect.define<{ from: number; to: number }>()
+const refreshEffect = StateEffect.define<true>()
 
 /** 强制重算装饰（文档主题切换、外部重载等场景） */
 export function refreshDecorations(view: EditorView): void {
-  view.dispatch({
-    effects: refreshEffect.of({ from: view.viewport.from, to: view.viewport.to }),
-  })
+  view.dispatch({ effects: refreshEffect.of(true) })
 }
 
 /** IME 冻结开关：true = 清空装饰回到纯源码 */
@@ -822,20 +875,32 @@ function decorationField(
     create(state) {
       // 初始没有 viewport 信息：先按全文构建（文档第一次挂载时视口覆盖全文）
       const info = state.field(frontmatter, false) ?? null
-      return buildDecorations(state, { from: 0, to: state.doc.length }, options, info)
+      return buildDecorations(state, options, info)
     },
     update(value, tr) {
       const frozen = tr.effects.find(effect => effect.is(freezeEffect))?.value
       if (frozen === true) return { decorations: Decoration.none, atoms: Decoration.none }
 
-      const viewport = tr.effects.find(effect => effect.is(refreshEffect))?.value
+      const refreshed = tr.effects.some(effect => effect.is(refreshEffect))
       const info = tr.state.field(frontmatter, false) ?? null
 
-      // 文档/选区变了就重建；否则只有视口变化（或解冻）时才重建
-      if (!tr.docChanged && !tr.selection && !viewport && frozen !== false) return value
+      // 文档/选区变了就重建；否则只有显式刷新（主题切换、解冻）时才重建
+      if (!tr.docChanged && !tr.selection && !refreshed && frozen !== false) return value
 
-      const target = viewport ?? { from: 0, to: tr.state.doc.length }
-      return buildDecorations(tr.state, target, options, info)
+      /*
+       * **永远按全文构建，不做视口窗口化。**
+       *
+       * 早先按 `view.viewport` 只构建可见区间，想省长文档的重建成本。但视口在
+       * 编辑器刚挂载 / 刚切换模式时**还没测量**，读到的是 `{0, 0}` 或一段极小的
+       * 区间；拿它当构建区间就把装饰裁成只剩 frontmatter，整篇文档退回纯源码——
+       * 用户看到的是「切到实时预览还是 `**加粗**` 原文，点一下才渲染」（点击产生
+       * 选区变化，走的是全文重建，于是突然好了）。
+       *
+       * 而且窗口化本来就没有收益：选区变化（每次点击、每次移动光标）都走全文
+       * 重建，滚动并不重建。省下的只有「滚动到未构建区域」这一种情况，代价却是
+       * 一类很难复现的渲染缺失。删除。
+       */
+      return buildDecorations(tr.state, options, info)
     },
     provide: field => [
       EditorView.decorations.from(field, value => value.decorations),
@@ -847,58 +912,6 @@ function decorationField(
       EditorView.atomicRanges.of(view => view.state.field(field, false)?.atoms ?? Decoration.none),
     ],
   })
-}
-
-/**
- * 视口驱动插件：把真实 viewport 通过 effect 送回 StateField。
- *
- * 只在视口越出「已构建区间」时才派发——每次滚动都派发会让重建频率与
- * 滚动帧率绑死（长文档直接掉帧）。
- */
-function viewportDriver(): Extension {
-  return ViewPlugin.fromClass(
-    class {
-      private built: { from: number; to: number }
-      readonly view: EditorView
-
-      constructor(view: EditorView) {
-        this.view = view
-        this.built = { from: view.viewport.from, to: view.viewport.to }
-        /*
-         * create() 阶段不允许同步 dispatch：CM6 正在构造视图，任何 dispatch
-         * 都会抛「Calls to EditorView.update are not allowed while an update
-         * is in progress」，插件随后被标记为崩溃（实测整层装饰失效）。
-         * 因此推迟到微任务——此时视图已就绪，视口也才是真实测量值。
-         */
-        queueMicrotask(() => {
-          if (!view.dom.parentNode) return
-          view.dispatch({
-            effects: refreshEffect.of({ from: view.viewport.from, to: view.viewport.to }),
-          })
-        })
-      }
-
-      update(update: ViewUpdate): void {
-        if (!update.viewportChanged) return
-        const { from, to } = update.view.viewport
-        // 已构建区间向两侧各留 2000px 余量；新视口仍在余量内就跳过
-        const margin = 2000
-        if (from >= this.built.from - margin && to <= this.built.to + margin) return
-        this.built = { from, to }
-        /*
-         * 不能在 update 回调里同步 dispatch：CM6 正在处理事务，期间再派发会抛
-         * 「Calls to EditorView.update are not allowed while an update is in progress」，
-         * 插件随后被标记为崩溃，整层装饰永久失效（实测：滚动一屏后长文档不再重建）。
-         * 推到下一帧；视图可能已销毁，用 parentNode 判存活。
-         */
-        const view = update.view
-        requestAnimationFrame(() => {
-          if (!view.dom.parentNode) return
-          view.dispatch({ effects: refreshEffect.of({ from, to }) })
-        })
-      }
-    },
-  )
 }
 
 /**
@@ -944,7 +957,7 @@ function compositionGuard(): Extension {
 export function createLivePreview(options: LivePreviewOptions): Extension {
   const frontmatter = frontmatterField()
   const decorations = decorationField(options, frontmatter)
-  return [frontmatter, decorations, viewportDriver(), compositionGuard(), frontmatterClickHandler()]
+  return [frontmatter, decorations, compositionGuard(), frontmatterClickHandler()]
 }
 
 /**

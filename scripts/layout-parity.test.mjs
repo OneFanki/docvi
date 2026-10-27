@@ -111,3 +111,58 @@ test('列表项层级 class 从 1 起，且与 doc.css 的缩进步长一致', (
     `一级列表缩进应包含与阅读态相同的步长 ${step}，实际为：${li1.trim()}`,
   )
 })
+
+test('块级替换装饰的 widget 必须是块级元素，且上下留白用 padding', () => {
+  const live = readFileSync(join(root, 'packages/editor/src/live-preview.ts'), 'utf8')
+
+  /*
+   * 两条硬约束，都只影响「点击命中」而不影响观感——所以必须靠测试锁住，
+   * 靠肉眼根本发现不了（实测：带 frontmatter 时命中率 68%，去掉后 100%）。
+   *
+   * 1. `Decoration.replace({ block: true })` 的 widget DOM 必须是块级：
+   *    行内元素（span / display:inline-flex）参与行内布局，而 CM6 按块记账高度，
+   *    两个口径错开 → 其后所有行点击坐标整体偏移。
+   * 2. 块 widget 的上下间距必须用 padding：CM6 用 getBoundingClientRect 量高度，
+   *    margin 不计入，会与真实布局高度错开。
+   */
+  assert.doesNotMatch(
+    live,
+    /new FrontmatterWidget[\s\S]{0,200}?createElement\('span'\)/,
+    'frontmatter 卡是 block:true 的替换装饰，DOM 必须是块级元素（不能用 span）',
+  )
+
+  const chip = editorRule('.cm-lp-frontmatter')
+  assert.match(
+    chip,
+    /display:\s*flex/,
+    'frontmatter 卡必须是块级 display（flex，不能是 inline-flex）',
+  )
+  assert.doesNotMatch(chip, /display:\s*inline-flex/, 'frontmatter 卡不能是 inline-flex')
+
+  const blockStyle = editorRule('.cm-lp-block')
+  assert.doesNotMatch(
+    blockStyle,
+    /margin:\s*[^;]*\d(px|em)\s+0/,
+    '块 widget 的上下间距不能用 margin（CM6 量高度不计 margin），应改用 padding',
+  )
+  assert.match(blockStyle, /padding:\s*0\.6em 0/, '块 widget 应保留 0.6em 的上下 padding')
+})
+
+test('实时预览不做视口窗口化（装饰必须按全文构建）', () => {
+  const live = readFileSync(join(root, 'packages/editor/src/live-preview.ts'), 'utf8')
+  /*
+   * 窗口化会让「切到实时预览」时装饰只覆盖文档开头（视口还没测量），
+   * 表现为正文仍是 Markdown 源码、点一下才渲染。详见踩坑库 2026-10-27。
+   */
+  assert.doesNotMatch(live, /viewportDriver/, '视口窗口化已删除，不应再引入')
+  assert.match(
+    live,
+    /ensureSyntaxTree\(state, doc\.length/,
+    '构建装饰前必须确保整篇文档已解析，否则遍历不到远处的标题/强调节点',
+  )
+  assert.doesNotMatch(
+    live,
+    /syntaxTree\(state\)\.iterate/,
+    '必须遍历 ensureSyntaxTree 的返回值；syntaxTree(state) 只是视口局部树',
+  )
+})

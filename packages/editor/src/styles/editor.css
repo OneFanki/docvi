@@ -74,9 +74,20 @@
   color: var(--dv-ed-md-quote);
 }
 
-/* 块 Widget：与阅读视图同一套排版，外边距按块间距补齐 */
+/*
+ * 块 Widget 的上下间距必须用 **padding**，不能用 margin。
+ *
+ * ⚠️ CM6 用 `getBoundingClientRect()` 量块高度，而**外边距不计入**盒尺寸。
+ * 原来写 `margin: 0.6em 0`（上下各 19.2px），块的真实占位是「实测高度 + 上下
+ * margin」，CM6 只记到实测高度——差的 19.2px 会累积进高度预言机，导致**该块
+ * 之后的所有行点击坐标整体偏上**。
+ *
+ * 症状（实测）：表格块实测 219.9px，其后第一行只有上部 35% 能命中本行，鼠标
+ * 点在行中间偏下就跳到下一行；表格上方的行完全正常。文档里块越多、越靠前，
+ * 偏移越大。padding 计入盒尺寸，与 CM6 的测量口径一致，视觉上等价。
+ */
 .cm-lp-block {
-  margin: 0.6em 0;
+  padding: 0.6em 0;
 }
 
 .cm-lp-block__body {
@@ -238,7 +249,6 @@
    * 0.08em→0.33px、**0.10em→0.03px**、0.12em→-0.27px，取 0.1em。
    * 这不是视觉微调，是让两个字号的盒中心真正对齐。
    */
-  vertical-align: 0.1em;
 }
 
 .cm-lp-link {
@@ -284,12 +294,25 @@
  * padding，写 32px 会让它比正文整体右移 18px，标题与属性卡左右错开。
  * 上下留白压到最小——它只是「这里有一段元信息」的提示，不是标题。
  */
+/*
+ * frontmatter 折叠卡。
+ *
+ * ⚠️ 必须是**块级**（`display: flex` 而不是 `inline-flex`），且上下留白用
+ * padding 而不是 margin：它由 `Decoration.replace({ block: true })` 承载，
+ * CM6 按块记账高度、用 `getBoundingClientRect()` 实测（不含 margin）。
+ * 行内 display 或外边距都会让记账与真实布局错开，表现为「整篇文档点击命中错行」。
+ */
 .cm-lp-frontmatter {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
-  margin: 6px 32px 8px 14px;
-  padding: 1px 8px;
+  width: fit-content;
+  /*
+   * 上下留白用 padding（计入盒高），左右用 margin 只是缩进、不影响高度记账。
+   * CM6 用 `getBoundingClientRect()` 量块高度，margin 不计入——见上面说明。
+   */
+  margin: 0 32px 0 14px;
+  padding: 7px 8px 9px;
   border: 1px solid var(--dv-ed-panel-border);
   border-radius: 999px;
   font-size: 11px;
