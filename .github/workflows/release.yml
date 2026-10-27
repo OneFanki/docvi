@@ -109,13 +109,15 @@ jobs:
           node-version: 22.18
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # 复用与本地一致的打包链：先构建插件与两个壳变体，再出包
+      # 复用与本地一致的打包链：先构建插件与两个壳变体，再出包。
+      #
+      # 走 `docvi:dist:ci` 而不是 `docvi:dist`：electron-builder 只要检测到 CI
+      # 环境变量且配置里有 publish 段，就会在**产物已生成之后**尝试发布，拿不到
+      # token 就整步报错——包其实已经打好了，却因为收尾失败被当作构建失败
+      # （实测三平台同时红）。`--publish never` 才是真正的开关，靠「不给 GH_TOKEN」
+      # 关不掉。发布统一由 publish job 做，三平台资产一次性挂到同一个 Release。
       - name: 构建安装包
-        run: pnpm docvi:dist
-        env:
-          # 打包时不要让 electron-builder 自己发布，统一由 publish job 做
-          # （三个平台的资产必须一次性挂到同一个 Release 上）
-          GH_TOKEN: ''
+        run: pnpm docvi:dist:ci
       - uses: actions/upload-artifact@v4
         with:
           name: docvi-${{ matrix.name }}

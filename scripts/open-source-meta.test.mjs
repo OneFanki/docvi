@@ -171,7 +171,21 @@ test('package.json 声明 repository（electron-builder 靠它解析发布目标
   )
   assert.match(
     read('.github', 'workflows', 'release.yml'),
-    /pnpm docvi:dist/,
-    '发布工作流必须走同一个构建入口',
+    /pnpm docvi:dist:ci/,
+    '发布工作流必须走同一个构建入口（CI 变体，带 --publish never）',
   )
+})
+
+test('CI 打包入口带 --publish never，禁止 electron-builder 隐式发布', () => {
+  /*
+   * 实测：三个平台都构建成功、产物已落盘，却在收尾阶段集体失败，日志是
+   * "GitHub Personal Access Token is not set"。electron-builder 在 CI 环境变量
+   * 存在时会忽略「没给 token」这件事仍然尝试发布，失败即判整步失败。
+   * 唯一可靠开关是命令行 `--publish never`；发版交给 publish job 统一做。
+   */
+  const scripts = readJson('package.json').scripts
+  const ci = scripts['docvi:dist:ci']
+  assert.ok(ci, '必须提供 docvi:dist:ci 这个 CI 专用打包入口')
+  assert.match(ci, /--publish never/, 'docvi:dist:ci 必须显式带 --publish never')
+  assert.match(ci, /electron-builder/, 'docvi:dist:ci 必须仍然调用 electron-builder')
 })

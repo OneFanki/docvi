@@ -132,6 +132,24 @@ function insertItem(item: InsertItem): void {
   editor.applyChanges(plan.changes, plan.caretAfter)
   slash.value = null
   slashDismissedAt.value = null
+
+  /*
+   * 表格插完直接开网格编辑器。
+   *
+   * 只留「悬停表格右上角的小按钮」这一个入口，等于把可视化编辑藏起来：
+   * 从斜杠菜单选「表格」的用户本来就想填内容，还要再找一遍按钮才知道能可视化改。
+   * 插入的是空表（表头 + 一行空格），网格编辑器正好是它的自然续写。
+   */
+  if (item.id !== 'table') return
+  const last = plan.changes[plan.changes.length - 1]
+  if (!last) return
+  // 前面的变更（富组件写文件头）会把正文后推，位置要按增长量换算
+  const shift = plan.changes
+    .slice(0, -1)
+    .reduce((acc, change) => acc + change.insert.length - (change.to - change.from), 0)
+  const from = last.from + shift
+  const model = parseTable(last.insert)
+  if (model) tableEditor.value = { open: true, model, from, to: from + last.insert.length }
 }
 
 function dismissSlash(): void {

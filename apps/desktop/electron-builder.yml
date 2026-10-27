@@ -11,6 +11,14 @@ appId: app.docvi
 productName: docvi
 copyright: Copyright © docvi contributors
 
+# 可执行文件名必须在这里统一声明，不能只写在 win 段。
+#
+# 缺省时 electron-builder 从 package.json 的 name 推导，而本包名是
+# `@docvi/desktop`（带 scope），清洗后变成 `@docvidesktop`——`@` 在 mac/linux
+# 的文件路径里非法，AppImage/dmg 打包直接失败。Windows 段原本单独设了
+# executableName，所以这个问题只在 mac/linux 上暴露，本地打 Windows 包看不出来。
+executableName: docvi
+
 directories:
   output: release
   buildResources: build
@@ -53,7 +61,6 @@ publish:
   releaseType: release
 
 win:
-  executableName: docvi
   target:
     - target: nsis
       arch:

@@ -30,6 +30,7 @@
     "docvi:build": "pnpm --filter @docvi/desktop build",
     "docvi:typecheck": "pnpm --filter @docvi/desktop typecheck",
     "docvi:dist": "pnpm --filter @docvi/desktop build && node scripts/build-plugins.mjs && node scripts/assemble-plugins.mjs --out apps/desktop/build/plugins && electron-builder --project apps/desktop --config electron-builder.yml",
+    "docvi:dist:ci": "pnpm --filter @docvi/desktop build && node scripts/build-plugins.mjs && node scripts/assemble-plugins.mjs --out apps/desktop/build/plugins && electron-builder --project apps/desktop --config electron-builder.yml --publish never",
     "docvi:build:web": "pnpm --filter @docvi/desktop exec vite build --config vite.web.config.ts",
     "scan:open-source": "node scripts/scan-open-source.mjs",
     "skills:check": "node scripts/check-skills.mjs",
