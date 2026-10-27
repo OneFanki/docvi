@@ -195,8 +195,13 @@ export function extractPluginBlocks(
   return out.join(crlf)
 }
 
-/** 相对路径按 baseDir 归一为根相对（折叠 `..` / `.` / 空段） */
-function toRootRelative(rawPath: string, baseDir: string): string {
+/**
+ * 相对路径按 baseDir 归一为根相对（折叠 `..` / `.` / 空段）。
+ *
+ * 导出给宿主的「图片预览」复用：编辑弹窗里显示现有图片时，路径必须与块内渲染
+ * 用同一条归一规则，否则弹窗里破图而正文正常（或反之），用户无从判断哪边是对的。
+ */
+export function toRootRelative(rawPath: string, baseDir: string): string {
   const segments = (rawPath.startsWith('/') ? rawPath : `${baseDir}/${rawPath}`).split('/')
   const stack: string[] = []
   for (const segment of segments) {

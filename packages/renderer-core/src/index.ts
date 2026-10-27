@@ -1,4 +1,10 @@
-export { renderMarkdown, resolveLink, extractPluginBlocks, readFrontmatter } from './markdown.ts'
+export {
+  renderMarkdown,
+  resolveLink,
+  extractPluginBlocks,
+  readFrontmatter,
+  toRootRelative,
+} from './markdown.ts'
 export type {
   ContainerSyntax,
   Frontmatter,
