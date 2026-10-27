@@ -1,6 +1,6 @@
 {
-  "version": "0.2.0",
+  "version": "0.2.1",
   "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
-  "notes": "斜杠菜单二维导航、表单编辑标记；实时预览切模式不再显示源码，点击命中不再错行。",
+  "notes": "表格可视化编辑入口不再隐藏：悬停表格即可见「编辑表格」，斜杠插入表格后直接打开网格编辑器。斜杠菜单上下键按行跳转，可直接进入增强组件区。",
   "homepage": "https://github.com/OneFanki/docvi"
 }
