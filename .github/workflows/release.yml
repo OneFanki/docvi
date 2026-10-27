@@ -1,0 +1,150 @@
+# 发版：版本号提升合并到 main 时自动创建 tag 与 Release，并构建三平台安装包。
+#
+# 两种入口：
+#   1. main 上的 package.json 版本还没打过 tag → 视为发版，建 tag + 构建 + 发布；
+#   2. 推送 v* tag → 重建既有版本的产物（修 CI 或补资产时用）。
+# main 上版本已打过 tag 的普通合并不会重复发版。
+#
+# ⚠️ 版本号唯一来源是**根 package.json**（apps/desktop 的 version 由它注入），
+# bump 只改那一处，避免两处版本对不上而发布了一个错版本号。
+name: 发版
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      tag: ${{ steps.decide.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: decide
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v${version}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            # 推 tag 时必须与 package.json 一致，否则会发出一个版本号对不上的包
+            if [[ "${GITHUB_REF_NAME}" != "${tag}" ]]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} 与 package.json 版本 ${version} 不一致"
+              exit 1
+            fi
+            release=true
+          elif git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} 已存在，本次不发版（bump 版本号后再合并才会发）"
+            release=false
+          else
+            release=true
+          fi
+          echo "release=${release}" >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    env:
+      # 门禁不打包 Electron，跳过二进制下载省时间
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.10.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.18
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+
+  build:
+    needs: [version, verify]
+    if: needs.version.outputs.release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+            # 只取安装包：release/*.exe 会把 NSIS 的临时 __uninstaller.exe 也捞进来
+            artifacts: |
+              apps/desktop/release/*-setup.exe
+          - os: macos-latest
+            name: macos
+            artifacts: |
+              apps/desktop/release/*.dmg
+          - os: ubuntu-latest
+            name: linux
+            artifacts: |
+              apps/desktop/release/*.AppImage
+    runs-on: ${{ matrix.os }}
+    env:
+      # electron-builder 自带 Electron zip 下载，npm postinstall 的二进制用不上
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      # 产物是未签名的：显式关掉身份发现，避免 runner 上残留的证书
+      # 产出一个「半签名」包——它的行为会与本地构建不一致，很难排查
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.10.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.18
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 复用与本地一致的打包链：先构建插件与两个壳变体，再出包
+      - name: 构建安装包
+        run: pnpm docvi:dist
+        env:
+          # 打包时不要让 electron-builder 自己发布，统一由 publish job 做
+          # （三个平台的资产必须一次性挂到同一个 Release 上）
+          GH_TOKEN: ''
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docvi-${{ matrix.name }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [version, build]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 发布 GitHub Release
+        shell: bash
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # 已有该 tag（重跑场景）：替换资产而不是失败
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "docvi ${TAG}" \
+              --generate-notes
+          fi

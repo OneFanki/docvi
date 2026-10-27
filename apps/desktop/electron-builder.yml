@@ -47,6 +47,11 @@ fileAssociations:
     description: Markdown 文档
     role: Viewer
 
+# 发布渠道：打 tag 时由 GitHub Actions 上传到 Release（本地 dist 不受影响）
+publish:
+  provider: github
+  releaseType: release
+
 win:
   executableName: docvi
   target:

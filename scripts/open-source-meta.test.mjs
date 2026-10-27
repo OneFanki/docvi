@@ -135,3 +135,17 @@ test('README 的许可与贡献链接指向真实文件', () => {
   }
   assert.match(readme, /MIT/, 'README 应写明许可')
 })
+
+test('三处版本号必须一致（根 / 桌面包 / 更新清单）', () => {
+  /*
+   * 安装包版本取 `apps/desktop/package.json`，而发版判断与 latest.json 用的是
+   * 根 package.json。三处不同步的后果很隐蔽：CI 认为该发 v0.2.0，实际产出的
+   * 安装包叫 docvi-0.1.0-setup.exe——用户下载到文件名与版本号对不上的包，
+   * 而构建全程没有任何报错（实测踩到过）。
+   */
+  const rootVersion = readJson('package.json').version
+  const desktopVersion = readJson('apps', 'desktop', 'package.json').version
+  const manifestVersion = readJson('latest.json').version
+  assert.equal(desktopVersion, rootVersion, 'apps/desktop 的 version 必须与根 package.json 一致')
+  assert.equal(manifestVersion, rootVersion, 'latest.json 的 version 必须与根 package.json 一致')
+})

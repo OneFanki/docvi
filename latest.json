@@ -1,6 +1,6 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
-  "notes": "首个公开构建。安装包由 GitHub Actions 在打 tag 时产出，签名暂缺（Windows 会提示未知发布者）。",
+  "notes": "斜杠菜单二维导航、表单编辑标记；实时预览切模式不再显示源码，点击命中不再错行。",
   "homepage": "https://github.com/OneFanki/docvi"
 }

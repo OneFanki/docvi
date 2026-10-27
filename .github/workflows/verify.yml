@@ -2,9 +2,9 @@ name: 校验
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 # 同一分支的新推送取消上一轮未完成的任务，省 runner 也省等待
 concurrency:
