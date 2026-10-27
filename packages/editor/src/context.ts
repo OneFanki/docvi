@@ -1,3 +1,4 @@
+import { syntaxTree } from '@codemirror/language'
 import { ViewPlugin, type EditorView, type ViewUpdate } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
 
@@ -7,7 +8,7 @@ import type { Extension } from '@codemirror/state'
  * 为什么由 editor 包上报、由 app 画 UI：
  *  - 位置必须从 CM6 拿（`coordsAtPos` 才是真实屏幕坐标），宿主自己算会漂；
  *  - 但菜单/气泡要长得像应用的一部分（图标、分组、i18n），用 Vue 画最省事。
- * 所以这里是**纯上报**：只报「在哪、查什么词」，不参与渲染。
+ * 所以这里是**纯上报**：只报「在哪、查什么词、当前已有什么格式」，不参与渲染。
  */
 
 export interface SlashState {
@@ -19,6 +20,26 @@ export interface SlashState {
   rect: { left: number; top: number; bottom: number } | null
 }
 
+/**
+ * 选区当前生效的格式。
+ *
+ * 气泡工具条据此显示**按下态**：光标在 `**加粗**` 里时加粗按钮要亮着。
+ * 「点了加粗按钮却看不出是否生效」是用户明确报过的问题——按钮不反映状态，
+ * 用户只能靠数原文里的星号来判断，而实时预览恰恰把星号藏了。
+ */
+export interface SelectionMarks {
+  bold: boolean
+  italic: boolean
+  strike: boolean
+  code: boolean
+  link: boolean
+  /** 标题级别：0 = 不是标题 */
+  heading: number
+  bullet: boolean
+  ordered: boolean
+  quote: boolean
+}
+
 export interface SelectionState {
   from: number
   to: number
@@ -27,6 +48,8 @@ export interface SelectionState {
   focused: boolean
   /** 选中区顶部的屏幕坐标：气泡工具栏贴这里 */
   rect: { left: number; top: number; bottom: number } | null
+  /** 选区起点处的格式状态（空选区取光标所在位置） */
+  marks: SelectionMarks
 }
 
 export interface ContextCallbacks {
@@ -37,10 +60,88 @@ export interface ContextCallbacks {
 /** 斜杠命令只认「行首空白 + / + 词」：正文中间的 `/` 是路径或分数，不该弹菜单 */
 const SLASH_RE = /^[ \t]*\/([\w\u4e00-\u9fa5-]*)$/
 
+/** 没有任何格式的基线：宿主读不到时报「全部未激活」，按钮一律不亮 */
+export const NO_MARKS: SelectionMarks = {
+  bold: false,
+  italic: false,
+  strike: false,
+  code: false,
+  link: false,
+  heading: 0,
+  bullet: false,
+  ordered: false,
+  quote: false,
+}
+
 function coordsAt(view: EditorView, pos: number): SlashState['rect'] {
   const coords = view.coordsAtPos(pos)
   if (!coords) return null
   return { left: coords.left, top: coords.top, bottom: coords.bottom }
+}
+
+/**
+ * 读出位置所在的行内 / 行级格式。
+ *
+ * 判断方式是沿语法树向上找祖先节点：CM6 的 Markdown 语法把 `**x**` 解析成
+ * StrongEmphasis 包住内容，光标落在 x 里时它必然是祖先。行级格式（标题、列表、
+ * 引用）在同一棵树里也有对应节点，一并读掉，省得宿主再各算一份。
+ *
+ * 只读视口范围内的语法树（`syntaxTree`）就够：选区永远在视口内，为它触发
+ * 全文解析得不偿失。
+ */
+function marksAt(view: EditorView, pos: number): SelectionMarks {
+  const marks: SelectionMarks = { ...NO_MARKS }
+  const { state } = view
+  if (pos > state.doc.length) return marks
+
+  const line = state.doc.lineAt(pos)
+  if (/^\s*[-*+]\s+\[[ xX]\]/.test(line.text)) marks.bullet = true
+  else if (/^\s*[-*+]\s+/.test(line.text)) marks.bullet = true
+  else if (/^\s*\d+[.)]\s+/.test(line.text)) marks.ordered = true
+  if (/^\s*>\s?/.test(line.text)) marks.quote = true
+
+  let node = syntaxTree(state).resolveInner(pos, -1)
+  while (node) {
+    switch (node.name) {
+      case 'StrongEmphasis':
+        marks.bold = true
+        break
+      case 'Emphasis':
+        marks.italic = true
+        break
+      case 'Strikethrough':
+        marks.strike = true
+        break
+      case 'InlineCode':
+        marks.code = true
+        break
+      case 'Link':
+        marks.link = true
+        break
+      case 'ATXHeading1':
+      case 'ATXHeading2':
+      case 'ATXHeading3':
+      case 'ATXHeading4':
+      case 'ATXHeading5':
+      case 'ATXHeading6':
+        marks.heading = Number(node.name.slice(-1))
+        break
+      case 'Blockquote':
+        marks.quote = true
+        break
+      case 'BulletList':
+        marks.bullet = true
+        break
+      case 'OrderedList':
+        marks.ordered = true
+        break
+      default:
+        break
+    }
+    if (!node.parent) break
+    node = node.parent
+  }
+  return marks
 }
 
 export function contextReporter(callbacks: ContextCallbacks): Extension {
@@ -66,8 +167,16 @@ export function contextReporter(callbacks: ContextCallbacks): Extension {
 
     const focused = view.hasFocus
     const range = state.selection.main
+    const marks = marksAt(view, range.from)
     if (range.empty) {
-      callbacks.onSelection({ from: range.from, to: range.to, empty: true, focused, rect: null })
+      callbacks.onSelection({
+        from: range.from,
+        to: range.to,
+        empty: true,
+        focused,
+        rect: null,
+        marks,
+      })
       return
     }
     // 气泡贴在选区的**上沿**：贴下沿时多行选中会盖住正文
@@ -78,6 +187,7 @@ export function contextReporter(callbacks: ContextCallbacks): Extension {
       empty: false,
       focused,
       rect: coords ? { left: coords.left, top: coords.top, bottom: coords.bottom } : null,
+      marks,
     })
   }
 
@@ -122,7 +232,14 @@ export function contextReporter(callbacks: ContextCallbacks): Extension {
       destroy(): void {
         this.destroyed = true
         callbacks.onSlash(null)
-        callbacks.onSelection({ from: 0, to: 0, empty: true, focused: false, rect: null })
+        callbacks.onSelection({
+          from: 0,
+          to: 0,
+          empty: true,
+          focused: false,
+          rect: null,
+          marks: NO_MARKS,
+        })
       }
     },
   )
