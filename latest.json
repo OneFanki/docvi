@@ -1,6 +1,6 @@
 {
-  "version": "0.2.2",
+  "version": "0.3.0",
   "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
-  "notes": "表格与图片有了真正的可视化编辑：点表格直接开网格编辑器、行和列都能在任意位置插入；图片支持选择、粘贴与拖拽。切视图不再丢失阅读位置和撤销记录，删除线、勾选框、分割线等预览缺陷一并修好，并新增 macOS 与 Linux 安装包。",
+  "notes": "界面现在会实时跟随磁盘：AI 或 git 改动、增删文件后，正文、侧栏目录与全库搜索都自动跟上，不需要手动刷新。关于页新增 GitHub 入口与应用内自动更新，下载走系统代理。",
   "homepage": "https://github.com/OneFanki/docvi"
 }

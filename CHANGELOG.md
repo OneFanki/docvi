@@ -24,17 +24,77 @@
 
 ## [未发布]
 
+（暂无）
+
+## [0.3.0] - 2026-10-27
+
 ### 中文
 
-<!-- 摘要（2–5 条）写在这里。 -->
+- **文件在外部被改动后，界面会自己跟上**：AI 写盘、git 拉取、别的编辑器保存，界面随即显示最新内容；你有未保存的修改时不会被静默覆盖，而是让你选保留哪一份
+- **侧栏目录和搜索也实时跟上磁盘**：AI 新建、删除、改名文件，侧栏立刻多一行 / 少一行，全库搜索也能马上搜到，不用手动刷新
+- **新增「重新载入」入口**：底栏按钮、命令面板、F5 都能重读磁盘上的当前文档，文件监视失效时也有兜底
+- **单文件（未加入工作区的 .md）里的图片能正常显示了**：相对路径图片不再破图，AI 生成或从别处拿到的单篇文档可以直接打开阅读
+- **大图查看修好了三件事**：mermaid 图按原始尺寸渲染不再糊、背景不再透出正文、关闭按钮不再被系统窗口按钮压住
+- **关于页能查更新、直接下载安装了**：显示自己的 GitHub 地址；有新版本时应用内下载安装包并校验 SHA-256，通过后一键重启安装。下载走系统代理，需要挂代理才能访问 GitHub 的网络里也能用
+- **底栏窄窗口不再乱**：路径优先显示文件名、前面省略（悬停看完整路径），按钮多了可横向滚动且不占布局，切渲染模式时按钮也不会再被挤动
 
 #### 完整变更
 
+- **应用内自动更新**：从 Release API 取本机平台与架构对应的安装包，下载后校验 SHA-256，校验不过只删文件不执行；Windows 走静默升级脚本（等主进程退出→安装→重启），macOS / Linux 交给系统安装流程
+- **下载走 Chromium 网络栈**：`net.request` 而非 Node 全局 fetch——后者不读系统代理，在必须挂代理访问 GitHub 的网络里会表现为「点了更新，进度一动不动」
+- **重定向逐跳验域**：GitHub 的 release 下载会 302 到带签名的 CDN 地址，每一跳都校验是否落在可信域，不合规立即中止
+- **关于页**：新增项目主页入口、更新说明、下载进度条（带字节数与百分比）、取消下载、重启并安装；容器版明确提示由部署方升级
+- **底栏路径尾部优先**：长路径从前面省略、保留文件名，悬停提示显示完整路径
+- **底栏按钮区可横向滚动**：滚动条是自绘的悬浮条，绝对定位在底栏底边、悬停才显形，不占任何布局（原生滚动条会把 24px 撑高）
+- **底栏按钮不再位移**：会随模式增减的控件（脏标记、折行开关）移到模式按钮左边，模式按钮与固定宽度的操作按钮位置在切模式时保持不变
+- **外部改动自动同步**：主进程的文件监视事件真正接到界面（此前整条链路只差最后一跳，事件在发但没人订阅，文档模型里的「外部改动」处理是死代码）
+- **目录结构实时跟随磁盘**：每个打开着的工作区挂一棵递归监视（400ms 合并成一批），新建 / 删除 / 改名文档后侧栏自动重扫、搜索索引自动作废重建；已打开的文档按变化路径逐个对账，后台标签的正文也一起更新
+- **监视口径与扫描一致**：`.git` / `node_modules` / 素材目录里的写入不算内容变化（否则 `git status` 刷个 index 就会整树重扫）；图片等非 Markdown 文件不触发树的刷新
+- **删除已打开的文档会明说**：标签保留、内容停在旧版本，同时提示「已从磁盘删除」，不再让界面装作无事发生
+- **三种情形分别处理**：内容没变则什么都不做；缓冲区没有未保存修改则静默采用磁盘版本；有未保存修改则标记冲突并让你选择，绝不覆盖你刚敲的内容
+- **手动重新载入**：底栏「重新载入」按钮（读屏标签同步）、命令面板 `doc.reload`、F5；顺带重扫目录树，外部新增/删除的文件也会出现
+- **监视归属收口**：由应用按「当前文档」统一持有，切标签时跟着切换；切回已装载的文档先补读一次，避免看到后台期间的旧正文
+- **单文件图片**：主进程在读取单文件时登记它的所在目录并下发 `docvi://local/<id>` 资产前缀，相对路径图片走这条通道取值；URL 里不含任何磁盘路径
+- **解析基准修正**：单文件文档不再把绝对路径当作相对资源的基准（否则图片 URL 里会带 `C:/Users/…`）
+- **大图尺寸修正**：mermaid 产物写的是 `width="100%"`，进入灯箱后没有可参照的包含块，浏览器按 300px 兜底——800×949 的图被排成 300×356 再放大，必然糊。现在打开时按 viewBox 钉死真实尺寸
+- **大图可读下限**：图表打开时不会缩到比正文还小；拖拽与滚轮可以看细节，点「适应」时才真正装下全貌
+- **大图背景改为实底**：去掉半透明与背景模糊，正文不再从图后透出来
+- **大图拖拽不再选中文字**：拖拽期间禁用选区（旧实现加的那个类名从来没有对应样式，等于没生效）
+- **覆盖层避让窗口按钮**：大图查看、流程图 / 状态机 / 表关系图的全屏降级覆盖层，顶栏统一避开窗口按钮所在的那一条（Windows 在右上、macOS 在左上），最右侧的关闭按钮不再被系统的 ✕ 盖住
+
 ### English
 
-<!-- Summary (2–5 lines). -->
+- **The view now follows changes made on disk**: edits from an AI agent, a `git pull` or another editor show up right away. If you have unsaved edits they are never silently overwritten — you choose which version to keep
+- **The sidebar and search follow the disk too**: when an AI creates, deletes or renames a file, the tree gains or loses a row and full-text search finds it immediately — no manual refresh
+- **New "Reload" entry point**: a status-bar button, a command-palette command and F5 all re-read the current document, covering cases where file watching fails
+- **Relative images now work in standalone `.md` files** (documents not added as a workspace): no more broken images, so a single file from an AI or elsewhere can be read as-is
+- **The large view is fixed in three ways**: mermaid diagrams render at their real size instead of turning blurry, the backdrop no longer shows the page behind it, and the close button is no longer buried under the window's own buttons
+- **The About panel can check for updates and install them**: it links to the GitHub repo, and when a new version exists the app downloads the installer, verifies its SHA-256 and installs it on restart. Downloads use the system proxy, so they work on networks that need one to reach GitHub
+- **The status bar stays tidy in narrow windows**: the path keeps its filename and elides the front (hover for the full path), extra buttons scroll horizontally without taking layout space, and switching render mode no longer shoves the mode buttons around
 
 #### Full changes
+
+- **External changes now reach the UI**: the main-process file watcher was already emitting events and the preload bridge was implemented, but nothing in the renderer subscribed — the store's external-change path was dead code
+- **The tree tracks the disk live**: every open workspace gets a recursive watcher (batched over 400ms), so a created, deleted or renamed document rescans the tree and rebuilds the search index; open documents are reconciled by changed path, including those in background tabs
+- **Watcher scope matches the scan**: writes under `.git` / `node_modules` / asset folders are not content changes (otherwise a `git status` index refresh would rescan the whole tree), and non-Markdown files do not refresh the tree
+- **Deleting an open document is stated plainly**: the tab stays with its old content, plus a "deleted on disk" notice instead of pretending nothing happened
+- **Three cases handled separately**: identical content does nothing; a clean buffer silently adopts the disk version; a dirty buffer is marked as a conflict and you pick, so nothing you typed is lost
+- **Manual reload**: status-bar button, the `doc.reload` command and F5, which also rescans the tree so files added or removed outside the app show up
+- **Single owner for watching**: the app holds the watcher for the active document and moves it as tabs change; returning to an already-loaded document re-reads it once instead of showing stale text
+- **Standalone images**: reading a standalone file now registers its folder and hands back a `docvi://local/<id>` asset prefix, so relative images resolve; no disk path appears in the URL
+- **Resolution base fixed**: standalone documents no longer use their absolute path as the base for relative resources (which leaked `C:/Users/…` into image URLs)
+- **Large-view sizing**: mermaid emits `width="100%"`, which has no containing block inside the lightbox and falls back to 300px — an 800×949 diagram laid out at 300×356 and then upscaled, hence the blur. The size is now pinned from the viewBox
+- **Legibility floor**: diagrams never open smaller than they were in the document; drag and wheel for detail, and "fit" shows the whole picture
+- **Solid backdrop**: the lightbox is opaque, with no blur, so page content no longer shows through
+- **Dragging no longer selects text**: selection is suppressed while dragging (the class the old code added never had a matching style, so it did nothing)
+- **Overlays clear the window buttons**: the large view and the fullscreen fallbacks of flow diagrams / state machines / table graphs now push their top bar below the window-button strip (top-right on Windows, top-left on macOS), so the rightmost close button is no longer buried under the system ✕
+- **In-app updates**: the app picks the asset matching this machine's platform and architecture from the release API, downloads it, verifies SHA-256 and only then offers to install. A failed check deletes the file and never runs it. Windows upgrades silently via a detached script that waits for the app to exit; macOS and Linux hand the file to the system installer
+- **Downloads use the Chromium network stack**: `net.request` instead of Node's global `fetch`, which ignores the system proxy and would stall forever on networks that need one to reach GitHub
+- **Per-hop redirect validation**: GitHub's release download redirects to a signed CDN URL; every hop is checked against the trusted-domain list and aborted otherwise
+- **About panel**: project homepage link, release notes, a download progress bar with bytes and percentage, cancel, and "restart and install"; container builds say they are upgraded by the operator
+- **Status bar keeps the filename**: long paths elide from the front, with the full path on hover
+- **Status bar buttons scroll horizontally**: the scrollbar is self-drawn, absolutely positioned at the bar's bottom edge and only visible on hover, so it takes no layout space (a native one would push the 24px bar taller)
+- **Status bar buttons stop moving**: controls that appear or resize (dirty marker, wrap toggle) moved to the left of the mode buttons, so the mode buttons and fixed-width actions keep their position when switching modes
 
 ## [0.2.2] - 2026-10-27
 
