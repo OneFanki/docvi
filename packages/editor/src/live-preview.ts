@@ -58,6 +58,8 @@ export interface LivePreviewOptions {
   assetPrefix?: string
   /** 点击块内的「编辑表格」按钮：把源码区间交给宿主打开网格编辑器 */
   onEditTable?: (payload: { from: number; to: number; source: string }) => void
+  /** 点击图片块：把源码区间交给宿主打开图片编辑弹窗 */
+  onEditImage?: (payload: { from: number; to: number; source: string }) => void
 }
 
 /* ---------- 块级 Widget：复用同一条渲染管线 ---------- */
@@ -80,6 +82,7 @@ class RenderedBlockWidget extends WidgetType {
     to: number
     onEdit: (payload: { from: number; to: number; source: string }) => void
   } | null
+  readonly imageEdit: RenderedBlockWidget['tableEdit']
   readonly containerSyntax: PluginSyntaxDeclaration[]
   readonly docPath: string
   readonly assetPrefix: string | undefined
@@ -94,6 +97,7 @@ class RenderedBlockWidget extends WidgetType {
     containerSyntax: PluginSyntaxDeclaration[] = [],
     docPath = 'live-preview.md',
     assetPrefix?: string,
+    imageEdit: RenderedBlockWidget['tableEdit'] = null,
   ) {
     super()
     this.source = source
@@ -102,6 +106,7 @@ class RenderedBlockWidget extends WidgetType {
     this.frontmatter = frontmatter
     this.registry = registry
     this.tableEdit = tableEdit
+    this.imageEdit = imageEdit
     this.containerSyntax = containerSyntax
     this.docPath = docPath
     this.assetPrefix = assetPrefix
@@ -113,7 +118,9 @@ class RenderedBlockWidget extends WidgetType {
       other.fingerprint === this.fingerprint &&
       other.kind === this.kind &&
       other.tableEdit?.from === this.tableEdit?.from &&
-      other.tableEdit?.to === this.tableEdit?.to
+      other.tableEdit?.to === this.tableEdit?.to &&
+      other.imageEdit?.from === this.imageEdit?.from &&
+      other.imageEdit?.to === this.imageEdit?.to
     )
   }
 
@@ -135,6 +142,11 @@ class RenderedBlockWidget extends WidgetType {
      */
     if (this.tableEdit) {
       const edit = this.tableEdit
+      // 区间与原文一起写进 DOM：整块点击（见 tableBlockClickHandler）要读它，
+      // 靠 posAtDOM 反推在缩进/相邻块的情况下会算错
+      wrapper.dataset.tableFrom = String(edit.from)
+      wrapper.dataset.tableTo = String(edit.to)
+      wrapper.dataset.tableSource = this.source
       const button = document.createElement('button')
       button.type = 'button'
       button.className = 'cm-lp-table-edit'
@@ -147,6 +159,34 @@ class RenderedBlockWidget extends WidgetType {
         edit.onEdit({ from: edit.from, to: edit.to, source: this.source })
       })
       wrapper.appendChild(button)
+    }
+
+    /*
+     * 图片块：整块可点。
+     *
+     * 图片的「可编辑」入口不能只靠悬停按钮——图片本身占满整块，用户的
+     * 第一反应就是点图。按钮只为可发现性存在（悬停时出现在右上角），
+     * 点图片本体同样打开弹窗。
+     */
+    if (this.imageEdit) {
+      const edit = this.imageEdit
+      const open = (event: Event): void => {
+        event.preventDefault()
+        event.stopPropagation()
+        edit.onEdit({ from: edit.from, to: edit.to, source: this.source })
+      }
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'cm-lp-image-edit'
+      button.textContent = '编辑图片'
+      button.contentEditable = 'false'
+      button.addEventListener('mousedown', open)
+      wrapper.appendChild(button)
+      wrapper.addEventListener('mousedown', event => {
+        const target = event.target as HTMLElement | null
+        if (!target?.closest('img')) return
+        open(event)
+      })
     }
 
     let mount: DeclarativeMount | null = null
@@ -287,7 +327,7 @@ class BulletWidget extends WidgetType {
   }
 }
 
-/** 任务列表的勾选框：只做显示，勾选状态仍由文档里的 `[x]` 决定 */
+/** 任务列表的勾选框：点击即切换文档里的 `[ ]` / `[x]`（勾选状态由原文决定） */
 class TaskBoxWidget extends WidgetType {
   constructor(readonly checked: boolean) {
     super()
@@ -301,12 +341,20 @@ class TaskBoxWidget extends WidgetType {
     const box = document.createElement('span')
     box.className = this.checked ? 'cm-lp-taskbox is-checked' : 'cm-lp-taskbox'
     box.textContent = this.checked ? '☑' : '☐'
-    box.setAttribute('aria-hidden', 'true')
+    box.setAttribute('role', 'checkbox')
+    box.setAttribute('aria-checked', String(this.checked))
+    box.title = this.checked ? '标记为未完成' : '标记为完成'
     return box
   }
 
+  /**
+   * 必须让事件冒泡给 CM6。
+   *
+   * 返回 true（多数装饰部件的默认写法）时 CM6 会把部件内的事件当成「不是编辑器
+   * 的事件」忽略掉，点击处理器永远收不到 mousedown——表现为「勾选框点不动」。
+   */
   override ignoreEvent(): boolean {
-    return true
+    return false
   }
 }
 
@@ -392,11 +440,22 @@ function fingerprint(kind: string, source: string, extra = ''): string {
  * 构建结果：装饰本身 + 需要作为原子区间处理的隐藏标记。
  *
  * 分成两份而不是一份：`Decoration.replace` 只管显示，光标仍然可以落进被替换的
- * 区间；只有同时登记到 `atomicRanges` 才能让光标跳过它。
+ * 区间；只有同时登记到 `atoms`（`atomicRanges`）才能让光标跳过它。
  */
 interface BuildResult {
   decorations: DecorationSet
   atoms: DecorationSet
+}
+
+/**
+ * 装饰字段的值：在构建结果之上多一枚**粘性**输入法冻结标记。
+ *
+ * 冻结必须粘住整个组合期，而不是只作用于第一个事务：组合输入跨多个事务
+ * （每次按键一个新 transaction），只在首个事务带 effect 的话，后续按键仍会
+ * 重建装饰、销毁块级 Widget，文档高度继续塌陷。所以状态要存进字段值里。
+ */
+interface DecorationValue extends BuildResult {
+  frozen: boolean
 }
 
 /**
@@ -490,6 +549,9 @@ function buildDecorations(
           options.containerSyntax ?? [],
           options.docPath ?? 'live-preview.md',
           options.assetPrefix,
+          kind === 'image' && options.onEditImage
+            ? { from: startLine.from, to: endLine.to, onEdit: options.onEditImage }
+            : null,
         ),
       }),
     })
@@ -858,7 +920,17 @@ export function refreshDecorations(view: EditorView): void {
   view.dispatch({ effects: refreshEffect.of(true) })
 }
 
-/** IME 冻结开关：true = 清空装饰回到纯源码 */
+/**
+ * IME 冻结开关：true = 冻结（保留当前装饰、只跟随位置映射）。
+ *
+ * ⚠️ 早期实现是「清空装饰回到纯源码」，代价是**布局高度瞬间塌陷**：
+ * 表格、组件卡片这些块级 Widget 一消失，整篇文档高度骤降，`scrollTop`
+ * 超出新高度被浏览器夹到 0——用户看到的就是「输入法一打字，页面直接跳到顶部」。
+ * 触发条件很日常：想打 `/` 但没切英文，输入了顿号「、」，组合期一到位置就跳。
+ *
+ * 现在改成**只映射不清空**：装饰与 Widget 原地保留，位置随事务前移。
+ * 组合期间本来也不该重建（候选框才稳定），映射正好满足——既不重建，也不塌高。
+ */
 const freezeEffect = StateEffect.define<boolean>()
 
 /**
@@ -871,21 +943,45 @@ function decorationField(
   options: LivePreviewOptions,
   frontmatter: StateField<FrontmatterInfo | null>,
 ) {
-  return StateField.define<BuildResult>({
+  return StateField.define<DecorationValue>({
     create(state) {
       // 初始没有 viewport 信息：先按全文构建（文档第一次挂载时视口覆盖全文）
       const info = state.field(frontmatter, false) ?? null
-      return buildDecorations(state, options, info)
+      return { ...buildDecorations(state, options, info), frozen: false }
     },
     update(value, tr) {
-      const frozen = tr.effects.find(effect => effect.is(freezeEffect))?.value
-      if (frozen === true) return { decorations: Decoration.none, atoms: Decoration.none }
+      const freezeSignal = tr.effects.find(effect => effect.is(freezeEffect))?.value
+
+      /*
+       * 冻结 = **保留现有装饰，只做位置映射**。
+       *
+       * 不能返回 `Decoration.none`：块级 Widget 消失会让文档高度瞬间塌陷，
+       * `scrollTop` 被夹到 0，用户看到「打字时页面跳到顶部」（实测由输入法
+       * 组合触发：想打 `/` 却没切英文，输入了「、」）。
+       *
+       * 冻结必须是**粘性**的：组合输入跨多个事务，只在第一个事务带 signal
+       * 的话，后续按键仍会重建装饰、继续销毁 Widget。信号只在解冻时重建一次。
+       */
+      if (freezeSignal === true) {
+        return {
+          decorations: value.decorations.map(tr.changes),
+          atoms: value.atoms.map(tr.changes),
+          frozen: true,
+        }
+      }
+      if (value.frozen && freezeSignal !== false) {
+        return {
+          decorations: value.decorations.map(tr.changes),
+          atoms: value.atoms.map(tr.changes),
+          frozen: true,
+        }
+      }
 
       const refreshed = tr.effects.some(effect => effect.is(refreshEffect))
       const info = tr.state.field(frontmatter, false) ?? null
 
       // 文档/选区变了就重建；否则只有显式刷新（主题切换、解冻）时才重建
-      if (!tr.docChanged && !tr.selection && !refreshed && frozen !== false) return value
+      if (!tr.docChanged && !tr.selection && !refreshed && freezeSignal !== false) return value
 
       /*
        * **永远按全文构建，不做视口窗口化。**
@@ -900,7 +996,7 @@ function decorationField(
        * 重建，滚动并不重建。省下的只有「滚动到未构建区域」这一种情况，代价却是
        * 一类很难复现的渲染缺失。删除。
        */
-      return buildDecorations(tr.state, options, info)
+      return { ...buildDecorations(tr.state, options, info), frozen: false }
     },
     provide: field => [
       EditorView.decorations.from(field, value => value.decorations),
@@ -957,7 +1053,87 @@ function compositionGuard(): Extension {
 export function createLivePreview(options: LivePreviewOptions): Extension {
   const frontmatter = frontmatterField()
   const decorations = decorationField(options, frontmatter)
-  return [frontmatter, decorations, compositionGuard(), frontmatterClickHandler()]
+  return [
+    frontmatter,
+    decorations,
+    compositionGuard(),
+    frontmatterClickHandler(),
+    taskBoxClickHandler(),
+    tableBlockClickHandler(options),
+  ]
+}
+
+/**
+ * 点击表格块 = 直接开网格编辑器。
+ *
+ * 之前只有右上角一枚小按钮是入口，用户的第一反应是点表格本身，结果只是把光标
+ * 放进块里、表格退回源码——看起来像「点了没反应」。表格是结构化内容，点它想
+ * 做的事就是改它，所以表格本体整块都作为入口。
+ *
+ * ⚠️ 但**只认表格本体**（`.cm-lp-block--table table` 之内）：块的外框有上下
+ * 各 0.6em 的留白，那是块与块之间的间距。用户点在表格下方那圈空白里，意图
+ * 通常是「在表格后面继续写」，弹窗会打断他——那里必须留给 CM6 落光标。
+ *
+ * 区间从 widget 写进 DOM 的 dataset 取，不用 `posAtDOM` + 向下扫行：
+ * 后者遇到「表格后面紧跟另一个 `|` 开头的段落」或缩进差异就会算错区间，
+ * 而 widget 建立时本来就知道准确区间。
+ *
+ * `mousedown` 而不是 `click`：点击会让 CM6 把光标放进块区间，块装饰随即撤除，
+ * 到 click 阶段表格 DOM 已经不存在了。
+ */
+function tableBlockClickHandler(options: LivePreviewOptions): Extension {
+  return EditorView.domEventHandlers({
+    mousedown(event) {
+      const onEdit = options.onEditTable
+      if (!onEdit) return false
+      const target = event.target as HTMLElement | null
+      // 按钮自己处理过（且 stopPropagation），这里只兜底「点在表格本体上」
+      if (target?.closest('.cm-lp-table-edit')) return false
+      // 必须是表格本体（table 之内）：块外框的留白要留给「插入正文」
+      if (!target?.closest('.cm-lp-block--table table')) return false
+      const wrapper = target.closest<HTMLElement>('.cm-lp-block--table')
+      const from = Number(wrapper?.dataset.tableFrom)
+      const to = Number(wrapper?.dataset.tableTo)
+      if (!wrapper || !Number.isFinite(from) || !Number.isFinite(to)) return false
+      event.preventDefault()
+      const source = wrapper.dataset.tableSource ?? ''
+      onEdit({ from, to, source })
+      return true
+    },
+  })
+}
+
+/**
+ * 勾选框点击 = 改文档里的 `[ ]` / `[x]`。
+ *
+ * 实时预览里勾选框是**替换装饰**画出来的假控件，它自己没有状态——勾选状态的
+ * 唯一真相是原文。所以点击必须回来改文本：把该行 TaskMarker 区间换成另一种写法，
+ * 装饰随文档重建，方框才会真的变。
+ *
+ * 为什么用 mousedown 而不是 click：CM6 的鼠标按下会先设选区并可能触发块装饰
+ * 撤除（光标进入块区间），click 阶段部件已经被销毁，事件就丢了。
+ */
+function taskBoxClickHandler(): Extension {
+  return EditorView.domEventHandlers({
+    mousedown(event, view) {
+      const target = (event.target as HTMLElement | null)?.closest('.cm-lp-taskbox')
+      if (!target) return false
+      event.preventDefault()
+
+      const coords = view.posAtCoords({ x: event.clientX, y: event.clientY })
+      if (coords === null) return true
+      const line = view.state.doc.lineAt(coords)
+      // TaskMarker 只在行首的 `- [ ]` 位置；整行扫一遍比依赖 widget 的坐标更稳
+      const match = /\[\s*([ xX]?)\s*\]/.exec(line.text)
+      if (!match || match.index === undefined) return true
+      const checked = /[xX]/.test(match[1] ?? '')
+      const from = line.from + match.index
+      view.dispatch({
+        changes: { from, to: from + match[0].length, insert: checked ? '[ ]' : '[x]' },
+      })
+      return true
+    },
+  })
 }
 
 /**

@@ -111,6 +111,13 @@
 
 .cm-lp-block--table .cm-lp-block__body {
   overflow-x: auto;
+  /*
+   * 顶部让出一条横带放「编辑表格」按钮（按钮 22px + 上下各 6px）。
+   *
+   * 为什么不用负定位把按钮浮到块外：块级 Widget 的高度由自身盒尺寸决定，
+   * 浮到块外的那部分不进入记账，滚到视口顶端时会被滚动容器裁掉。
+   */
+  padding-top: 30px;
 }
 
 /*
@@ -118,6 +125,13 @@
  *
  * 默认半透明、鼠标进块才完全显形：常驻高不透明度会让每张表都多一个按钮，
  * 阅读长文档时反而更吵。块本身要 position: relative 才能把按钮钉在右上角。
+ *
+ * ⚠️ 定位必须在块**内部**（`top` 为正）。原先写 `top: -9px` 让按钮浮到块外，
+ * 表格滚到视口顶端时它会被滚动容器裁掉、或是钻到标签栏下面——实测按钮
+ * top = -270 而滚动容器 top = 83，完全不可见也不可点。
+ *
+ * 按钮需要的那条横带由 `.cm-lp-block__body` 的 `padding-top` 让出来，
+ * 所以按钮**不会压住任何表头文字**：视觉上它在表格上方那条留白里。
  */
 .cm-lp-block--table {
   position: relative;
@@ -125,8 +139,8 @@
 
 .cm-lp-table-edit {
   position: absolute;
-  top: -9px;
-  right: 4px;
+  top: 6px;
+  right: 6px;
   z-index: 2;
   height: 22px;
   padding: 0 9px;
@@ -159,9 +173,63 @@
   color: var(--dv-ed-md-link);
 }
 
+/*
+ * 为按钮在表头右侧留出位置：按钮改成块内定位后会压住最后一列表头文字。
+ * 只加右内边距、不改结构，表格布局不受影响（表头文字本来就有余量）。
+ */
+.cm-lp-block--table .cm-lp-block__body thead th:last-child {
+  padding-right: 76px;
+}
+
+/*
+ * 图片块：整块可点开弹窗，按钮只为可发现性存在。
+ *
+ * 与表格按钮同一套视觉（悬停浮在右上角），但点图片本体也打开弹窗——
+ * 用户的第一反应就是点图，要求他先找到按钮才算「能编辑」不合理。
+ */
+.cm-lp-block--image {
+  position: relative;
+}
+
+/* 与表格同一套做法：顶部让出一条横带给按钮，按钮不压图片本身 */
+.cm-lp-block--image .cm-lp-block__body {
+  padding-top: 30px;
+}
+
+.cm-lp-image-edit {
+  position: absolute;
+  /* 与表格按钮同理：必须在块内，出块会被滚动容器裁掉（见 .cm-lp-table-edit 的说明） */
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--dv-ed-panel-border);
+  border-radius: 999px;
+  background: var(--dv-ed-panel);
+  color: var(--dv-ed-text);
+  font: inherit;
+  font-size: 11px;
+  line-height: 20px;
+  cursor: pointer;
+  opacity: 0.42;
+  transition: opacity 0.12s ease;
+}
+
+.cm-lp-block--image:hover .cm-lp-image-edit,
+.cm-lp-image-edit:focus-visible {
+  opacity: 1;
+}
+
+.cm-lp-image-edit:hover {
+  border-color: var(--dv-ed-md-link);
+  color: var(--dv-ed-md-link);
+}
+
 .cm-lp-block--image .cm-lp-block__body img {
   max-height: 420px;
   object-fit: contain;
+  cursor: pointer;
 }
 
 /* 行内标记：Live Preview 隐藏标记符后，用样式表达语义 */
@@ -186,6 +254,17 @@
   margin-right: 0.35em;
   color: var(--dv-ed-md-marker);
   font-size: 1.02em;
+  /*
+   * 勾选框是真的能点：手型光标是这个能力唯一的视觉提示。
+   * 键盘可达性由 CM6 的光标移动保证（用方向键走到方框处按回车无效，
+   * 但 Backspace 删除方框也同样改文档——两种编辑方式都成立）。
+   */
+  cursor: pointer;
+  user-select: none;
+}
+
+.cm-lp-taskbox:hover {
+  color: var(--dv-ed-md-link);
 }
 
 .cm-lp-taskbox.is-checked {

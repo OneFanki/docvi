@@ -1,4 +1,4 @@
-import { EditorState, Compartment, type Extension } from '@codemirror/state'
+import { EditorState, Compartment, StateEffect, type Extension } from '@codemirror/state'
 import {
   EditorView,
   keymap,
@@ -20,6 +20,7 @@ import { headingBadge } from './heading-badge.ts'
 import { contextReporter, type ContextCallbacks } from './context.ts'
 import { emptyLineHint } from './hint.ts'
 import { leadingWhitespace } from './leading-whitespace.ts'
+import { planInlineWrap } from './inline-wrap.ts'
 
 /**
  * CM6 装配。
@@ -232,6 +233,22 @@ export interface CreateEditorOptions {
   context?: ContextCallbacks
   /** 点击「编辑表格」按钮：宿主打开网格编辑器 */
   onEditTable?: (payload: { from: number; to: number; source: string }) => void
+  /** 点击图片块：宿主打开图片编辑弹窗 */
+  onEditImage?: (payload: { from: number; to: number; source: string }) => void
+  /**
+   * 粘贴 / 拖入图片文件：宿主负责把文件落到磁盘并插入 Markdown。
+   *
+   * `pos` 是插入位置（粘贴时为光标，拖放时为落点）；编辑器自身不碰文件系统。
+   */
+  onImageFiles?: (files: File[], pos: number) => void
+  /**
+   * 复用的编辑器状态（含撤销栈与选区）。
+   *
+   * 只有**文档内容与 `doc` 一致**时才会被采用：缓冲区可能在编辑器卸载期间
+   * 被外部改动（磁盘重载、冲突处理），带着旧状态回来会让界面显示旧内容。
+   * 不一致时静默退回「按 doc 新建」——撤销栈丢了总比显示错内容安全。
+   */
+  state?: EditorState
   /** 源码模式是否折行（默认 true）；实时预览恒折行，不受此项影响 */
   wrap?: boolean
 }
@@ -240,6 +257,8 @@ export interface EditorHandle {
   view: EditorView
   getText(): string
   setText(text: string): void
+  /** 当前状态快照：视图销毁后带着撤销栈一起回来 */
+  getState(): EditorState
   setMode(mode: 'live' | 'source'): void
   /** 文档主题变了：块级 Widget 的配色来自文档主题，需要重建 */
   refresh(): void
@@ -262,6 +281,13 @@ export interface EditorHandle {
    * 是几十行），按滚动百分比同步必然越滚越偏。
    */
   getTopLine(): number
+  /**
+   * 滚到指定 0-based 源行（该行贴到视口顶部）。
+   *
+   * 切换视图时用「源行」而不是像素恢复位置：两个视图的排版高度完全不同
+   * （源码一行表格在阅读态可能是几十行），像素值搬过去只会落错地方。
+   */
+  scrollToLine(line: number): void
   focus(): void
   destroy(): void
   /** 当前选区（已归一化：from <= to） */
@@ -369,61 +395,19 @@ function toggleLinePrefix(view: EditorView, kind: LinePrefixKind): void {
 }
 
 /**
- * 判断选区是否已被同一标记包裹。
+ * 用标记包裹选区（加粗 / 斜体 / 删除线 / 行内代码）。
  *
- * 单字符标记（`*` / `` ` ``）要额外排除「多字符标记的一部分」：
- * `**加粗**` 里 from-1 是 `*`，若不检查再前一个字符，点斜体就会把加粗拆成斜体。
- */
-function wrappedBy(doc: string, from: number, to: number, marker: string): boolean {
-  const before = doc.slice(Math.max(0, from - marker.length), from)
-  const after = doc.slice(to, to + marker.length)
-  if (before !== marker || after !== marker) return false
-  if (marker.length !== 1) return true
-  // 前/后再紧贴一个同字符 → 属于更长的标记（** / __ 等），不当作本标记
-  return doc[from - 2] !== marker && doc[to + 1] !== marker
-}
-
-/**
- * 用标记包裹选区（加粗 / 斜体）。
- *
- * 三个细节：
- *  1. 选区已被同一标记包裹 → **取消**包裹（同一个键来回切，不需要记状态）；
- *  2. 无选区时插入一对标记并把光标放在中间，用户接着打字即可；
- *  3. 反向选区（anchor > head）要归一化，否则插入位置会落到选区外侧。
+ * 具体规划在 `inline-wrap.ts`：这里只负责把结果 dispatch 出去。
+ * 为什么要抽出去——选区的**尾部空白**（双击选词、拖选整行都会带上）会让
+ * CommonMark 判定强调语法不成立，标记原样显示；纯函数那份逻辑守住了这个边界，
+ * 也能被 node 单测直接覆盖。
  */
 function toggleWrap(view: EditorView, marker: string): boolean {
-  const { state } = view
-  const range = state.selection.main
-  const from = Math.min(range.from, range.to)
-  const to = Math.max(range.from, range.to)
-  const doc = state.doc.toString()
-  const len = marker.length
-
-  if (from !== to && wrappedBy(doc, from, to, marker)) {
-    view.dispatch({
-      changes: [
-        { from: from - len, to: from },
-        { from: to, to: to + len },
-      ],
-      selection: { anchor: from - len, head: to - len },
-    })
-    return true
-  }
-
-  if (from === to) {
-    view.dispatch({
-      changes: { from, insert: `${marker}${marker}` },
-      selection: { anchor: from + len },
-    })
-    return true
-  }
-
+  const range = view.state.selection.main
+  const plan = planInlineWrap(view.state.doc.toString(), range.from, range.to, marker)
   view.dispatch({
-    changes: [
-      { from, insert: marker },
-      { from: to, insert: marker },
-    ],
-    selection: { anchor: from + len, head: to + len },
+    changes: plan.changes,
+    selection: { anchor: plan.selection.from, head: plan.selection.to },
   })
   return true
 }
@@ -440,6 +424,7 @@ export function createEditor(options: CreateEditorOptions): EditorHandle {
       ...(options.docPath ? { docPath: options.docPath } : {}),
       ...(options.assetPrefix ? { assetPrefix: options.assetPrefix } : {}),
       ...(options.onEditTable ? { onEditTable: options.onEditTable } : {}),
+      ...(options.onEditImage ? { onEditImage: options.onEditImage } : {}),
     }),
     /*
      * 标题悬浮徽标只在实时预览出现：源码模式的承诺是「所见即文件」，
@@ -491,6 +476,41 @@ export function createEditor(options: CreateEditorOptions): EditorHandle {
 
   if (options.placeholder) extensions.push(cmPlaceholder(options.placeholder))
 
+  /*
+   * 粘贴 / 拖入图片：拦下事件交给宿主落盘，编辑器不碰文件系统。
+   *
+   * 为什么必须在这里拦：浏览器的默认行为是把图片按「无路径的 File」塞进
+   * contenteditable（或干脆什么都不做），文档里永远拿不到可用的图片链接。
+   * 宿主拿到 File[] 后负责写进工作区 assets/ 并回填 Markdown。
+   */
+  if (options.onImageFiles) {
+    const onImageFiles = options.onImageFiles
+    extensions.push(
+      EditorView.domEventHandlers({
+        paste(event, view) {
+          const files = Array.from(event.clipboardData?.files ?? []).filter(file =>
+            file.type.startsWith('image/'),
+          )
+          if (!files.length) return false
+          event.preventDefault()
+          onImageFiles(files, view.state.selection.main.head)
+          return true
+        },
+        drop(event, view) {
+          const files = Array.from(event.dataTransfer?.files ?? []).filter(file =>
+            file.type.startsWith('image/'),
+          )
+          if (!files.length) return false
+          event.preventDefault()
+          // 拖放落点：光标跟着鼠标走，插图位置才符合直觉
+          const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
+          onImageFiles(files, pos ?? view.state.selection.main.head)
+          return true
+        },
+      }),
+    )
+  }
+
   if (options.onChange || options.onSave) {
     extensions.push(
       EditorView.updateListener.of(update => {
@@ -518,14 +538,39 @@ export function createEditor(options: CreateEditorOptions): EditorHandle {
     )
   }
 
-  const view = new EditorView({
-    state: EditorState.create({ doc, extensions }),
-    parent,
-  })
+  /*
+   * 状态复用要过一道内容校验：`doc` 与状态里的正文一致才复用。
+   *
+   * 编辑器卸载期间缓冲区可能被外部改动（磁盘重载、冲突处理把编辑器内容换掉），
+   * 带着旧状态回来会显示旧内容——那比丢撤销栈严重得多。
+   */
+  const reusable = options.state && options.state.doc.toString() === doc ? options.state : null
+
+  /*
+   * ⚠️ 复用状态时**必须用新扩展重配**，不能直接把旧 state 交给新 EditorView。
+   *
+   * `EditorState` 里装的是**旧配置**：`contextReporter` 的 onSlash / onSelection、
+   * `onEditTable`、`onImageFiles`、`onChange`、`onSave`、`onScroll` 全部是旧组件
+   * 实例的闭包。切一次视图后组件实例是新的，旧闭包仍写进**已销毁实例**的 ref：
+   *  - 斜杠菜单永远不弹（状态写给了没人看的 ref）；
+   *  - 气泡工具条不再更新（选区格式读不到）；
+   *  - 表格/图片的可视化入口点了没反应。
+   * 症状是「切过视图之后这些功能就坏了」，而代码看起来完全正常，极难自查。
+   *
+   * `StateEffect.reconfigure` 正是为这种场景设计的：文档、选区、以及与新旧配置
+   * 都存在的 state field（`history` 就在其中）都会保留，只有扩展换成新的。
+   * 撤销栈因此照样能带回来。
+   */
+  const baseState = reusable
+    ? reusable.update({ effects: StateEffect.reconfigure.of(extensions) }).state
+    : EditorState.create({ doc, extensions })
+
+  const view = new EditorView({ state: baseState, parent })
 
   return {
     view,
     getText: () => view.state.doc.toString(),
+    getState: () => view.state,
     setText(text) {
       // 全量替换：外部重载（文件被外部修改）走这条，保留撤销栈里的一次记录
       const current = view.state.doc.toString()
@@ -567,6 +612,14 @@ export function createEditor(options: CreateEditorOptions): EditorHandle {
       // scrollTop 是相对滚动容器内容顶部的偏移，lineBlockAtHeight 也按同一坐标系
       const block = view.lineBlockAtHeight(view.scrollDOM.scrollTop)
       return view.state.doc.lineAt(block.from).number - 1
+    },
+    scrollToLine(line) {
+      const total = view.state.doc.lines
+      const number = Math.max(1, Math.min(total, Math.round(line) + 1))
+      const target = view.state.doc.line(number)
+      view.dispatch({
+        effects: EditorView.scrollIntoView(target.from, { y: 'start', yMargin: 0 }),
+      })
     },
     focus: () => view.focus(),
     destroy: () => view.destroy(),
