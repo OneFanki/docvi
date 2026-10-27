@@ -82,21 +82,27 @@ const MARKDOWN_ITEMS: InsertItem[] = [
     label: '任务清单',
     group: 'markdown',
     keywords: 'task todo checklist 任务 待办',
-    render: () => ({ text: '- [ ] 待办项\n', cursorOffset: 6 }),
+    // 不预填「待办项」：用户要的是空格子直接写自己的事，先删再写是纯多余动作。
+    // 光标落在方框之后，敲字即是这一项的内容。
+    render: () => ({ text: '- [ ] \n', cursorOffset: 6 }),
   },
   {
     id: 'hr',
     label: '分割线',
     group: 'markdown',
     keywords: 'hr divider 分割线 分隔',
+    // 紧贴上一行文字会变成 setext 标题下划线，必须独立成块
+    needsBlankBefore: true,
     render: () => ({ text: '---\n' }),
   },
   {
     id: 'image',
     label: '图片',
     group: 'markdown',
-    keywords: 'image img 图片',
-    render: () => ({ text: '![描述](图片路径)\n', cursorOffset: 2 }),
+    keywords: 'image img 图片 粘贴 拖拽',
+    // 插入的是打开图片弹窗的占位块：可视化选择文件 / 本地路径 / 网络地址
+    form: true,
+    render: () => ({ text: '![]()\n', cursorOffset: 2 }),
   },
 ]
 

@@ -28,6 +28,14 @@ export interface InsertItem {
    * 而不是插完再自己发现。声明式富组件目前全是手写 YAML，一律没有。
    */
   form?: boolean
+  /**
+   * 前面必须空一行才能成立。
+   *
+   * 分割线尤其如此：`---` 紧贴上一行文字时不是分割线，而是**上一行的 setext
+   * 标题下划线**（CommonMark 规则），整段会被折成一级标题，分割线根本不出现。
+   * 用户在正文末行直接打 `/hr` 是最自然的操作，所以由插入规划自动补空行。
+   */
+  needsBlankBefore?: boolean
   /** 生成插入文本；`cursorOffset` 是插入后光标相对插入块的偏移 */
   render: (ctx: InsertContext) => { text: string; cursorOffset?: number }
 }
@@ -102,6 +110,23 @@ export function componentInsertion(doc: string, fragment: string): { at: number;
 }
 
 /**
+ * 插入点前面是否需要补一个空行。
+ *
+ * 判据是「插入点所在行之前紧邻的那一行有内容」。斜杠命令只在一整行只有
+ * `/词` 时触发，所以插入点就是行首——上一行有字就意味着块会与它粘连。
+ */
+function needsBlankLine(doc: string, from: number): boolean {
+  const eol = doc.includes('\r\n') ? '\r\n' : '\n'
+  const before = doc.slice(0, from)
+  if (!before) return false
+  // 已经以空行结尾（或文档开头）就不必再补
+  if (before.endsWith(`${eol}${eol}`) || before === eol) return false
+  const previous = before.slice(0, before.length - eol.length)
+  const lineStart = Math.max(previous.lastIndexOf('\n'), previous.lastIndexOf('\r'))
+  return previous.slice(lineStart + 1).trim() !== ''
+}
+
+/**
  * 把一次斜杠插入翻译成文本变更。
  *
  * 富组件走**两个变更、一次事务**：用户按一次 Ctrl+Z 就整个撤销，
@@ -126,9 +151,12 @@ export function planInsert(
     delta = insertion.insert.length
   }
 
-  changes.push({ from, to, insert: rendered.text })
+  // 需要独立成块的项（分割线）：紧贴上一行会被解析成上一行的下划线，补一个空行
+  const eol = doc.includes('\r\n') ? '\r\n' : '\n'
+  const prefix = item.needsBlankBefore && needsBlankLine(doc, from) ? eol : ''
+  changes.push({ from, to, insert: prefix + rendered.text })
   const offset = rendered.cursorOffset ?? rendered.text.length
-  return { changes, caretAfter: from + delta + offset }
+  return { changes, caretAfter: from + delta + prefix.length + offset }
 }
 
 /**
@@ -149,7 +177,12 @@ export function insertedBlockRange(
   const shift = plan.changes
     .slice(0, -1)
     .reduce((acc, change) => acc + change.insert.length - (change.to - change.from), 0)
-  const from = body.from + shift
-  const text = body.insert.replace(/(?:\r?\n)+$/, '')
+  /*
+   * 首行的空行前缀（分割线这类需要独立成块的项会带）不属于块内容：
+   * 它只是为了让块与上一段分开，算进区间会把区间起点落到上一行的行尾。
+   */
+  const leading = /^(?:\r?\n)+/.exec(body.insert)?.[0]?.length ?? 0
+  const from = body.from + shift + leading
+  const text = body.insert.slice(leading).replace(/(?:\r?\n)+$/, '')
   return { from, to: from + text.length, text }
 }

@@ -150,3 +150,72 @@ test('insertedBlockRange：富组件插入时，区间要跨过新写入的文�
   assert.equal(next.slice(range.from, range.to), range.text)
   assert.match(range.text, /^<at-timeline/)
 })
+
+/* ---------- 块独立性（分割线不能贴上一行） ---------- */
+
+test('分割线紧贴上一行文字时自动补空行', () => {
+  const doc = '# 标题\n正文\n/hr'
+  const hrItem = {
+    id: 'hr',
+    label: '分割线',
+    group: 'markdown',
+    keywords: '',
+    needsBlankBefore: true,
+    render: () => ({ text: '---\n' }),
+  }
+  const plan = planInsert(doc, hrItem, 7, 10, null)
+  assert.equal(plan.changes.length, 1)
+  assert.equal(plan.changes[0]?.insert, '\n---\n')
+})
+
+test('前面已经是空行时不重复补', () => {
+  const doc = '# 标题\n\n/hr'
+  const hrItem = {
+    id: 'hr',
+    label: '分割线',
+    group: 'markdown',
+    keywords: '',
+    needsBlankBefore: true,
+    render: () => ({ text: '---\n' }),
+  }
+  const plan = planInsert(doc, hrItem, 6, 9, null)
+  assert.equal(plan.changes[0]?.insert, '---\n')
+})
+
+test('文档开头插入分割线不补空行', () => {
+  const doc = '/hr'
+  const hrItem = {
+    id: 'hr',
+    label: '分割线',
+    group: 'markdown',
+    keywords: '',
+    needsBlankBefore: true,
+    render: () => ({ text: '---\n' }),
+  }
+  const plan = planInsert(doc, hrItem, 0, 3, null)
+  assert.equal(plan.changes[0]?.insert, '---\n')
+})
+
+test('补的空行不计入块区间（否则回写会粘连上一行）', () => {
+  const hrItem = {
+    id: 'hr',
+    label: '分割线',
+    group: 'markdown',
+    keywords: '',
+    needsBlankBefore: true,
+    render: () => ({ text: '---\n' }),
+  }
+  const doc = '正文\n/hr'
+  const plan = planInsert(doc, hrItem, 3, 6, null)
+  const range = insertedBlockRange(plan)
+  assert.ok(range)
+  assert.equal(range.text, '---')
+  // 区间起点必须在补出来的空行之后
+  assert.equal(range.from, 3 + 1)
+})
+
+test('不需要独立成块的项不加空行', () => {
+  const doc = '正文\n/表'
+  const plan = planInsert(doc, plainItem, 3, 5, null)
+  assert.equal(plan.changes[0]?.insert, 'TABLE')
+})

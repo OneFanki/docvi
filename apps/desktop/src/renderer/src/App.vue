@@ -17,6 +17,16 @@ import { useServiceStore } from './stores/service'
 import { useI18n, applyExternalLocale, migrateLegacyLocale } from './lib/i18n'
 import { isReadOnlyHost, isWebHost } from './lib/host'
 import {
+  createHandoff,
+  forgetDocument,
+  invalidateState,
+  leaveView,
+  peekAnchor,
+  rememberState,
+  stateOf,
+  takeAnchor,
+} from './lib/view-handoff'
+import {
   onRouteChange,
   pushDocUrl,
   readBranch,
@@ -125,6 +135,39 @@ const docMode = ref<DocMode>('read')
 const editing = computed(() => docMode.value !== 'read')
 /** 分屏时左窗占比（0.3–0.7，拖动分隔条调整） */
 const splitRatio = ref(0.5)
+
+/**
+ * 视图切换要保管的两样东西：阅读位置锚点（源行）与编辑器状态（含撤销栈）。
+ *
+ * 为什么不能用 scrollTop：阅读态与编辑态的排版高度完全不同（源码里一行表格
+ * 渲染后可能是几十行），把像素值搬过去必然落错地方。源行是唯一稳定的坐标系——
+ * 切换前记下「视口顶部是第几行」，切换后在新视图里把同一行滚到顶部。
+ *
+ * 为什么必须保管 EditorState：它承载 CM6 的撤销栈。编辑器实例随模式切换销毁，
+ * 状态不留下来，「没保存、切个视图就撤不回」——用户会以为改动被吞了。
+ *
+ * 时序规则（锚点用一次即清、外部改动作废快照）收在 `lib/view-handoff.ts`，
+ * 那里是纯函数、有单测覆盖。
+ */
+const handoff = createHandoff()
+/** 供模板读取的响应式计数器：handoff 内部的 Map 不是响应式的，靠它触发重渲染 */
+const handoffEpoch = ref(0)
+function touched(): void {
+  handoffEpoch.value += 1
+}
+
+/** 待恢复的源行（编辑器挂载时读一次；阅读侧渲染完成后由 onRendered 消费） */
+const restoreAnchor = computed(() => {
+  void handoffEpoch.value
+  return peekAnchor(handoff)
+})
+
+/** 当前文档的编辑器状态快照（含撤销栈）；没有则为 null */
+const currentEditorState = computed(() => {
+  void handoffEpoch.value
+  const path = activeRef.value?.absolutePath ?? ''
+  return path ? stateOf(handoff, path) : null
+})
 
 /* ---------- 当前标签 / 当前文档 ---------- */
 
@@ -1328,6 +1371,14 @@ async function closeTab(id: string): Promise<boolean> {
   }
   const closingActive = tabs.activeId === id
   tabs.close(id)
+  /*
+   * 标签关掉就释放它的编辑器状态（撤销栈）与锚点。
+   * 不释放的话，同一篇文档在本次会话里反复开关会持续堆 EditorState——每个都
+   * 含完整 history，长会话下是实打实的内存泄漏；而且重新打开时旧撤销栈还会
+   * 复活，用户按 Ctrl+Z 会撤到「上次关闭前」的内容，看起来像文件被改了。
+   */
+  if (ref) forgetDocument(handoff, ref.absolutePath)
+  touched()
   if (closingActive) {
     const next = tabs.activeTab
     if (next) await activateTab(next.id)
@@ -1451,6 +1502,15 @@ function onRendered(payload: { path: string; title: string }): void {
   const ref = activeRef.value
   if (!tab || !ref) return
   if (payload.title) tabs.setDocTitle(tab.id, payload.title)
+  /*
+   * 两种恢复来源，优先级分明：
+   *  1. 刚切过视图 → 按源行落位（用户「正在看的内容」必须还在视野里）；
+   *  2. 否则按标签记忆的像素位置（同视图内切回来）。
+   * 锚点在 takeAnchor 里取完即清：渲染完毕会触发多次（高亮 / Mermaid / 组件
+   * 挂载各一次），留着会被重放成「页面老是弹回原处」。
+   */
+  const anchor = takeAnchor(handoff)
+  if (anchor !== null && readerRef.value?.scrollToSourceLine(anchor)) return
   readerRef.value?.restoreScroll(ref.scrollY)
 }
 
@@ -1458,20 +1518,89 @@ function onRendered(payload: { path: string; title: string }): void {
 function onEditorSaved(payload: { text: string }): void {
   const tab = activeTab.value
   if (!tab) return
-  const h1 = /^#s+(.+)$/m.exec(payload.text)?.[1]?.trim()
+  /*
+   * 保存后作废该文档的编辑器快照（含撤销栈）。
+   *
+   * 快照里的撤销栈记着「保存前」的步骤：留着它，用户切走再回来按 Ctrl+Z 会撤回
+   * 已落盘的内容，脏标记又从「已保存」跳回「未保存」——正是用户报的
+   * 「切视图后有时变回未保存」。
+   */
+  const path = activeRef.value?.absolutePath
+  if (path) {
+    invalidateState(handoff, path)
+    touched()
+  }
+  // ⚠️ 必须是 `\s`：写成 `s` 会匹配「#sss…」这种字面量，永远取不到真标题
+  const h1 = /^#\s+(.+)$/m.exec(payload.text)?.[1]?.trim()
   if (h1) tabs.setDocTitle(tab.id, h1)
+}
+
+/** 记住编辑器状态（含撤销栈）：切视图后再进来，Ctrl+Z 仍然生效 */
+function rememberEditorState(payload: { absolutePath: string; state: unknown }): void {
+  rememberState(handoff, payload?.absolutePath ?? '', payload?.state ?? null)
+  touched()
+}
+
+/** 编辑器已按锚点落位：清掉锚点，避免下一次普通渲染再被拽回原处 */
+function consumeAnchor(): void {
+  takeAnchor(handoff)
+  touched()
 }
 
 /**
  * 切换阅读 / 实时预览 / 源码 / 分屏。
  *
- * 编辑器实例只存在于编辑态；回到阅读时缓冲区由文档模型持有，
- * 所以「编辑 → 阅读」看到的是未保存的最新内容，而不是磁盘版本。
+ * 编辑器实例只存在于编辑态；回到阅读时缓冲区由文档模型持有，所以
+ * 「编辑 → 阅读」看到的是未保存的最新内容，而不是磁盘版本。
+ *
+ * 两件必须一起做的事（都关于「切视图不该丢东西」）：
+ *  1. **保住阅读位置**：切换前记下视口顶部的源行，切换后在新视图里落到同一行。
+ *     用源行不用像素——两个视图的排版高度完全不同，像素搬过去必然偏。
+ *  2. **保住撤销栈**：编辑态销毁前把 `EditorState` 存起来，下次进编辑态带回去。
+ *     丢了它，用户切一下视图就再也撤不回未保存的改动。
  */
 function setDocMode(mode: DocMode): void {
   if (docMode.value === mode) return
+  const from = docMode.value
+
+  /*
+   * 记锚点：从阅读态切走时读阅读视图的顶部源行；从编辑态切走时读编辑器。
+   * 分屏的左栏是源码编辑器、右侧是阅读视图——从分屏切出时以左侧（源码）为准，
+   * 因为用户的重心通常在正在编辑的那一侧。
+   */
+  const position =
+    from === 'read'
+      ? {
+          topLine: readerRef.value?.getTopLine() ?? 0,
+          scrollTop: readerRef.value?.getScroll() ?? 0,
+        }
+      : {
+          topLine: editorRef.value?.getTopLine() ?? 0,
+          scrollTop: editorRef.value?.getScroll() ?? 0,
+        }
+  leaveView(handoff, position)
+  touched()
+
+  // 编辑态 → 任何视图：先把状态快照留下（含撤销栈），供下次进编辑态复用
+  if (from !== 'read' && activeRef.value) {
+    rememberState(handoff, activeRef.value.absolutePath, editorRef.value?.getState() ?? null)
+    touched()
+  }
+
   docMode.value = mode
-  if (mode !== 'read') void nextTick(() => editorRef.value?.focus())
+
+  if (mode === 'read') {
+    // 阅读视图要等正文渲染完成（高度稳定）才落位，由 onRendered 消费锚点
+    return
+  }
+  void nextTick(() => {
+    editorRef.value?.focus()
+    /*
+     * 编辑器在挂载时已经按 anchor 落过一次位（prop 读的是同一个值）。
+     * 这里不再消费锚点——`takeAnchor` 只留给阅读侧；编辑器侧重复消费会把
+     * 阅读视图下一次正常渲染的锚点也清掉。
+     */
+  })
 }
 
 /* ---------- 文件操作（目录树右键 / 工具条） ---------- */
@@ -2550,9 +2679,15 @@ onBeforeUnmount(() => {
               mode="source"
               :doc-theme="theme.theme"
               :wrap="theme.editorWrap === 'wrap'"
+              :workspace-id="activeTab?.workspaceId ?? null"
+              :doc-path="currentDoc.path"
+              :initial-state="currentEditorState"
+              :restore-to-line="restoreAnchor"
               @error="store.setError($event)"
               @saved="onEditorSaved"
               @scrolled="onEditorScrolled"
+              @state-snapshot="rememberEditorState"
+              @restored="consumeAnchor"
             />
           </div>
           <div
@@ -2605,8 +2740,13 @@ onBeforeUnmount(() => {
           :wrap="theme.editorWrap === 'wrap'"
           :doc-path="currentDoc.path"
           :asset-prefix="docAssetPrefix"
+          :workspace-id="activeTab?.workspaceId ?? null"
+          :initial-state="currentEditorState"
+          :restore-to-line="restoreAnchor"
           @error="store.setError($event)"
           @saved="onEditorSaved"
+          @state-snapshot="rememberEditorState"
+          @restored="consumeAnchor"
         />
       </main>
 

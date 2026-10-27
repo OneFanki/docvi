@@ -54,8 +54,11 @@ const props = defineProps<{
   /**
    * 给块级元素标注源行（`data-source-line`）。
    *
-   * 只有分屏预览需要：右侧要按左侧的源行精确对齐。普通阅读与导出不开——
-   * 属性会进 HTML，导出文件里不该出现内部标记。
+   * 阅读视图**始终标注**：切视图时要按源行恢复阅读位置（`getTopLine`），没有
+   * 这些属性就无从知道「用户正在看第几行」。导出走的是另一条渲染路径
+   * （`lib/export-doc.ts`），不会把内部标记带进产物，所以这里开着没有副作用。
+   *
+   * 这个 prop 保留只是为了兼容既有调用点（分屏）；行为上与「始终开启」等价。
    */
   sourceLines?: boolean
 }>()
@@ -281,7 +284,8 @@ watch(
       ...(props.linkPrefix ? { urlPrefix: props.linkPrefix } : {}),
       // 图片前缀与链接前缀**分开**：桌面端的链接不带前缀，图片必须带资产协议前缀
       assetPrefix: props.assetPrefix,
-      sourceLines: props.sourceLines === true,
+      // 始终标注源行：切视图要按源行恢复位置（见 props.sourceLines 的说明）
+      sourceLines: true,
     })
     rendered.value = result
     emit('outline', result.outline)
@@ -380,6 +384,30 @@ defineExpose({
   host,
   openFind,
   getScroll: () => scroller.value?.scrollTop ?? 0,
+  /**
+   * 视口顶部所在的 0-based 源行（来自最近一个已滚过视口顶部的块）。
+   *
+   * 与 `getScroll()` 的区别：像素只在同一个视图里有意义，源行可以跨视图搬运。
+   * 切到编辑态时用它作为落位锚点——这就是「切视图不该把我正在看的内容甩走」
+   * 的实现口径：不看 scrollTop 的绝对值，看的是**正在看哪一段文字**。
+   */
+  getTopLine: (): number => {
+    const el = scroller.value
+    const surface = host.value?.querySelector<HTMLElement>('.at-doc')
+    if (!el || !surface) return 0
+    const blocks = Array.from(surface.querySelectorAll<HTMLElement>('[data-source-line]'))
+    if (!blocks.length) return 0
+    const viewportTop = el.getBoundingClientRect().top
+    let line = 0
+    for (const block of blocks) {
+      const value = Number(block.dataset.sourceLine)
+      if (!Number.isFinite(value)) continue
+      // 块的下沿还在视口上方 → 它已经完全滚过去了，取它的起始行
+      if (block.getBoundingClientRect().bottom <= viewportTop + 1) line = value
+      else break
+    }
+    return line
+  },
   restoreScroll: (y: number) => {
     if (scroller.value) scroller.value.scrollTop = y
   },

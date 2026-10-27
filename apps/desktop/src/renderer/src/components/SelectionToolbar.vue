@@ -14,6 +14,8 @@ import {
   Strikethrough,
 } from 'lucide-vue-next'
 
+import type { SelectionMarks } from '@docvi/editor'
+
 /**
  * 选区气泡工具条。
  *
@@ -24,16 +26,20 @@ import {
  * **行前缀**（无序列表/有序列表/引用）、**标题级别**（H1–H3）。用户心里是
  * 三件不同的事：把字变样子、把段落变结构、把段落变标题。
  *
- * 两个必须守住的细节：
+ * 三个必须守住的细节：
  *  1. `mousedown.prevent`：按下瞬间不能让编辑器失焦，否则 selection 清空、气泡自己消失；
  *  2. 链接走两段式（先点链接按钮，再输 URL），不做系统弹窗——弹窗会打断心流，
- *     而且用户往往想从剪贴板粘 URL，输入框更顺手。
+ *     而且用户往往想从剪贴板粘 URL，输入框更顺手；
+ *  3. **按钮要显示按下态**：选区已经在 `**加粗**` 里时加粗键必须亮着，否则用户
+ *     无从判断「点了到底有没有生效」——实时预览把星号藏了，没法靠数符号自查。
  */
 const props = defineProps<{
   /** 选区是否非空 */
   visible: boolean
   /** 选区上沿的屏幕坐标 */
   anchor: { left: number; top: number; bottom: number } | null
+  /** 选区当前生效的格式；null = 未知（不显示任何按下态） */
+  marks?: SelectionMarks | null
 }>()
 
 const emit = defineEmits<{
@@ -54,6 +60,15 @@ const urlInput = ref<HTMLInputElement | null>(null)
 const position = ref({ left: 0, top: 0 })
 
 const style = computed(() => ({ left: `${position.value.left}px`, top: `${position.value.top}px` }))
+
+/** 按下态：`marks` 为空时全部为 false（未知不等于激活，宁可都不亮） */
+function active(key: keyof SelectionMarks): boolean {
+  return props.marks?.[key] === true
+}
+
+function headingActive(level: number): boolean {
+  return props.marks?.heading === level
+}
 
 async function place(): Promise<void> {
   const anchor = props.anchor
@@ -160,6 +175,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
         <button
           v-tooltip="'加粗（Ctrl+B）'"
           class="bubble__btn"
+          :class="{ 'is-active': active('bold') }"
+          :aria-pressed="active('bold')"
           type="button"
           @click="emit('bold')"
         >
@@ -168,18 +185,41 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
         <button
           v-tooltip="'斜体（Ctrl+I）'"
           class="bubble__btn"
+          :class="{ 'is-active': active('italic') }"
+          :aria-pressed="active('italic')"
           type="button"
           @click="emit('italic')"
         >
           <Italic :size="14" :stroke-width="2" />
         </button>
-        <button v-tooltip="'删除线'" class="bubble__btn" type="button" @click="emit('strike')">
+        <button
+          v-tooltip="'删除线'"
+          class="bubble__btn"
+          :class="{ 'is-active': active('strike') }"
+          :aria-pressed="active('strike')"
+          type="button"
+          @click="emit('strike')"
+        >
           <Strikethrough :size="14" :stroke-width="2" />
         </button>
-        <button v-tooltip="'行内代码'" class="bubble__btn" type="button" @click="emit('code')">
+        <button
+          v-tooltip="'行内代码'"
+          class="bubble__btn"
+          :class="{ 'is-active': active('code') }"
+          :aria-pressed="active('code')"
+          type="button"
+          @click="emit('code')"
+        >
           <Code :size="14" :stroke-width="2" />
         </button>
-        <button v-tooltip="'链接'" class="bubble__btn" type="button" @click="startLink">
+        <button
+          v-tooltip="'链接'"
+          class="bubble__btn"
+          :class="{ 'is-active': active('link') }"
+          :aria-pressed="active('link')"
+          type="button"
+          @click="startLink"
+        >
           <Link2 :size="14" :stroke-width="2" />
         </button>
 
@@ -188,6 +228,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
         <button
           v-tooltip="'无序列表'"
           class="bubble__btn"
+          :class="{ 'is-active': active('bullet') }"
+          :aria-pressed="active('bullet')"
           type="button"
           @click="emit('prefix', 'bullet')"
         >
@@ -196,6 +238,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
         <button
           v-tooltip="'有序列表'"
           class="bubble__btn"
+          :class="{ 'is-active': active('ordered') }"
+          :aria-pressed="active('ordered')"
           type="button"
           @click="emit('prefix', 'ordered')"
         >
@@ -204,6 +248,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
         <button
           v-tooltip="'引用'"
           class="bubble__btn"
+          :class="{ 'is-active': active('quote') }"
+          :aria-pressed="active('quote')"
           type="button"
           @click="emit('prefix', 'quote')"
         >
@@ -215,6 +261,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
         <button
           v-tooltip="'一级标题'"
           class="bubble__btn"
+          :class="{ 'is-active': headingActive(1) }"
+          :aria-pressed="headingActive(1)"
           type="button"
           @click="emit('heading', 1)"
         >
@@ -223,6 +271,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
         <button
           v-tooltip="'二级标题'"
           class="bubble__btn"
+          :class="{ 'is-active': headingActive(2) }"
+          :aria-pressed="headingActive(2)"
           type="button"
           @click="emit('heading', 2)"
         >
@@ -231,6 +281,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
         <button
           v-tooltip="'三级标题'"
           class="bubble__btn"
+          :class="{ 'is-active': headingActive(3) }"
+          :aria-pressed="headingActive(3)"
           type="button"
           @click="emit('heading', 3)"
         >
@@ -270,6 +322,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
 .bubble__btn:hover {
   background: var(--dv-ui-surface-3);
   color: var(--dv-ui-text);
+}
+
+/*
+ * 按下态：选区已经在对应语法里时按钮必须亮着。
+ *
+ * 用主色底 + 主色文字而不是只加边框：工具条很小，细边框在 26px 的按钮上
+ * 几乎看不出来，用户会继续以为「点了没生效」。
+ */
+.bubble__btn.is-active {
+  background: color-mix(in srgb, var(--dv-ui-accent) 20%, transparent);
+  color: var(--dv-ui-accent);
+}
+
+.bubble__btn.is-active:hover {
+  background: color-mix(in srgb, var(--dv-ui-accent) 28%, transparent);
 }
 
 .bubble__btn--text {
