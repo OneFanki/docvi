@@ -1,6 +1,6 @@
 import { ipcMain, dialog, BrowserWindow, app, net, shell } from 'electron'
 import { createHash } from 'node:crypto'
-import { statSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { basename, isAbsolute, join } from 'node:path'
 
 import {
@@ -10,6 +10,8 @@ import {
   type ErrorCode,
   type GitProgressEvent,
   type GitState,
+  type ImageImportRequest,
+  type ImageImportResult,
   type MarketCatalog,
   type PluginRecordView,
   type RecentEntry,
@@ -32,6 +34,7 @@ import { createGitService } from './git.mjs'
 import { exportDocument } from './export-doc.ts'
 import { clearDraft, readDraft, writeDoc, writeDraft } from './fs-write.ts'
 import { copyEntry, createEntry, moveEntry, renameEntry, resolveForTrash } from './fs-ops.ts'
+import { importImage } from './image-import.ts'
 import type { FileWatcher } from './fs-watch.ts'
 import { toView, type PluginStore } from './plugin-store.ts'
 import { loadMarket } from './plugin-market.ts'
@@ -445,6 +448,88 @@ export function registerIpc(
       return toFailure(error)
     }
   })
+
+  /**
+   * 图片入库。
+   *
+   * 参数校验分两层：结构（字符串 / 工作区存在）在这里，路径与文件名的安全
+   * 判定在 image-import.ts（`resolveInside` + 扩展名白名单）。
+   */
+  ipcMain.handle(IPC.imageImport, (_event, request: unknown) => {
+    try {
+      const input = request as Partial<ImageImportRequest> | null
+      if (!input || typeof input !== 'object') return fail('E_INVALID', '参数必须是对象')
+      if (typeof input.workspaceId !== 'string')
+        return fail('E_INVALID', 'workspaceId 必须是字符串')
+      if (typeof input.docRelPath !== 'string') return fail('E_INVALID', 'docRelPath 必须是字符串')
+      if (typeof input.name !== 'string') return fail('E_INVALID', 'name 必须是字符串')
+      if (typeof input.data !== 'string' || !input.data) {
+        return fail('E_INVALID', 'data 必须是非空 base64 字符串')
+      }
+      const entry = store.find(input.workspaceId)
+      if (!entry) return fail('E_NOT_FOUND', '工作区不存在')
+      return ok(
+        importImage(entry.root, {
+          workspaceId: input.workspaceId,
+          docRelPath: input.docRelPath,
+          name: input.name,
+          data: input.data,
+        }),
+      )
+    } catch (error) {
+      return toFailure(error)
+    }
+  })
+
+  /**
+   * 选本地图片并直接入库。
+   *
+   * 系统文件框只给磁盘绝对路径，而 Markdown 里要写的是**相对文档目录**的路径
+   * （写绝对路径在渲染时会被当相对路径拼前缀，必然破图）。所以这里读字节 +
+   * 调 importImage，一次完成，回传可直接写进 `![](...)` 的相对路径。
+   */
+  ipcMain.handle(
+    IPC.imagePick,
+    async (event, request: unknown): Promise<Result<ImageImportResult | null>> => {
+      try {
+        const input = request as { workspaceId?: unknown; docRelPath?: unknown } | null
+        const workspaceId = typeof input?.workspaceId === 'string' ? input.workspaceId : ''
+        const docRelPath = typeof input?.docRelPath === 'string' ? input.docRelPath : ''
+        if (!workspaceId) return fail('E_INVALID', '缺少 workspaceId')
+        const entry = store.find(workspaceId)
+        if (!entry) return fail('E_NOT_FOUND', '工作区不存在')
+
+        const window = BrowserWindow.fromWebContents(event.sender)
+        const options: Electron.OpenDialogOptions = {
+          title: '选择图片',
+          properties: ['openFile'],
+          filters: [
+            {
+              name: '图片',
+              extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'svg'],
+            },
+          ],
+        }
+        const picked = window
+          ? await dialog.showOpenDialog(window, options)
+          : await dialog.showOpenDialog(options)
+        const source = picked.canceled ? null : (picked.filePaths[0] ?? null)
+        if (!source) return ok(null)
+
+        const bytes = readFileSync(source)
+        return ok(
+          importImage(entry.root, {
+            workspaceId,
+            docRelPath,
+            name: basename(source),
+            data: bytes.toString('base64'),
+          }),
+        )
+      } catch (error) {
+        return toFailure(error)
+      }
+    },
+  )
 
   ipcMain.handle(IPC.filePick, async (event): Promise<Result<string | null>> => {
     const window = BrowserWindow.fromWebContents(event.sender)

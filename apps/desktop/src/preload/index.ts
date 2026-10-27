@@ -66,6 +66,9 @@ const api: DocviApi = {
     ipcRenderer.invoke(IPC.fsCopy, workspaceId, relPath, targetDir),
   fsTrash: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsTrash, workspaceId, relPath),
 
+  imageImport: request => ipcRenderer.invoke(IPC.imageImport, request),
+  imagePick: request => ipcRenderer.invoke(IPC.imagePick, request),
+
   filePick: () => ipcRenderer.invoke(IPC.filePick),
   fileRead: absolutePath => ipcRenderer.invoke(IPC.fileRead, absolutePath),
 

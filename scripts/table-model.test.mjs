@@ -15,6 +15,8 @@ const {
   addRow,
   removeRow,
   addColumn,
+  insertRowAt,
+  insertColumnAt,
   removeColumn,
   setCell,
   cycleAlign,
@@ -135,4 +137,65 @@ test('对齐循环：默认 → 左 → 中 → 右 → 默认', () => {
   assert.equal(cycleAlign('left'), 'center')
   assert.equal(cycleAlign('center'), 'right')
   assert.equal(cycleAlign('right'), null)
+})
+
+/* ---------- 任意位置插入（本轮新增） ---------- */
+
+test('在任意位置插入行：中间 / 首行 / 末尾', () => {
+  const model = {
+    header: ['a'],
+    align: [null],
+    rows: [['1'], ['3']],
+  }
+  const middle = insertRowAt(model, 1)
+  assert.deepEqual(middle.rows, [['1'], [''], ['3']])
+
+  const first = insertRowAt(model, 0)
+  assert.deepEqual(first.rows, [[''], ['1'], ['3']])
+
+  // 末尾插入与 addRow 等价（连续录入时 Enter 走这条）
+  const last = insertRowAt(model, model.rows.length)
+  assert.deepEqual(last.rows, [['1'], ['3'], ['']])
+  assert.deepEqual(last, addRow(model))
+})
+
+test('插入行的位置参数会被夹到合法范围', () => {
+  const model = { header: ['a'], align: [null], rows: [['1']] }
+  assert.equal(insertRowAt(model, -5).rows.length, 2)
+  assert.equal(insertRowAt(model, 99).rows.length, 2)
+  // 越界插入的是末尾那个空行，不会丢掉原有内容
+  assert.deepEqual(insertRowAt(model, 99).rows[0], ['1'])
+})
+
+test('在任意位置插入列：表头、对齐、所有行同步扩展', () => {
+  const model = {
+    header: ['a', 'c'],
+    align: ['left', 'right'],
+    rows: [
+      ['1', '3'],
+      ['4', '6'],
+    ],
+  }
+  const middle = insertColumnAt(model, 1)
+  assert.deepEqual(middle.header, ['a', '', 'c'])
+  assert.deepEqual(middle.align, ['left', null, 'right'])
+  assert.deepEqual(middle.rows, [
+    ['1', '', '3'],
+    ['4', '', '6'],
+  ])
+
+  const end = insertColumnAt(model, 2)
+  assert.deepEqual(end.header, ['a', 'c', ''])
+  assert.ok(end.rows.every(row => row.length === 3))
+})
+
+test('插入列的往返：序列化后仍是矩形表格', () => {
+  let model = createTable(2, 2)
+  model = insertColumnAt(model, 1)
+  model = insertRowAt(model, 1)
+  const parsed = parseTable(serializeTable(model))
+  assert.ok(parsed)
+  assert.equal(parsed.header.length, 3)
+  assert.equal(parsed.rows.length, 3)
+  assert.ok(parsed.rows.every(row => row.length === 3))
 })

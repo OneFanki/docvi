@@ -145,6 +145,19 @@ export function addRow(model: TableModel): TableModel {
   return { ...model, rows: [...model.rows, Array.from({ length: model.header.length }, () => '')] }
 }
 
+/**
+ * 在任意位置插入一行。
+ *
+ * `index` 是插入后的行号：0 表示插到最上面，`rows.length` 表示追加到末尾
+ * （与 `addRow` 等价）。之前的「添加行」只能追加到末尾，用户在表格中间补一行
+ * 得先加到最后再一格一格挪内容——所以这里按位置插。
+ */
+export function insertRowAt(model: TableModel, index: number): TableModel {
+  const at = Math.max(0, Math.min(model.rows.length, Math.round(index)))
+  const row = Array.from({ length: model.header.length }, () => '')
+  return { ...model, rows: [...model.rows.slice(0, at), row, ...model.rows.slice(at)] }
+}
+
 export function removeRow(model: TableModel, index: number): TableModel {
   return { ...model, rows: model.rows.filter((_, i) => i !== index) }
 }
@@ -154,6 +167,22 @@ export function addColumn(model: TableModel): TableModel {
     header: [...model.header, `列 ${model.header.length + 1}`],
     align: [...model.align, null],
     rows: model.rows.map(row => [...row, '']),
+  }
+}
+
+/**
+ * 在任意位置插入一列（`index` 是插入后的列号，取值 0..列数）。
+ *
+ * 表头留空而不是写「列 N」：插在中间时「列 3」出现在第二列会让人以为列号错乱；
+ * 空表头有占位符提示，用户直接打字即可。
+ */
+export function insertColumnAt(model: TableModel, index: number): TableModel {
+  const at = Math.max(0, Math.min(model.header.length, Math.round(index)))
+  const insert = <T>(list: T[], value: T): T[] => [...list.slice(0, at), value, ...list.slice(at)]
+  return {
+    header: insert(model.header, ''),
+    align: insert(model.align, null),
+    rows: model.rows.map(row => insert(row, '')),
   }
 }
 

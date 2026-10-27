@@ -608,6 +608,17 @@ export function createWebHost(options: WebHostOptions = {}): DocviApi {
       return deny('容器版文档是只读的')
     },
 
+    /*
+     * 图片入库是写操作，容器读者面没有磁盘。契约上必须存在（渲染层只按
+     * hostKind 决定入口显隐，不做方法存在性探测），所以实现为明确拒绝。
+     */
+    async imageImport() {
+      return deny('容器版文档是只读的')
+    },
+    async imagePick() {
+      return deny('容器版文档是只读的')
+    },
+
     async filePick() {
       return deny('容器版不支持打开本地文件')
     },

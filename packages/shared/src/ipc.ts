@@ -62,6 +62,23 @@ export const IPC = {
   /** 删除走系统回收站（可恢复），不做永久删除 */
   fsTrash: 'docvi:fs:trash',
 
+  /**
+   * 图片入库：把粘贴 / 拖入 / 选中的图片字节写进工作区素材目录。
+   *
+   * 图片不能走文档写通道（那是整文替换），也不能把 base64 直接塞进 Markdown
+   * （几十 MB 的 data URL 会让文件没法读、版本历史爆掉）。字节走这条独立通道，
+   * 主进程落到文档同级的 `assets/` 并回传相对路径。
+   */
+  imageImport: 'docvi:image:import',
+  /**
+   * 选择本地图片并**直接入库**（系统文件框）。
+   *
+   * 为什么不返回绝对路径让渲染进程再调一次 imageImport：系统文件框给的是磁盘
+   * 绝对路径，把它写进 Markdown 是错的（渲染时会被当相对路径拼前缀，必然破图）。
+   * 主进程手上已经有文件了，直接读字节 → 落盘 → 回传相对路径，一步到位。
+   */
+  imagePick: 'docvi:image:pick',
+
   /** 搜索语料：整库文档全文（按工作区缓存，索引在渲染进程 worker 里建） */
   searchCorpus: 'docvi:search:corpus',
 
@@ -445,6 +462,32 @@ export interface FsOpResult {
   relPath: string
 }
 
+/**
+ * 图片入库请求。
+ *
+ * `data` 是 base64（不含 `data:` 前缀）：渲染进程从 File / 剪贴板字节读出来。
+ * 用 base64 而不是传 File 对象——File 跨不了 IPC，而且主进程需要的是字节本身。
+ */
+export interface ImageImportRequest {
+  workspaceId: string
+  /** 文档在内容根内的相对路径：素材落在它同级的 `assets/` 下 */
+  docRelPath: string
+  /** 原始文件名（只取扩展名与主名，路径部分会被丢弃） */
+  name: string
+  /** base64 编码的图片字节 */
+  data: string
+}
+
+/** 图片入库结果：相对文档目录的 Markdown 可用路径（如 `assets/图-1.png`） */
+export interface ImageImportResult {
+  /** 相对**文档所在目录**的路径，可直接写进 `![](...)` */
+  relPath: string
+  /** 落盘后的绝对路径（用于预览与「在文件夹中显示」） */
+  absolutePath: string
+  /** 实际写入的字节数 */
+  size: number
+}
+
 /** preload 经 contextBridge 暴露给渲染进程的完整表面。 */
 export interface DocviApi {
   /**
@@ -551,6 +594,23 @@ export interface DocviApi {
   fsCopy(workspaceId: string, relPath: string, targetDir: string): Promise<Result<FsOpResult>>
   /** 删除（进系统回收站，可恢复） */
   fsTrash(workspaceId: string, relPath: string): Promise<Result<FsOpResult>>
+
+  /**
+   * 把图片字节写进工作区素材目录，返回可写进 Markdown 的相对路径。
+   *
+   * 容器读者面没有写权限，由 `web-host` 实现为 E_FORBIDDEN（与其它写操作一致）——
+   * 契约上必须存在，渲染层只按 `hostKind` 决定是否露出入口，不做方法存在性探测。
+   */
+  imageImport(request: ImageImportRequest): Promise<Result<ImageImportResult>>
+  /**
+   * 选本地图片并直接入库。
+   *
+   * `workspaceId` 必须给：图片要落到该工作区的素材目录。取消时 data 为 null。
+   */
+  imagePick(request: {
+    workspaceId: string
+    docRelPath: string
+  }): Promise<Result<ImageImportResult | null>>
 
   /** 系统文件选择框；取消时 data 为 null */
   filePick(): Promise<Result<string | null>>

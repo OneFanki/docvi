@@ -5,15 +5,16 @@ import {
   AlignLeft,
   AlignRight,
   AlignStartVertical,
+  Columns3,
   Plus,
   Trash2,
   X,
 } from 'lucide-vue-next'
 
 import {
-  addColumn,
-  addRow,
   cycleAlign,
+  insertColumnAt,
+  insertRowAt,
   removeColumn,
   removeRow,
   serializeTable,
@@ -32,7 +33,9 @@ import {
  * 交互约定：
  *  - Enter：同列下移一格，已在最后一行就新增一行并移过去（连续录入不用离开键盘）；
  *  - Tab / Shift+Tab：浏览器默认的前后格移动；
- *  - 对齐按钮在列头上循环 左 / 中 / 右 / 默认。
+ *  - 行/列可以在**任意位置**插入：每行左侧、每列表头都带「在此前后插入」的入口；
+ *  - 对齐按钮在列头上循环 左 / 中 / 右 / 默认；
+ *  - 单元格用 textarea，内容长了自动换行升高——写长句不该被一条 30px 的输入框截断。
  */
 const props = defineProps<{
   open: boolean
@@ -86,35 +89,60 @@ function alignLabel(align: TableModel['align'][number]): string {
 
 function focusCell(row: number | 'header', column: number): void {
   const selector = `[data-cell="${row === 'header' ? -1 : row}:${column}"]`
-  grid.value?.querySelector<HTMLInputElement>(selector)?.focus()
+  const target = grid.value?.querySelector<HTMLTextAreaElement>(selector)
+  target?.focus()
+  // 光标放到末尾：继续录入时不用再点一次
+  if (target) target.selectionStart = target.selectionEnd = target.value.length
+}
+
+/**
+ * 自动长高：textarea 不能靠 CSS 撑开，必须把 scrollHeight 写回 style。
+ *
+ * 只在内容变化后调用（输入、插删行列、打开弹窗），不做轮询——表格编辑器里
+ * 的元素数量本来就少，重排成本可以忽略。
+ */
+function autoGrow(element: EventTarget | null): void {
+  if (!(element instanceof HTMLTextAreaElement)) return
+  element.style.height = 'auto'
+  element.style.height = `${element.scrollHeight}px`
+}
+
+async function growAll(): Promise<void> {
+  await nextTick()
+  grid.value?.querySelectorAll<HTMLTextAreaElement>('textarea.tbl__input').forEach(autoGrow)
 }
 
 function onCellKeydown(event: KeyboardEvent, row: number, column: number): void {
-  if (event.key !== 'Enter') return
+  // Enter 下移；Shift+Enter 是单元格内换行（用户想写两行说明时的自然期望）
+  if (event.key !== 'Enter' || event.shiftKey) return
   event.preventDefault()
   const isHeader = row === -1
   if (isHeader) {
     focusCell(0, column)
     return
   }
-  if (row === draft.value.rows.length - 1) draft.value = addRow(draft.value)
+  if (row === draft.value.rows.length - 1) draft.value = insertRowAt(draft.value, row + 1)
   void nextTick(() => focusCell(row + 1, column))
 }
 
-function updateCell(row: number | 'header', column: number, value: string): void {
+function updateCell(row: number | 'header', column: number, value: string, event?: Event): void {
   draft.value = setCell(draft.value, row, column, value)
+  autoGrow(event?.target ?? null)
 }
 
-function doAddColumn(): void {
-  draft.value = addColumn(draft.value)
+function doInsertColumn(index: number): void {
+  draft.value = insertColumnAt(draft.value, index)
+  void nextTick(() => focusCell('header', index))
+}
+
+function doInsertRow(index: number): void {
+  draft.value = insertRowAt(draft.value, index)
+  void nextTick(() => focusCell(index, 0))
 }
 
 function doRemoveColumn(index: number): void {
   draft.value = removeColumn(draft.value, index)
-}
-
-function doAddRow(): void {
-  draft.value = addRow(draft.value)
+  void growAll()
 }
 
 function doRemoveRow(index: number): void {
@@ -166,13 +194,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
                 <th class="tbl__gutter" />
                 <th v-for="(cell, column) in draft.header" :key="`h-${column}`" class="tbl__th">
                   <div class="tbl__colhead">
-                    <input
+                    <textarea
                       class="tbl__input tbl__input--head"
+                      rows="1"
                       :data-cell="`-1:${column}`"
                       :value="cell"
                       :placeholder="`列 ${column + 1}`"
                       @input="
-                        updateCell('header', column, ($event.target as HTMLInputElement).value)
+                        updateCell(
+                          'header',
+                          column,
+                          ($event.target as HTMLTextAreaElement).value,
+                          $event,
+                        )
                       "
                       @keydown="onCellKeydown($event, -1, column)"
                     />
@@ -185,6 +219,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
                       <component :is="alignIcon(draft.align[column] ?? null)" :size="12" />
                     </button>
                     <button
+                      v-tooltip="'在左侧插入一列'"
+                      class="tbl__colbtn"
+                      type="button"
+                      @click="doInsertColumn(column)"
+                    >
+                      <Plus :size="12" />
+                    </button>
+                    <button
                       v-tooltip="'删除此列'"
                       class="tbl__colbtn"
                       type="button"
@@ -195,27 +237,54 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
                     </button>
                   </div>
                 </th>
-                <th class="tbl__gutter" />
+                <th class="tbl__gutter tbl__gutter--tail">
+                  <button
+                    v-tooltip="'在末尾添加一列'"
+                    class="tbl__rowbtn"
+                    type="button"
+                    @click="doInsertColumn(draft.header.length)"
+                  >
+                    <Columns3 :size="13" />
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(row, rowIndex) in draft.rows" :key="`r-${rowIndex}`">
                 <th class="tbl__gutter">
-                  <button
-                    v-tooltip="'删除此行'"
-                    class="tbl__rowbtn"
-                    type="button"
-                    @click="doRemoveRow(rowIndex)"
-                  >
-                    <Trash2 :size="12" />
-                  </button>
+                  <div class="tbl__rowtools">
+                    <button
+                      v-tooltip="'在上方插入一行'"
+                      class="tbl__rowbtn"
+                      type="button"
+                      @click="doInsertRow(rowIndex)"
+                    >
+                      <Plus :size="12" />
+                    </button>
+                    <button
+                      v-tooltip="'删除此行'"
+                      class="tbl__rowbtn"
+                      type="button"
+                      @click="doRemoveRow(rowIndex)"
+                    >
+                      <Trash2 :size="12" />
+                    </button>
+                  </div>
                 </th>
                 <td v-for="(cell, column) in row" :key="`c-${rowIndex}-${column}`">
-                  <input
+                  <textarea
                     class="tbl__input"
+                    rows="1"
                     :data-cell="`${rowIndex}:${column}`"
                     :value="cell"
-                    @input="updateCell(rowIndex, column, ($event.target as HTMLInputElement).value)"
+                    @input="
+                      updateCell(
+                        rowIndex,
+                        column,
+                        ($event.target as HTMLTextAreaElement).value,
+                        $event,
+                      )
+                    "
                     @keydown="onCellKeydown($event, rowIndex, column)"
                   />
                 </td>
@@ -227,10 +296,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
         </div>
 
         <div class="tbl__tools">
-          <button class="tbl__tool" type="button" @click="doAddRow">
+          <button class="tbl__tool" type="button" @click="doInsertRow(draft.rows.length)">
             <Plus :size="13" /> 添加行
           </button>
-          <button class="tbl__tool" type="button" @click="doAddColumn">
+          <button class="tbl__tool" type="button" @click="doInsertColumn(draft.header.length)">
             <Plus :size="13" /> 添加列
           </button>
           <button
@@ -246,7 +315,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
         <pre v-if="showSource" class="tbl__source">{{ source }}</pre>
 
         <footer class="tbl__foot">
-          <span class="tbl__hint">Enter 下移一格 · Tab 前后切换</span>
+          <span class="tbl__hint">Enter 下移 · Shift+Enter 换行 · Tab 前后切换</span>
           <button class="tbl__btn" type="button" @click="emit('close')">取消</button>
           <button class="tbl__btn tbl__btn--primary" type="button" @click="submit">保存</button>
         </footer>
@@ -256,25 +325,35 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
 </template>
 
 <style scoped>
+/*
+ * 尺寸策略：**不写死**。
+ *
+ * 弹窗占满可用空间的 94% × 92%，再用 min/max 兜住极小与极大窗口：
+ *  - 窗口很小时（用户把应用缩到半屏甚至更窄），百分比自然收缩，不会被裁；
+ *  - 窗口很大时也不要铺满整屏，留出一圈暗背景让人看出「这是浮层」。
+ * 原来写死 760px 宽 + 少量内边距，窄窗口下表格被挤、宽窗口下两侧大片空白。
+ */
 .tbl {
   position: fixed;
   inset: 0;
   z-index: 95;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: clamp(8px, 2vh, 24px);
   background: color-mix(in srgb, var(--dv-ui-bg) 62%, transparent);
 }
 
 .tbl__card {
   display: flex;
   flex-direction: column;
-  width: min(760px, 100%);
-  max-height: calc(100vh - 48px);
+  width: min(1280px, 100%);
+  height: min(92vh, 100%);
+  min-height: 0;
   border: 1px solid var(--dv-ui-line);
   border-radius: var(--dv-ui-radius-md);
   background: var(--dv-ui-surface-2);
   box-shadow: var(--dv-ui-shadow-2);
+  overflow: hidden;
 }
 
 .tbl__head {
@@ -283,6 +362,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
   gap: 12px;
   padding: 16px 18px 12px;
   border-bottom: 1px solid var(--dv-ui-line-soft);
+  flex: none;
 }
 
 .tbl__title {
@@ -327,12 +407,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
   border-collapse: separate;
   border-spacing: 0;
   width: 100%;
+  table-layout: auto;
 }
 
 .tbl__th,
 .tbl__grid td {
   border: 1px solid var(--dv-ui-line-soft);
   padding: 0;
+  vertical-align: top;
 }
 
 .tbl__th {
@@ -340,15 +422,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
 }
 
 .tbl__gutter {
-  width: 26px;
+  width: 1%;
   border: none !important;
   background: transparent;
-  padding: 0;
+  padding: 0 2px;
+  vertical-align: middle;
 }
 
 .tbl__colhead {
   display: flex;
   align-items: center;
+}
+
+.tbl__rowtools {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .tbl__colbtn,
@@ -364,7 +453,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
   color: var(--dv-ui-text-dim);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--dv-ui-dur-1, 0.12s) ease;
 }
 
 .tbl__th:hover .tbl__colbtn,
@@ -383,16 +472,32 @@ tr:hover .tbl__rowbtn {
   cursor: default;
 }
 
+/*
+ * 单元格 = 自动长高的 textarea。
+ *
+ * 不用 input：长句在 90px 宽的单行框里根本看不全，而 Markdown 的单元格
+ * 本来就是可以写整段话的地方（序列化时会把换行压成空格）。
+ * `field-sizing: content` 在 Chromium 里已可用，但为兼容仍配合 JS 量高。
+ */
 .tbl__input {
+  display: block;
   width: 100%;
-  min-width: 90px;
-  height: 30px;
-  padding: 0 8px;
+  min-width: 120px;
+  min-height: 32px;
+  padding: 6px 8px;
   border: none;
   background: transparent;
   color: var(--dv-ui-text);
-  font-size: 12.5px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
   outline: none;
+  resize: none;
+  overflow: hidden;
+  field-sizing: content;
+  box-sizing: border-box;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .tbl__input:focus {
@@ -414,6 +519,7 @@ tr:hover .tbl__rowbtn {
   gap: 8px;
   padding: 10px 18px;
   border-top: 1px solid var(--dv-ui-line-soft);
+  flex: none;
 }
 
 .tbl__tool {
@@ -441,7 +547,7 @@ tr:hover .tbl__rowbtn {
 }
 
 .tbl__source {
-  max-height: 33vh;
+  max-height: 30vh;
   margin: 0 18px 10px;
   padding: 10px;
   overflow: auto;
@@ -449,10 +555,11 @@ tr:hover .tbl__rowbtn {
   border-radius: var(--dv-ui-radius-sm);
   background: var(--dv-ui-bg);
   color: var(--dv-ui-text-muted);
-  font-family: var(--dv-doc-font-mono, ui-monospace, 'Cascadia Code', Consolas, monospace);
+  font-family: var(--dv-font-mono, ui-monospace, 'Cascadia Code', Consolas, monospace);
   font-size: 11.5px;
   line-height: 1.6;
   white-space: pre;
+  flex: none;
 }
 
 .tbl__foot {
@@ -461,6 +568,7 @@ tr:hover .tbl__rowbtn {
   gap: 8px;
   padding: 10px 18px 14px;
   border-top: 1px solid var(--dv-ui-line-soft);
+  flex: none;
 }
 
 .tbl__hint {
