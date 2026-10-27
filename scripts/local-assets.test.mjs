@@ -8,26 +8,43 @@
  *     `width: max-content` 的灯箱容器后百分比无参照，浏览器回落到 300px 宽。
  */
 import assert from 'node:assert/strict'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 
 const { createLocalAssetRegistry } = await import('../apps/desktop/src/main/local-assets.ts')
 const { pinSize } = await import('../plugins/base/src/components/svg-size.ts')
 
-test('登记单文件后返回可用的资产前缀，且能按 id 反查目录', () => {
+/*
+ * 路径一律用宿主原生写法拼出来，不能写死 `C:\docs\note.md`。
+ *
+ * 登记表用宿主的 `dirname` 取资产根，而 `path.posix.dirname('C:\\docs\\note.md')`
+ * 返回 `'.'`——在 Linux 上写死 Windows 路径的断言必然失败（CI 实测挂了两条）。
+ * 真实路径永远是宿主原生的，所以这样写既跨平台又更贴近实际输入。
+ */
+const DIR = join(process.cwd(), 'fake-docs')
+const fileIn = name => join(DIR, name)
+
+test('登记单文件后返回可用的资产前缀，且能按 id 反查所在目录', () => {
   const registry = createLocalAssetRegistry()
-  const prefix = registry.register('C:\\docs\\note.md')
+  const file = fileIn('note.md')
+  const prefix = registry.register(file)
   assert.match(prefix, /^docvi:\/\/local\/[0-9a-f]{16}$/)
   const id = prefix.split('/').pop()
-  assert.equal(registry.rootOf(id), 'C:\\docs')
+  assert.equal(registry.rootOf(id), dirname(file))
 })
 
 test('同一文件重复登记返回同一个前缀（每次重读不该生成新 id）', () => {
   const registry = createLocalAssetRegistry()
-  const first = registry.register('C:\\docs\\note.md')
-  const second = registry.register('C:\\docs\\note.md')
-  assert.equal(first, second)
+  const file = fileIn('note.md')
+  assert.equal(registry.register(file), registry.register(file))
 })
 
+/*
+ * 大小写与斜杠方向不参与 id 计算：Windows 上 `C:\Docs\Note.md` 与 `c:/docs/note.md`
+ * 是同一个文件，给两个 id 会让同一篇文档的图片前缀来回抖动。
+ *
+ * 这条只比较两个前缀是否相等，不经过 `dirname`，因此任何平台都能断言。
+ */
 test('路径大小写与斜杠方向不影响 id（Windows 同一文件两种写法）', () => {
   const registry = createLocalAssetRegistry()
   const a = registry.register('C:\\Docs\\Note.md')
@@ -35,31 +52,37 @@ test('路径大小写与斜杠方向不影响 id（Windows 同一文件两种写
   assert.equal(a, b)
 })
 
+/* 反斜杠能不能解析成目录是 Windows 专有的行为，只能在 Windows 上断言 */
+test('Windows 反斜杠路径解析到所在目录', { skip: process.platform !== 'win32' }, () => {
+  const registry = createLocalAssetRegistry()
+  const id = registry.register('C:\\docs\\note.md').split('/').pop()
+  assert.equal(registry.rootOf(id), 'C:\\docs')
+})
+
 test('未登记过的 id 反查不到（渲染层无法凭空访问任意目录）', () => {
   const registry = createLocalAssetRegistry()
-  registry.register('C:\\docs\\note.md')
+  registry.register(fileIn('note.md'))
   assert.equal(registry.rootOf('0000000000000000'), undefined)
   assert.equal(registry.rootOf(''), undefined)
 })
 
 test('登记数量有上限：超过后淘汰最久未用的（内存不随标签数无限增长）', () => {
   const registry = createLocalAssetRegistry()
-  const first = registry.register('C:\\docs\\a.md')
-  const firstId = first.split('/').pop()
-  for (let i = 0; i < 70; i += 1) registry.register(`C:\\docs\\doc-${i}.md`)
+  const firstId = registry.register(fileIn('a.md')).split('/').pop()
+  for (let i = 0; i < 70; i += 1) registry.register(fileIn(`doc-${i}.md`))
   assert.equal(registry.rootOf(firstId), undefined, '最久未用的条目应被淘汰')
 })
 
 test('重复访问会刷新 LRU 位置（最近用过的不会被淘汰）', () => {
   const registry = createLocalAssetRegistry()
-  const first = registry.register('C:\\docs\\keep.md')
-  const firstId = first.split('/').pop()
+  const keep = fileIn('keep.md')
+  const firstId = registry.register(keep).split('/').pop()
   for (let i = 0; i < 60; i += 1) {
-    registry.register(`C:\\docs\\doc-${i}.md`)
-    // 每轮都重新登记 first：它始终是「最近用过」的
-    registry.register('C:\\docs\\keep.md')
+    registry.register(fileIn(`doc-${i}.md`))
+    // 每轮都重新登记 keep：它始终是「最近用过」的
+    registry.register(keep)
   }
-  assert.equal(registry.rootOf(firstId), 'C:\\docs')
+  assert.equal(registry.rootOf(firstId), dirname(keep))
 })
 
 /**
