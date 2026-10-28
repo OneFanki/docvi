@@ -231,6 +231,55 @@ test('electron-builder 配置能通过官方 schema 校验（键名写错会在�
   assert.ok(ok, `electron-builder 配置不符合 schema：${detail}`)
 })
 
+/* ---------- 包体积：运行时裁剪 ---------- */
+
+test('运行时裁剪钩子挂在 afterPack，且只裁 Windows 的 WebGPU 组件', async () => {
+  /*
+   * 这几条不是「源码里要出现某字符串」，而是在钉住一份**可执行契约**：
+   * 钩子必须在 electron-builder 真正会调用的位置（afterPack），路径必须能被
+   * 仓库根解析到，且不能顺手把 mac/linux 也裁了。
+   *
+   * 为什么值得守：钩子写错时打包**不会失败**——体积悄悄涨回去，没有任何报错。
+   * 本仓已经踩过两次同类：`win.files` 被静默忽略、`packager.logger` 不存在。
+   */
+  const config = builderConfig()
+  const hook = /^afterPack:\s*(.+)$/m.exec(config)?.[1]?.trim()
+  assert.ok(hook, 'electron-builder 配置里必须有 afterPack（否则运行时裁不掉）')
+
+  // 路径相对仓库根解析：写 ./scripts/... 会报 Cannot find module
+  const hookPath = join(root, hook)
+  assert.ok(
+    readFileSync(hookPath, 'utf8').includes('DROP_ON_WINDOWS'),
+    `afterPack 指向的文件不存在或不是裁剪脚本：${hook}`,
+  )
+
+  const script = readFileSync(hookPath, 'utf8')
+  // 只裁 Windows：这些 DLL 是 Windows 运行时专有的，别的平台没有
+  assert.match(
+    script,
+    /electronPlatformName\s*!==\s*'win32'[\s\S]{0,40}return/,
+    '裁剪脚本必须在非 Windows 平台直接返回',
+  )
+  // 要裁的必须是这几份 WebGPU / 软件光栅组件（依据见函数注释里的实测）
+  for (const name of [
+    'dxcompiler.dll',
+    'dxil.dll',
+    'd3dcompiler_47.dll',
+    'vk_swiftshader.dll',
+    'vulkan-1.dll',
+  ]) {
+    assert.ok(script.includes(name), `裁剪清单缺少 ${name}`)
+  }
+
+  /*
+   * 反向守卫：`win` 段下不许出现 `files`。
+   * electron-builder 只认顶层 files，win.files 会被静默忽略——配了等于没配，
+   * 但看配置的人会以为已经排除了。这正是本次踩到的坑。
+   */
+  const winBlock = /^win:\n([\s\S]*?)(?=^\S)/m.exec(config)?.[1] ?? ''
+  assert.doesNotMatch(winBlock, /^\s+files:/m, 'win 段下的 files 会被静默忽略，必须用 afterPack')
+})
+
 /* ---------- 发版必须带版本说明 ---------- */
 
 test('发版工作流：缺版本说明时立即失败，不发出无声明的 Release', () => {

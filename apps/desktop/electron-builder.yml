@@ -88,6 +88,23 @@ win:
   icon: build/icon.ico
   artifactName: docvi-${version}-win-${arch}-setup.${ext}
 
+# 打包后裁掉只服务 WebGPU / 软件渲染回退的运行时组件（仅 Windows）。
+#
+# 为什么用 afterPack 而不是 win.files：electron-builder 的 `files` 只有顶层一处，
+# `win` 段下写 `files` 会被**静默忽略**（本仓踩坑库已记过「未知键静默忽略」，
+# 这次自己又踩了一次：配完重打包，DLL 一个没少）。afterPack 是明确执行的回调。
+#
+# docvi 不用 WebGPU，也不依赖 SwiftShader 做软件光栅。实测删掉这五个文件后应用
+# 照常启动，含 mermaid 图与代码高亮的文档渲染完全正常（断言过标题、SVG 尺寸、
+# Shiki 着色 span 与背景色）。
+#
+# 收益是实打实的下载量：解包 336MB → 299MB，压缩后约少 14MB。其中
+# dxcompiler.dll 一块就占 24.6MB 原始 / 9.7MB 压缩。
+#
+# ⚠️ 路径相对**仓库根**解析，不是相对 apps/desktop——写成 ./scripts/... 会报
+# 「Cannot find module」，因为 electron-builder 的执行目录是仓库根。
+afterPack: apps/desktop/scripts/trim-runtime.mjs
+
 nsis:
   oneClick: false
   perMachine: false

@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
 import { AlertCircle, CheckCircle2, FilePlus2, FolderPlus, Link2, X } from 'lucide-vue-next'
 import type {
   DocPayload,
@@ -60,7 +68,18 @@ import PluginsView from './components/PluginsView.vue'
 import PreviewPage from './components/PreviewPage.vue'
 import SettingsView from './components/SettingsView.vue'
 import ShortcutsPanel from './components/ShortcutsPanel.vue'
-import EditorView from './components/EditorView.vue'
+/*
+ * 编辑器按需加载。
+ *
+ * CodeMirror 全家桶（view / state / language / commands / search + lezer 各语言
+ * 语法）实测占主 chunk 原始体积约 1.1MB，而它**只在编辑态才用得上**——用户
+ * 大部分时间在阅读。静态 import 会让冷启动就必须解析这 1.1MB 才能显示出正文。
+ *
+ * 这里用 `defineAsyncComponent` 而不是路由级拆分：编辑器与阅读视图共用同一个
+ * 文档缓冲区，切换模式时不该整页重建。所有 `editorRef.value?.` 调用点本来就
+ * 带可选链，加载中为 null 也不会出错。
+ */
+const EditorView = defineAsyncComponent(() => import('./components/EditorView.vue'))
 import ConfirmDialog, { type ConfirmAction } from './components/ConfirmDialog.vue'
 import PromptDialog from './components/PromptDialog.vue'
 import ContentRootDialog from './components/ContentRootDialog.vue'
