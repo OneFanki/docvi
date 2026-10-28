@@ -67,8 +67,20 @@ export function useZoomPan(
     transformOrigin: '0 0',
   }))
 
-  function clamp(value: number) {
-    return Math.min(max, Math.max(min, value))
+  const clamp = (value: number) => Math.min(max, Math.max(min, value))
+
+  /**
+   * 视口的**内容区**尺寸（扣掉 padding）。
+   *
+   * 内容元素排在 padding 内侧，而 `clientWidth/clientHeight` 含 padding。
+   * 拿含 padding 的尺寸去算居中，左右留白会差出「两倍 padding」——实测
+   * 13px 的偏差就来自画布的 `padding: 0.4rem`。居中必须按内容区算。
+   */
+  function contentBox(viewport: HTMLElement): { w: number; h: number } {
+    const style = getComputedStyle(viewport)
+    const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0)
+    const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0)
+    return { w: viewport.clientWidth - padX, h: viewport.clientHeight - padY }
   }
 
   function zoomAt(next: number, anchorX: number, anchorY: number) {
@@ -91,8 +103,9 @@ export function useZoomPan(
       return
     }
     scale.value = 1
-    tx.value = Math.max(0, (viewport.clientWidth - content.offsetWidth) / 2)
-    ty.value = Math.max(0, (viewport.clientHeight - content.offsetHeight) / 2)
+    const box = contentBox(viewport)
+    tx.value = Math.max(0, (box.w - content.offsetWidth) / 2)
+    ty.value = Math.max(0, (box.h - content.offsetHeight) / 2)
     // 「回到默认」= 恢复自动跟随容器，不算手动调整
     touched = false
   }
@@ -110,23 +123,37 @@ export function useZoomPan(
     if (!viewport || !content) return
     const cw = content.offsetWidth
     const ch = content.offsetHeight
-    const vpW = viewport.clientWidth
-    const vpH = viewport.clientHeight
+    const box = contentBox(viewport)
     // 布局未就绪时**跳过**，不要用一个瞬态尺寸算缩放：
     // 内嵌宿主会把内容先按 0 / 极小宽度排一帧（实测 cw=30、vw=0），
     // 用它算出 30%（最小档）并覆盖了正确的 72%（2026-10-19 实测）。
-    if (cw < 40 || ch < 40 || vpW < 80 || vpH < 80) return
-    const vw = Math.max(0, vpW - padding * 2)
-    const vh = Math.max(0, vpH - padding * 2)
+    if (cw < 40 || ch < 40 || box.w < 80 || box.h < 80) return
+    // 内容允许占据的区域：内容区再各留一圈视觉留白
+    const vw = Math.max(0, box.w - padding * 2)
+    const vh = Math.max(0, box.h - padding * 2)
     // ⚠️ 上限必须夹到 1：内容比视口窄时 vw/cw 会远大于 1，单看图宽会算出 116%，
     // 结果高度方向被裁掉（2026-10-19 实测）。「适应」的语义是「装下」，不是「填满」。
     // 下限 = fitFloor：装下所需比例低于可读阈值时，宁可装不下也要保住字。
     const computed = Math.min(1, clamp(Math.min(vw / cw, vh / ch)))
     scale.value = honorFloor ? Math.max(computed, Math.min(1, floorOf())) : computed
-    // 装不下时不能居中（会把内容左半截挤到视口外），改为贴左上
-    const fits = cw * scale.value <= vw && ch * scale.value <= vh
-    tx.value = fits ? (vpW - cw * scale.value) / 2 : padding
-    ty.value = fits ? (vpH - ch * scale.value) / 2 : padding
+    /*
+     * 分轴决定居中还是贴边：哪一轴装得下就居中，装不下的那一轴贴边（贴边才
+     * 看得到内容起点；居中会把两头都挤出视口）。
+     *
+     * 旧实现是「两轴都装下才居中，否则**两轴都**贴左上」。长流程图最常见的情形
+     * 就是「高度超出、横向留一大片空白」——那时横向明明放得下，却被连累贴左，
+     * 图挤在左边、右边全空（用户实测截图）。分轴之后各管各的。
+     *
+     * 平移量相对**内容区**（不含 padding）算：内容元素本身排在 padding 内侧，
+     * 用含 padding 的 clientWidth 去算居中，两侧留白会差出两倍 padding
+     * ——探针实测「左 619 / 右 606」，差的 13px 就是画布的 `padding: 0.4rem`。
+     * 居中的两个边界都在内容区内，所以直接用 (box.w - 缩放后宽度) / 2；
+     * 装不下时贴内容区左缘再让出 `padding`。
+     */
+    const scaledW = cw * scale.value
+    const scaledH = ch * scale.value
+    tx.value = scaledW <= vw ? (box.w - scaledW) / 2 : padding
+    ty.value = scaledH <= vh ? (box.h - scaledH) / 2 : padding
     // 程序自动适配**不算**手动调整：否则布局中间态算出的比例会被锁死，
     // ResizeObserver 之后再也不重算（2026-10-19 实测缩到 50% 而正确值是 72%）。
   }
