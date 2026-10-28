@@ -4,15 +4,17 @@ import {
   AlertTriangle,
   Blocks,
   ChevronDown,
+  Download,
   ExternalLink,
   FolderPlus,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
+  Star,
   Trash2,
 } from 'lucide-vue-next'
 
-import type { PluginRecordView } from '@docvi/shared'
+import { formatStars, type MarketEntry, type PluginRecordView } from '@docvi/shared'
 
 import ComponentPreview from './ComponentPreview.vue'
 import { usePluginStore } from '../stores/plugins'
@@ -146,9 +148,46 @@ function fetchedLabel(): string {
   return t('plugins.market.daysAgo', { count: Math.floor(hours / 24) })
 }
 
-/** 打开插件仓库（市场里唯一的动作：去 GitHub 看源码/文档） */
+/** 打开插件仓库（没有产物时的动作：去 GitHub 看源码/文档） */
 function openRepository(url: string): void {
   window.open(url, '_blank', 'noreferrer')
+}
+
+/**
+ * 打开接入文档：告诉想上架的作者该改哪个文件、产物要长什么样。
+ *
+ * 指向仓库里的静态文档而不是网页站：那份文档与清单格式是同一个提交里的，
+ * 内容不会与客户端的解析规则漂移。
+ */
+function openSubmitDocs(): void {
+  window.open(
+    'https://github.com/OneFanki/docvi/blob/main/docs/plugin-market.md',
+    '_blank',
+    'noreferrer',
+  )
+}
+
+/**
+ * 安装市场插件：成功后切到「已安装」页签，用户能立刻看到装进去了。
+ *
+ * 参数类型用具名导入的 `MarketEntry`，不用 `(typeof store.market)[number]`：
+ * 后者在模板编译出的渲染函数里会带上一串类型查询，配合 `<script setup>` 的
+ * 编译结果容易在**生产构建**里退化成不执行任何东西的包装（实测：DOM 收到
+ * click，但 handler 一行都没跑，dev 下正常）。
+ */
+async function installEntry(entry: MarketEntry): Promise<void> {
+  const ok = await store.installFromMarket(entry)
+  if (ok) activeTab.value = 'installed'
+}
+
+/** star 数折叠（1000 以上用 k）：卡片不该被一个六位数撑宽 */
+function starsLabel(stars: number): string {
+  return formatStars(stars)
+}
+
+/** 市场条目是否提供了可安装的产物 */
+function canInstall(entry: MarketEntry): boolean {
+  return Boolean(entry.artifact)
 }
 
 function trustLabel(trust: string): string {
@@ -427,8 +466,36 @@ function contributionSummary(record: (typeof store.records)[number]): string {
               <p v-if="entry.tags?.length" class="card__tags">
                 <span v-for="tag in entry.tags" :key="tag" class="card__tag">{{ tag }}</span>
               </p>
+              <!--
+                作者与 star 来自 GitHub API，可能缺席（非 GitHub 托管 / 离线 /
+                限流）。缺席时整行不渲染，而不是显示「作者：—」这种占位噪音。
+              -->
+              <p v-if="entry.repo?.author || entry.repo?.stars !== undefined" class="card__repo">
+                <span v-if="entry.repo?.author" class="card__author">
+                  {{ t('plugins.market.author') }} {{ entry.repo.author }}
+                </span>
+                <span v-if="entry.repo?.stars !== undefined" class="card__stars">
+                  <Star :size="11" :stroke-width="2" />
+                  {{ starsLabel(entry.repo.stars) }}
+                </span>
+              </p>
             </div>
             <div class="card__actions">
+              <button
+                v-if="!readonly && canInstall(entry)"
+                class="btn btn--primary btn--sm"
+                type="button"
+                :disabled="Boolean(store.installing) || store.isInstalled(entry.name)"
+                :title="store.isInstalled(entry.name) ? t('plugins.market.installed') : ''"
+                @click="installEntry(entry)"
+              >
+                <Download :size="13" :stroke-width="1.8" />
+                <span>{{
+                  store.installing === entry.name
+                    ? t('plugins.market.installing')
+                    : t('plugins.market.install')
+                }}</span>
+              </button>
               <button
                 class="btn btn--ghost btn--sm"
                 type="button"
@@ -438,15 +505,22 @@ function contributionSummary(record: (typeof store.records)[number]): string {
                 <span>{{ t('plugins.market.repository') }}</span>
               </button>
             </div>
+            <!--
+              没提供产物的条目：给出为什么没有安装按钮，而不是静默少一个控件。
+              用户看到「不能装」时必须知道原因，否则会怀疑是客户端出了问题。
+            -->
+            <p v-if="!readonly && !canInstall(entry)" class="card__no-artifact">
+              {{ t('plugins.market.noArtifact') }}
+            </p>
           </article>
         </div>
 
-        <!--
-          为什么这里没有「安装」按钮：桌面端没有解压库（安装包刻意零运行时依赖），
-          下载 tarball → 解压 → 校验这条链只有容器运维面有。给一个点了必然失败
-          的按钮，比不给按钮更糟。
-        -->
-        <p v-if="!readonly" class="market-note">{{ t('plugins.market.installHint') }}</p>
+        <p v-if="!readonly" class="market-note">
+          {{ t('plugins.market.installHint') }}
+          <button class="market-note__link" type="button" @click="openSubmitDocs()">
+            {{ t('plugins.market.submit') }} →
+          </button>
+        </p>
       </div>
 
       <p v-if="store.error" class="plugins__error">{{ store.error }}</p>
@@ -600,6 +674,52 @@ function contributionSummary(record: (typeof store.records)[number]): string {
   margin: 16px 0 0;
   font-size: 11.5px;
   line-height: 1.7;
+  color: var(--dv-ui-text-dim);
+}
+
+/* 上架文档入口：做成行内文字链接，不抢「安装」按钮的视觉重量 */
+.market-note__link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--dv-ui-accent);
+  cursor: pointer;
+}
+
+.market-note__link:hover {
+  text-decoration: underline;
+}
+
+/* 作者与 star：弱化到辅助信息，不与插件描述抢注意力 */
+.card__repo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  color: var(--dv-ui-text-dim);
+}
+
+.card__author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card__stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  /* 数字区固定最小宽度：star 数从 9 变 10、从 999 变 1.2k 时不推挤左侧作者名 */
+  font-variant-numeric: tabular-nums;
+}
+
+.card__no-artifact {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 2px;
+  font-size: 11.5px;
   color: var(--dv-ui-text-dim);
 }
 

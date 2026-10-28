@@ -1,6 +1,6 @@
 {
-  "$comment": "插件市场清单（远端配置文件）。托管在 GitHub 上（默认 raw.githubusercontent.com/OneFanki/docvi/main/plugins/market.json），客户端打开插件面板时拉取并缓存到本机，可手动刷新。它**只列第三方/可选插件**及各自的仓库地址；内置插件（base / audio）随安装包发布、不存在「安装」这个动作，因此不在这里登记——它们固定出现在「已安装」页签。字段：name（包名，[a-z0-9-]）、version、repository（插件源码仓库，必填且必须 http(s)）、displayName/description（字符串或 {zh,en}）、trust（presentation | sandbox-service | trusted-service）、tags、tarball（可选，预构建包地址，供容器运维面安装）。",
+  "$comment": "插件市场清单（远端配置文件）。托管在 GitHub 上（默认 raw.githubusercontent.com/OneFanki/docvi/main/plugins/market.json），客户端打开插件面板时拉取并缓存到本机，可手动刷新。它**只列第三方/可选插件**及各自的仓库地址与产物入口；内置插件（base / audio）随安装包发布、不存在「安装」这个动作，因此不在这里登记——它们固定出现在「已安装」页签。上架方式：编辑本文件、在 plugins 数组追加一项并提 PR，完整规范见 docs/plugin-market.md。字段：name（包名，[a-z0-9-]，须与 manifest 一致）、version（须与 manifest 一致）、repository（插件源码仓库，必填且必须 http(s)）、displayName/description（字符串或 {zh,en}）、trust（presentation | sandbox-service | trusted-service）、tags、artifact（{ manifest: manifest 的绝对 https 地址, sha256?: manifest 的 SHA-256 }——缺失则只能打开仓库、不能一键安装；其余产物文件由客户端按 manifest 的 entry/styles 推出）、repo（作者与 star，由每日 CI 批量刷新——GraphQL 一次查询带 100 个仓库，作者无需填写，也不要手写）。",
   "schemaVersion": 1,
-  "updatedAt": "2026-10-24",
+  "updatedAt": "2026-10-27",
   "plugins": []
 }

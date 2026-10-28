@@ -51,6 +51,8 @@ export interface PluginStoreOptions {
 export interface PluginStore {
   /** 内置插件根（dev = 仓库 plugins/；打包后 = resources/plugins） */
   readonly builtinDir: string
+  /** 用户插件根（`<userData>/plugins/`）：市场安装往这里落位 */
+  readonly userDir: string
   list(): PluginRecord[]
   find(id: string): PluginRecord | undefined
   /** 安装一个插件目录（已校验 manifest）：复制到 userDir/<id>/<version>/ */
@@ -266,6 +268,7 @@ export function createPluginStore(options: PluginStoreOptions): PluginStore {
 
   return {
     builtinDir: options.builtinDir,
+    userDir: options.userDir,
     list: scanAll,
     find: id => scanAll().find(record => record.manifest.name === id),
     install(sourceDir) {

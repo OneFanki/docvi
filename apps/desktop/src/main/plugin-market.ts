@@ -1,7 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-import type { MarketCatalog, MarketEntry } from '@docvi/shared'
+import type { MarketCatalog, MarketEntry, MarketRepoMeta } from '@docvi/shared'
+
+import { parseArtifact } from './plugin-artifact.ts'
 
 /**
  * 插件市场清单的拉取、缓存与解析。
@@ -75,6 +77,23 @@ function str(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+/** 仓库元信息（作者 / star）：字段逐个校验，坏值丢弃而不是让整条记录失效 */
+function parseRepoMeta(raw: unknown): MarketRepoMeta | null {
+  if (!raw || typeof raw !== 'object') return null
+  const record = raw as Record<string, unknown>
+  const meta: MarketRepoMeta = {}
+  if (typeof record.stars === 'number' && Number.isFinite(record.stars) && record.stars >= 0) {
+    meta.stars = Math.floor(record.stars)
+  }
+  const author = str(record.author)
+  if (author) meta.author = author
+  const avatar = str(record.avatar)
+  if (avatar && /^https:\/\//i.test(avatar)) meta.avatar = avatar
+  const homepage = str(record.homepage)
+  if (homepage && /^https:\/\//i.test(homepage)) meta.homepage = homepage
+  return Object.keys(meta).length ? meta : null
+}
+
 /**
  * 解析远端清单。
  *
@@ -101,6 +120,10 @@ export function parseCatalog(raw: unknown, now: number, sourceUrl: string): Mark
         ? entry.trust
         : 'presentation'
 
+    // 产物入口：地址不可信就当没有（不是整条拒绝——仍可「打开仓库」）
+    const artifact = parseArtifact(entry.artifact)
+    const repo = parseRepoMeta(entry.repo)
+
     plugins.push({
       name,
       displayName: localized(entry.displayName, name),
@@ -111,7 +134,8 @@ export function parseCatalog(raw: unknown, now: number, sourceUrl: string): Mark
         ? { tags: entry.tags.filter((tag): tag is string => typeof tag === 'string') }
         : {}),
       repository,
-      ...(str(entry.tarball) ? { tarball: str(entry.tarball) as string } : {}),
+      ...(artifact ? { artifact } : {}),
+      ...(repo ? { repo } : {}),
     })
   }
 

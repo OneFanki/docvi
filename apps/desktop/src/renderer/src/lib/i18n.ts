@@ -377,8 +377,14 @@ const zh: Dict = {
   'plugins.market.refreshing': '刷新中…',
   'plugins.market.repository': '打开仓库',
   'plugins.market.installed': '已安装',
+  'plugins.market.install': '安装',
+  'plugins.market.installing': '安装中…',
+  'plugins.market.noArtifact': '该插件未提供预构建产物，请打开仓库按文档手动安装',
+  'plugins.market.author': '作者',
+  'plugins.market.stars': '{count} star',
+  'plugins.market.submit': '如何上架自己的插件',
   'plugins.market.installHint':
-    '市场的每条插件都指向它自己的仓库。桌面端不自带解压与校验能力，因此不在这里直接安装——需要的话由容器运维面安装，或把构建好的插件包用「从文件夹安装」装进来。',
+    '产物由插件自己的仓库自动构建，这里只负责下载并校验。上架方式见接入文档——向市场清单提一个 PR 即可。',
   'plugins.market.empty': '市场清单里还没有条目。',
   'plugins.market.emptyOffline': '没有可用的清单缓存，且当前拉取失败——联网后点「刷新」再试。',
   'plugins.market.neverFetched': '尚未拉取过',
@@ -792,8 +798,15 @@ const en: Dict = {
   'plugins.market.refreshing': 'Refreshing…',
   'plugins.market.repository': 'Open repository',
   'plugins.market.installed': 'Installed',
+  'plugins.market.install': 'Install',
+  'plugins.market.installing': 'Installing…',
+  'plugins.market.noArtifact':
+    'This plugin publishes no prebuilt artifact — open its repository and follow its docs',
+  'plugins.market.author': 'Author',
+  'plugins.market.stars': '{count} stars',
+  'plugins.market.submit': 'How to list your plugin',
   'plugins.market.installHint':
-    'Every market entry points at its own repository. The desktop app ships without an archive extractor, so it does not install from the market directly — use the container ops console, or install a prebuilt plugin folder with "Install from folder".',
+    'Artifacts are built by each plugin repository in CI; the app only downloads and verifies them. To list your plugin, open a PR against the market catalog — see the integration guide.',
   'plugins.market.empty': 'The market catalog has no entries yet.',
   'plugins.market.emptyOffline':
     'No cached catalog and the current fetch failed — retry with "Refresh" once online.',

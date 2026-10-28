@@ -127,6 +127,8 @@ export const IPC = {
   pluginList: 'docvi:plugin:list',
   /** 插件市场清单（远端配置文件 + 本地缓存） */
   pluginMarket: 'docvi:plugin:market',
+  /** 从市场拉产物并安装（桌面）；容器版由部署器在构建期装配 */
+  pluginInstallFromMarket: 'docvi:plugin:install-from-market',
   pluginInstall: 'docvi:plugin:install',
   pluginUninstall: 'docvi:plugin:uninstall',
   pluginSetEnabled: 'docvi:plugin:set-enabled',
@@ -781,6 +783,13 @@ export interface DocviApi {
    * 没缓存就返回空目录。市场不可用绝不能拖垮已装插件列表。
    */
   pluginMarket(options?: { refresh?: boolean }): Promise<Result<MarketCatalog>>
+  /**
+   * 从市场安装一个插件：拉产物 → 校验 → 落盘。
+   *
+   * 只接受清单条目本身（不接受渲染层传来的任意 URL）：主进程会再用
+   * `artifact` 段做一次可信域与一致性校验。返回安装后的插件清单。
+   */
+  pluginInstallFromMarket(entry: MarketEntry): Promise<Result<PluginRecordView[]>>
   /** 打开目录选择框安装插件；取消时 data 为 null */
   pluginInstall(): Promise<Result<PluginRecordView | null>>
   pluginUninstall(id: string): Promise<Result<PluginRecordView[]>>
@@ -843,11 +852,9 @@ export interface DocviApi {
  * 仓库地址。清单本身不含内置插件——内置插件随安装包发布，不存在「安装」这个
  * 动作，只在「已安装」里启停。
  *
- * 桌面端对市场条目的能力边界：
- *  - 能做的事：浏览清单、打开插件仓库、查看缓存与刷新；
- *  - 不能做的事：从市场下载安装。插件是预构建产物（dist/index.js + style.css），
- *    安装需要下载 tarball、解压、校验、落位，桌面端刻意保持零运行时依赖
- *    （安装包里不带 node_modules），这条链只有容器运维面有。
+ * 插件的产物由**作者自己的仓库自动构建**（规范见 `docs/plugin-market.md`），
+ * 客户端只负责拉产物：清单给出 manifest 的绝对地址，manifest 里再声明入口与
+ * 样式，逐个下载即可。这样客户端不需要解压库，也不必信任整包体积。
  */
 export interface MarketEntry {
   name: string
@@ -856,10 +863,51 @@ export interface MarketEntry {
   description?: { zh: string; en?: string }
   trust: 'presentation' | 'sandbox-service' | 'trusted-service'
   tags?: string[]
-  /** 插件源码仓库（GitHub 等）。桌面端的主要动作就是打开它 */
+  /** 插件源码仓库（GitHub 等）。没有产物时的主要动作就是打开它 */
   repository: string
-  /** 预构建 tarball（可选）：容器运维面据此安装，桌面端只展示 */
-  tarball?: string
+  /**
+   * 预构建产物的入口（manifest 的绝对地址）。
+   *
+   * 没有这个字段的条目只能「打开仓库」——不是所有插件都提供预构建产物
+   * （可能还没配好 CI）。界面据此决定「安装」按钮是否可用。
+   */
+  artifact?: MarketArtifactRef
+  /**
+   * 仓库元信息（作者 / star）。**清单自带**，由每日 CI 批量刷新
+   * （见 `.github/workflows/market-refresh.yml`）——客户端不做任何 GitHub
+   * API 调用：未认证限额只有 60 次/小时且按 IP 共享，逐仓查询在几十个条目
+   * 时就会撞死。新上架的条目要等下一次刷新才有数据，缺席时界面不渲染该行。
+   */
+  repo?: MarketRepoMeta
+}
+
+/** 清单条目里「产物在哪」：manifest 地址 + 可选的完整性校验 */
+export interface MarketArtifactRef {
+  /** manifest 的绝对 https 地址（必须在可信域内） */
+  manifest: string
+  /** manifest 的 SHA-256（十六进制）；给了就校验 */
+  sha256?: string
+}
+
+/** 仓库的展示元信息（作者 / star / 头像 / 主页） */
+export interface MarketRepoMeta {
+  stars?: number
+  author?: string
+  avatar?: string
+  homepage?: string
+}
+
+/**
+ * star 数的展示形式：1000 以上折成 `1.2k`，避免卡片被长数字撑宽。
+ *
+ * 放共享包而不是各自的界面里：主进程要按同一份规则生成文案、渲染层要显示，
+ * 两处各写一份必然出现「上面写 1200、下面写 1.2k」。
+ */
+export function formatStars(stars: number): string {
+  if (!Number.isFinite(stars) || stars < 0) return '0'
+  if (stars < 1000) return String(Math.floor(stars))
+  const thousands = stars / 1000
+  return `${thousands >= 10 ? Math.round(thousands) : thousands.toFixed(1).replace(/\.0$/, '')}k`
 }
 
 export interface MarketCatalog {

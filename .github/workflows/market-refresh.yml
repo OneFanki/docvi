@@ -1,0 +1,50 @@
+# 市场清单的每日刷新：批量拉取插件仓库的 star 与作者，回写 plugins/market.json。
+#
+# star/作者数据只在这里采集（GraphQL 一次查询带 100 个仓库；认证后限额千级，
+# 客户端零 GitHub API 调用——未认证限额 60 次/小时按 IP 共享，逐仓查询必撞死）。
+#
+# 两个触发点：
+#   1. 每日定时（北京时间 11:30 前后，避开整点的调度高峰）；
+#   2. 改动了 plugins/market.json 的推送——新上架的插件当次就能拿到 star，
+#      不用等到第二天。刷新提交本身也会触发一次，但那次查不到差异、不会
+#      再提交，循环在这里终止。
+name: 市场刷新
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['plugins/market.json']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: market-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.18
+      - name: 批量刷新 star 与作者
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/market-refresh.mjs
+      - name: 有差异才提交
+        run: |
+          if git diff --quiet plugins/market.json; then
+            echo "无差异，跳过提交"
+          else
+            git config user.name "docvi-market-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add plugins/market.json
+            git commit -m "chore(root): 每日刷新插件 star 与作者信息"
+            git push
+          fi

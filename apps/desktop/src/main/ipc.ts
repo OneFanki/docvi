@@ -13,6 +13,7 @@ import {
   type ImageImportRequest,
   type ImageImportResult,
   type MarketCatalog,
+  type MarketEntry,
   type PluginRecordView,
   type RecentEntry,
   type RuntimeInfo,
@@ -41,6 +42,7 @@ import type { FileWatcher } from './fs-watch.ts'
 import type { LocalAssetRegistry } from './local-assets.ts'
 import { toView, type PluginStore } from './plugin-store.ts'
 import { loadMarket } from './plugin-market.ts'
+import { installFromMarket } from './plugin-install.ts'
 import {
   cancelUpdateDownload,
   checkForUpdate,
@@ -849,14 +851,42 @@ export function registerIpc(
   )
 
   /**
-   * 从市场安装 → **已移除**。
+   * 从市场安装：拉产物 → 逐文件校验 → 落盘。
    *
-   * 市场现在是远端目录（列第三方插件与仓库地址），安装需要下载 tarball、解压、
-   * 校验、落位。桌面端刻意保持零运行时依赖（安装包里不带 node_modules，没有
-   * 解压库），这条链只在容器运维面存在。界面上不再给这个按钮——点了必然失败
-   * 的入口比没有入口更糟。
+   * 渲染层传回清单条目，主进程**不信任其中任何字段**：地址再过一遍可信域、
+   * 远端 manifest 与条目做 name/version 一致性校验、包内路径逐段验安全。
    */
+  ipcMain.handle(
+    IPC.pluginInstallFromMarket,
+    async (_event, raw: unknown): Promise<Result<PluginRecordView[]>> => {
+      try {
+        const entry = raw as Partial<MarketEntry> | null
+        if (
+          !entry ||
+          typeof entry.name !== 'string' ||
+          typeof entry.version !== 'string' ||
+          !entry.artifact
+        ) {
+          return fail('E_INVALID', '安装请求缺少插件标识或产物地址')
+        }
+        await installFromMarket({
+          entry: { name: entry.name, version: entry.version, artifact: entry.artifact },
+          plugins,
+        })
+        service.sync()
+        return ok(plugins.list().map(toView))
+      } catch (error) {
+        return toFailure(error)
+      }
+    },
+  )
 
+  /**
+   * 从本地目录安装（开发态 / 手头已有插件包）。
+   *
+   * 与市场上架无关：市场走 `pluginInstallFromMarket`（拉远端产物）。
+   * 这条保留给「作者给自己调试」的场景——选一个含 plugin.json 的目录即可。
+   */
   ipcMain.handle(IPC.pluginInstall, async (event): Promise<Result<PluginRecordView | null>> => {
     const window = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.OpenDialogOptions = {

@@ -66,6 +66,11 @@ export const usePluginStore = defineStore('plugins', () => {
       market.value = []
       return
     }
+    /*
+     * 作者与 star 直接来自清单的 `repo` 字段（每日 CI 批量刷新，见
+     * .github/workflows/market-refresh.yml）——这里不做任何客户端 GitHub
+     * API 调用：未认证限额 60 次/小时按 IP 共享，逐仓查询必然撞死。
+     */
     market.value = (result.data as MarketCatalog).plugins
     marketMeta.value = result.data as MarketCatalog
   }
@@ -81,6 +86,58 @@ export const usePluginStore = defineStore('plugins', () => {
     return records.value.some(record => record.name === name)
   }
 
+  /** 正在安装的插件名（界面据此给按钮转圈并防重复点击） */
+  const installing = ref<string | null>(null)
+
+  /**
+   * 从市场安装：主进程拉产物 → 校验 → 落盘，回来后刷新已装列表。
+   *
+   * 与 `install()`（选本地目录）分开：这条要走网络、有明确的失败原因，
+   * 界面需要把错误原样告诉用户（「manifest 校验值不一致」这类信息不能吞掉）。
+   */
+  /**
+   * 从市场安装：主进程拉产物 → 校验 → 落盘，回来后刷新已装列表。
+   *
+   * 与 `install()`（选本地目录）分开：这条要走网络、有明确的失败原因，
+   * 界面需要把错误原样告诉用户（「manifest 校验值不一致」这类信息不能吞掉）。
+   *
+   * ⚠️ 传给 IPC 前必须**深拷贝成纯对象**：`entry` 来自 pinia 的 reactive 数组，
+   * 是 Proxy，跨进程结构化克隆会直接抛 `An object could not be cloned.`——
+   * 而这个异常在渲染层被 async 函数吞成 rejected promise，界面只表现为
+   * 「点了没反应」，控制台连一条错都不会有（实测踩到）。
+   */
+  async function installFromMarket(entry: MarketEntry): Promise<boolean> {
+    if (installing.value) return false
+    installing.value = entry.name
+    error.value = null
+    try {
+      // 只带主进程真正需要的三个字段，顺带剥掉 Proxy 与多余数据
+      const plain = {
+        name: entry.name,
+        version: entry.version,
+        ...(entry.artifact ? { artifact: { ...entry.artifact } } : {}),
+      }
+      const result = await window.docvi.pluginInstallFromMarket(plain as MarketEntry)
+      if (!result.ok) {
+        // 错误文案由界面拼（store 不认识当前语言）
+        error.value = result.error.message
+        return false
+      }
+      records.value = result.data
+      return true
+    } catch (thrown) {
+      /*
+       * 走到这里说明请求根本没发出去（最典型就是上面那个 Proxy 克隆失败）。
+       * 必须转成界面能显示的文案：静默吞掉会让用户以为按钮坏了。
+       */
+      error.value = `安装请求发送失败：${thrown instanceof Error ? thrown.message : String(thrown)}`
+      return false
+    } finally {
+      installing.value = null
+    }
+  }
+
+  /** 补仓库元信息（作者 / star）：拿不到就保持原样，不影响清单展示 */
   async function remove(id: string): Promise<void> {
     const list = unwrap(await window.docvi.pluginUninstall(id))
     if (list) records.value = list
@@ -108,6 +165,8 @@ export const usePluginStore = defineStore('plugins', () => {
     load,
     loadMarket,
     install,
+    installing,
+    installFromMarket,
     isInstalled,
     remove,
     setEnabled,

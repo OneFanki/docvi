@@ -832,6 +832,15 @@ export function createWebHost(options: WebHostOptions = {}): DocviApi {
       return deny('容器版不支持安装插件')
     },
     /**
+     * 从市场安装：容器版的插件由部署方在构建期装配进镜像，读者面没有写权限。
+     *
+     * 与「打开安装对话框」不同，这里返回 deny 而不是空操作：安装是一个用户
+     * 明确点击的写动作，静默成功会让界面显示「已安装」而磁盘上什么都没有。
+     */
+    async pluginInstallFromMarket() {
+      return deny('容器版插件由部署方统一装配，读者面不能安装')
+    },
+    /**
      * 容器版市场清单：读者面没有安装权限，因此返回空目录；安装属于运维面
      * （`/_/admin`，token 后），与读者面分开——不在浏览器里给读者一个点了
      * 必然失败的「安装」按钮。

@@ -156,6 +156,7 @@ const api: DocviApi = {
 
   pluginList: () => ipcRenderer.invoke(IPC.pluginList),
   pluginMarket: options => ipcRenderer.invoke(IPC.pluginMarket, options),
+  pluginInstallFromMarket: entry => ipcRenderer.invoke(IPC.pluginInstallFromMarket, entry),
   pluginInstall: () => ipcRenderer.invoke(IPC.pluginInstall),
   pluginUninstall: id => ipcRenderer.invoke(IPC.pluginUninstall, id),
   pluginSetEnabled: (id, enabled) => ipcRenderer.invoke(IPC.pluginSetEnabled, id, enabled),
