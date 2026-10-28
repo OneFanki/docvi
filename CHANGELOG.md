@@ -24,7 +24,41 @@
 
 ## [未发布]
 
-（暂无）
+### 中文
+
+- **插件市场可以直接安装了**：插件产物由作者自己的仓库自动构建，客户端只负责下载与校验。市场卡片显示作者与 GitHub star 数，点「安装」即可装进来；想上架自己的插件，向清单提一个 PR 就行——规范见 `docs/plugin-market.md`
+- **图表全屏后横向居中了**：长流程图以前一进全屏就挤在左边、右侧一大片空白
+- **装包变小、启动变快**：安装包 110MB → 100MB；编辑器代码改为按需加载，冷启动少解析约 1.1MB
+
+#### 完整变更
+
+- **插件市场改为「拉产物」**：清单条目新增 `artifact`（manifest 的绝对地址 + 可选 SHA-256），客户端取回 manifest 后按其 `entry` / `styles` 逐个下载纯文本文件直接落盘——因此不需要解压库，桌面安装包仍然零运行时依赖
+- **安装链路逐环校验**：https + 可信域（GitHub）→ 拒收 HTML 错误页 → 校验 SHA-256 → 校验 manifest 的 name/version 与清单一致 → 包内路径逐段验安全（拒绝 `..`、绝对路径、含冒号的盘符）→ 先写临时目录再整体落位
+- **作者与 star 由每日 CI 刷新**：清单的 `repo` 字段由 GitHub Actions 每日批量更新（GraphQL 一次查询带 100 个仓库，认证后限额千级）。客户端**零 GitHub API 调用**——未认证限额 60 次/小时按 IP 共享，逐仓查询在几十个插件时就会撞死
+- **上架文档**：`docs/plugin-market.md` 写清产物规范、GitHub Actions 构建示例、PR 流程与自查清单
+- **图表全屏居中**：缩放适配从「两轴都装下才居中，否则两轴都贴左上」改为**分轴判断**——装得下的轴居中、装不下的轴贴边。长流程图正是「高度超出、宽度有余」，旧逻辑把横向一起贴左，实测左右留白差 1165px
+- **居中计算扣掉 padding**：平移量改为相对内容区计算，修掉画布 `padding: 0.4rem` 造成的 13px 偏差（现为 1px 亚像素误差）
+- **编辑器按需加载**：CodeMirror 全家桶拆成独立 chunk（1.15MB），只在进入编辑态时加载；主 chunk 从 2888KB 降到 1737KB
+- **裁剪 Windows 运行时**：`afterPack` 钩子移除只服务 WebGPU / SwiftShader 的五份 DLL（共 36.7MB 原始），解包 336MB → 299MB，安装包 110MB → 100MB。已实测裁剪后标题、mermaid SVG、Shiki 高亮、背景色全部正常
+- **测试实例不再污染 `%APPDATA%`**：`DOCVI_DATA_DIR` 现在同时把 Electron 的 userData 指过去（此前只有应用数据被隔离，Chromium 仍在 APPDATA 下堆积缓存目录，一轮探针实测残留 96 个）
+
+### English
+
+- **The plugin market can install now**: artifacts are built by each plugin's own repository; the app only downloads and verifies them. Cards show the author and GitHub stars, and one click installs. To list your plugin, open a PR against the catalog — see `docs/plugin-market.md`
+- **Diagrams are horizontally centred in fullscreen**: tall flowcharts used to sit against the left edge with empty space on the right
+- **Smaller installer, faster start**: 110MB → 100MB, and the editor is now loaded on demand, cutting ~1.1MB from cold-start parsing
+
+#### Full changes
+
+- **Market switched to pulling artifacts**: entries gain an `artifact` field (absolute manifest URL plus optional SHA-256); the app reads the manifest, then downloads its `entry` / `styles` as plain text. No archive extractor is needed, so the desktop package still has zero runtime deps
+- **Every install step is verified**: https + trusted host (GitHub) → reject HTML error pages → verify SHA-256 → check manifest name/version against the catalog → validate every in-package path (no `..`, no absolute paths, no drive letters) → stage in a temp dir, then move into place
+- **Author and stars refreshed daily by CI**: the catalog's `repo` field is updated daily by GitHub Actions (GraphQL batches 100 repositories per query; authenticated limits are in the thousands). The client makes **zero GitHub API calls** — the unauthenticated limit is 60/hour shared per IP, which per-repo queries would exhaust within a few dozen plugins
+- **Integration guide**: `docs/plugin-market.md` covers artifact layout, a GitHub Actions example, the PR flow, and a checklist
+- **Fullscreen diagrams are centred**: fitting changed from "centre only when both axes fit, otherwise pin both to the top-left" to **per-axis** — a fitting axis centres, an overflowing axis pins. Tall flowcharts overflow vertically but have horizontal room, which the old logic dragged to the left (measured 1165px difference)
+- **Centring excludes padding**: offsets are computed against the content box, fixing a 13px bias from the canvas `padding: 0.4rem`
+- **Editor loaded on demand**: the CodeMirror bundle is its own 1.15MB chunk loaded only when editing; the main chunk drops from 2888KB to 1737KB
+- **Windows runtime trimmed**: an `afterPack` hook removes five DLLs that only serve WebGPU / SwiftShader (36.7MB raw), taking the unpacked app from 336MB to 299MB and the installer from 110MB to 100MB. Verified afterwards that headings, mermaid SVG, Shiki highlighting and background all still render
+- **Test instances no longer litter `%APPDATA%`**: `DOCVI_DATA_DIR` now also redirects Electron's userData (previously only app data was isolated, while Chromium kept piling up cache directories — one probe run left 96 behind)
 
 ## [0.3.0] - 2026-10-27
 
