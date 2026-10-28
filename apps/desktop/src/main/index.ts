@@ -46,6 +46,20 @@ const RENDERER_DIST = join(__dirname, '../renderer')
  */
 app.setName(process.env.DOCVI_INSTANCE?.trim() || 'docvi')
 
+/*
+ * `DOCVI_DATA_DIR` 生效时，把 Electron 自己的 userData 也指过去。
+ *
+ * 只覆盖 `dataDir()`（设置、会话、插件）是不够的：Chromium 仍会往
+ * `%APPDATA%/<instance>` 写 Cache / GPUCache / Local Storage 等几十个目录。
+ * 自动化跑一次就留一坨，长跑下去能攒出上百个（实测一次清理出 96 个）。
+ *
+ * 必须在 app ready **之前**调用：session 与 partition 的存储位置都从它派生，
+ * 晚了会分裂成两处。
+ */
+if (process.env.DOCVI_DATA_DIR?.trim()) {
+  app.setPath('userData', process.env.DOCVI_DATA_DIR.trim())
+}
+
 /**
  * 覆盖式滚动条。
  *
