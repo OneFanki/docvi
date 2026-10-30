@@ -195,6 +195,29 @@
   --dv-c-cat-4: #85a8f0;
   --dv-c-cat-5: #d9a05b;
   --dv-c-cat-6: #98a2b0;
+
+  /*
+   * mermaid 派生色：图表主题与文档主题之间的中间层。默认从同档文档 token
+   * 派生（换主题 mermaid 跟着变）；同时它就是插件主题包的插槽——主题包在
+   * token 表里覆盖 `--dv-mermaid-*` 即可单独改图表外观，不必另建体系。
+   * mermaid 的 themeVariables 需要具体色值（内部做颜色运算，var() 解析不了），
+   * 渲染时由 renderer-core 读这组变量的 computed 值注入。
+   */
+  --dv-mermaid-bg: var(--dv-doc-surface);
+  --dv-mermaid-node-bg: var(--dv-doc-surface-2);
+  --dv-mermaid-node-border: var(--dv-doc-border-strong);
+  --dv-mermaid-text: var(--dv-doc-text);
+  --dv-mermaid-text-2: var(--dv-doc-text-muted);
+  --dv-mermaid-line: var(--dv-doc-graph-wire);
+  --dv-mermaid-accent: var(--dv-doc-accent);
+  --dv-mermaid-note-bg: var(--dv-doc-code-bg);
+  --dv-mermaid-cluster-bg: var(--dv-doc-surface);
+  --dv-mermaid-cat-1: var(--dv-c-cat-1);
+  --dv-mermaid-cat-2: var(--dv-c-cat-2);
+  --dv-mermaid-cat-3: var(--dv-c-cat-3);
+  --dv-mermaid-cat-4: var(--dv-c-cat-4);
+  --dv-mermaid-cat-5: var(--dv-c-cat-5);
+  --dv-mermaid-cat-6: var(--dv-c-cat-6);
 }
 
 :root[data-theme='paper'],
@@ -237,6 +260,23 @@
   --dv-c-cat-4: #335c8f;
   --dv-c-cat-5: #8a6720;
   --dv-c-cat-6: #6b6459;
+
+  /* mermaid 派生色：与暗色档同名同语义，值跟随亮色文档 token（见暗色档注释） */
+  --dv-mermaid-bg: var(--dv-doc-surface);
+  --dv-mermaid-node-bg: var(--dv-doc-surface-2);
+  --dv-mermaid-node-border: var(--dv-doc-border-strong);
+  --dv-mermaid-text: var(--dv-doc-text);
+  --dv-mermaid-text-2: var(--dv-doc-text-muted);
+  --dv-mermaid-line: var(--dv-doc-graph-wire);
+  --dv-mermaid-accent: var(--dv-doc-accent);
+  --dv-mermaid-note-bg: var(--dv-doc-code-bg);
+  --dv-mermaid-cluster-bg: var(--dv-doc-surface);
+  --dv-mermaid-cat-1: var(--dv-c-cat-1);
+  --dv-mermaid-cat-2: var(--dv-c-cat-2);
+  --dv-mermaid-cat-3: var(--dv-c-cat-3);
+  --dv-mermaid-cat-4: var(--dv-c-cat-4);
+  --dv-mermaid-cat-5: var(--dv-c-cat-5);
+  --dv-mermaid-cat-6: var(--dv-c-cat-6);
 }
 
 /* 正文容器：只负责底色与排版基线，颜色全部来自上面的主题变量 */
@@ -507,6 +547,23 @@
   --dv-c-cat-5: #cba45f;
   --dv-c-cat-6: #949aa4;
 
+  /* mermaid 派生组：跟随本主题的文档 token（组语义见暗色基底档注释） */
+  --dv-mermaid-bg: var(--dv-doc-surface);
+  --dv-mermaid-node-bg: var(--dv-doc-surface-2);
+  --dv-mermaid-node-border: var(--dv-doc-border-strong);
+  --dv-mermaid-text: var(--dv-doc-text);
+  --dv-mermaid-text-2: var(--dv-doc-text-muted);
+  --dv-mermaid-line: var(--dv-doc-graph-wire);
+  --dv-mermaid-accent: var(--dv-doc-accent);
+  --dv-mermaid-note-bg: var(--dv-doc-code-bg);
+  --dv-mermaid-cluster-bg: var(--dv-doc-surface);
+  --dv-mermaid-cat-1: var(--dv-c-cat-1);
+  --dv-mermaid-cat-2: var(--dv-c-cat-2);
+  --dv-mermaid-cat-3: var(--dv-c-cat-3);
+  --dv-mermaid-cat-4: var(--dv-c-cat-4);
+  --dv-mermaid-cat-5: var(--dv-c-cat-5);
+  --dv-mermaid-cat-6: var(--dv-c-cat-6);
+
   --dv-ed-bg: #14161a;
   --dv-ed-text: #c3c7ce;
   --dv-ed-caret: #6f9fd8;
@@ -607,6 +664,23 @@
   --dv-c-cat-4: #2f5f8f;
   --dv-c-cat-5: #8a6420;
   --dv-c-cat-6: #626a76;
+
+  /* mermaid 派生组：跟随本主题的文档 token（组语义见暗色基底档注释） */
+  --dv-mermaid-bg: var(--dv-doc-surface);
+  --dv-mermaid-node-bg: var(--dv-doc-surface-2);
+  --dv-mermaid-node-border: var(--dv-doc-border-strong);
+  --dv-mermaid-text: var(--dv-doc-text);
+  --dv-mermaid-text-2: var(--dv-doc-text-muted);
+  --dv-mermaid-line: var(--dv-doc-graph-wire);
+  --dv-mermaid-accent: var(--dv-doc-accent);
+  --dv-mermaid-note-bg: var(--dv-doc-code-bg);
+  --dv-mermaid-cluster-bg: var(--dv-doc-surface);
+  --dv-mermaid-cat-1: var(--dv-c-cat-1);
+  --dv-mermaid-cat-2: var(--dv-c-cat-2);
+  --dv-mermaid-cat-3: var(--dv-c-cat-3);
+  --dv-mermaid-cat-4: var(--dv-c-cat-4);
+  --dv-mermaid-cat-5: var(--dv-c-cat-5);
+  --dv-mermaid-cat-6: var(--dv-c-cat-6);
 
   --dv-ed-bg: #f7f8fa;
   --dv-ed-text: #23272e;

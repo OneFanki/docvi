@@ -99,7 +99,7 @@ async function load(): Promise<void> {
   try {
     await highlightPass(host)
     // 预览跟随文档主题的明暗：深色文档配深色图表，否则图里白底会刺眼
-    await mermaidPass(host, document.documentElement.dataset.theme !== 'paper')
+    await mermaidPass(host)
   } catch {
     // 高亮 / 图表失败不阻断预览：至少组件本体能看
   }

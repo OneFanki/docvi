@@ -496,6 +496,7 @@
 /* ---------- mermaid ---------- */
 
 .at-doc .at-mermaid {
+  position: relative;
   margin: 16px 0;
   padding: 18px;
   background-color: var(--dv-doc-surface);
@@ -503,8 +504,6 @@
   border-radius: var(--dv-radius-md);
   text-align: center;
   overflow-x: auto;
-  /* 可点开大图（图内文字在阅读列里常常小到看不清） */
-  cursor: zoom-in;
 }
 
 .at-doc .at-mermaid:hover {
@@ -514,6 +513,78 @@
 .at-doc .at-mermaid svg {
   max-width: 100%;
   height: auto;
+}
+
+/* 全屏入口：悬停图表时在右上角显现；点击图本身不再触发全屏（hover 探图易误触） */
+.at-mermaid__expand {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--dv-doc-border);
+  border-radius: var(--dv-radius-sm);
+  background: var(--dv-doc-surface);
+  color: var(--dv-doc-text-muted);
+  cursor: zoom-in;
+  opacity: 0;
+  transition:
+    opacity var(--dv-dur-1) var(--dv-ease),
+    color var(--dv-dur-1) var(--dv-ease),
+    border-color var(--dv-dur-1) var(--dv-ease);
+}
+
+.at-doc .at-mermaid:hover .at-mermaid__expand,
+.at-mermaid__expand:focus-visible {
+  opacity: 1;
+}
+
+.at-mermaid__expand:hover {
+  color: var(--dv-doc-accent);
+  border-color: var(--dv-doc-accent);
+}
+
+.at-mermaid__expand svg {
+  width: 13px;
+  height: 13px;
+}
+
+/*
+ * mermaid hover 联动（class 由 renderer-core 的 enhanceMermaidSvg 写入）：
+ * 悬停节点/边 → is-focus 根 + is-hot 命中集合，无关元素淡出。选择器同时
+ * 覆盖阅读列（.at-doc）与灯箱（.lightbox__svg）——灯箱里的 SVG 是 outerHTML
+ * 快照，class 会随快照带进来。高亮要压过 mermaid 写死的内联色，只能 !important。
+ */
+:is(.at-doc .at-mermaid, .lightbox__svg)
+  svg
+  :is(.node, path.flowchart-link, path.relationshipLine, g.edgeLabel) {
+  transition: opacity var(--dv-dur-1) var(--dv-ease);
+}
+
+:is(.at-doc .at-mermaid, .lightbox__svg)
+  svg.is-focus
+  :is(.node, path.flowchart-link, path.relationshipLine, g.edgeLabel):not(.is-hot) {
+  /* 淡出但保持可读：0.15 会把无关分支压到看不清，聚焦变成「隐藏」 */
+  opacity: 0.35;
+}
+
+:is(.at-doc .at-mermaid, .lightbox__svg) svg .node.is-hot > :is(rect, polygon, circle, path) {
+  stroke: var(--dv-doc-accent) !important;
+  stroke-width: 2px !important;
+}
+
+:is(.at-doc .at-mermaid, .lightbox__svg) svg path.is-hot {
+  stroke: var(--dv-doc-accent) !important;
+  stroke-width: 2.5px !important;
+}
+
+/* 高亮的边标签：文字提亮（压过 mermaid 的内联色），配合 DOM 提层盖住相邻标签 */
+:is(.at-doc .at-mermaid, .lightbox__svg) svg g.edgeLabel.is-hot span,
+:is(.at-doc .at-mermaid, .lightbox__svg) svg g.edgeLabel.is-hot text {
+  color: var(--dv-doc-accent) !important;
+  fill: var(--dv-doc-accent) !important;
 }
 
 /* ---------- 声明式组件占位 ---------- */

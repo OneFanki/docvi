@@ -32,6 +32,20 @@ description: 改 at-* 声明式协议、frontmatter components 段、组件运�
 5. `courses/component-showcase`（活样例，必须能打开）
 6. 插件包 `docs/SKILL.md`（MCP `get_plugin_docs` 的数据源）
 
+## 图表达选型（mermaid vs 声明式组件）
+
+两者互补而非竞争，按内容形态分流（AI 生成文档时同规则）：
+
+| 内容形态                                          | 用什么                              |
+| ------------------------------------------------- | ----------------------------------- |
+| 任意拓扑 / subgraph / 大节点数 / 一次性说明       | mermaid fence（表达广度通道）       |
+| 时序需要**步进叙事**（上一步/下一步、当前步高亮） | `at-message-flow`                   |
+| 表关系的正式表达（连线锚定到字段行、悬停联动）    | `at-table-graph`                    |
+| 流程 / 状态需要 `current` 高亮、点击下钻说明      | `at-flow-diagram` / `at-state-flow` |
+| 快速小规模表关系（草稿级、无需字段级锚定）        | mermaid `erDiagram` 亦可            |
+
+mermaid 的观感与交互由宿主统一负责：配色走 `--dv-mermaid-*` 派生变量（跟随文档主题，插件主题包可覆盖），hover 联动由 `packages/renderer-core/src/mermaid-hover.ts` 注入——作者写裸 mermaid fence 即可，不需要装饰。
+
 ## 禁止
 
 - 组件内直接读 frontmatter / 路由 / 宿主全局；一切输入走 props（由桥接层注入）。
@@ -41,3 +55,4 @@ description: 改 at-* 声明式协议、frontmatter components 段、组件运�
 ## 变更触发
 
 - 任何协议字段语义变化 → 同步本 skill + `docs/architecture/组件协议.md` + 插件包文档，并评估是否需要 ADR。
+- 升级 mermaid 依赖 → 先跑 `scripts/dev/probe-mermaid-shape.mjs` 核对 SVG id 约定，再核对 `mermaid-hover.ts` 的解析器。

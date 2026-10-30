@@ -75,7 +75,7 @@ async function renderOffscreen(options: ExportRenderOptions): Promise<{
   // 两趟异步渲染都要等：不等的话导出文件里代码块是裸文本、图表是空 div
   try {
     await highlightPass(surface)
-    await mermaidPass(surface, options.docTheme !== 'paper')
+    await mermaidPass(surface)
   } catch {
     // 渲染失败不阻断导出：宁可少一块高亮，也不要导不出来
   }

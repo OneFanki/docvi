@@ -222,7 +222,7 @@ class RenderedBlockWidget extends WidgetType {
           mount = core.mountPluginBlocks(body, this.registry, { onMissing: () => undefined })
         }
         await core.highlightPass(body)
-        await core.mermaidPass(body, document.documentElement.dataset.theme !== 'paper')
+        await core.mermaidPass(body)
       } catch {
         // 渲染失败保留源码文本，不打断编辑
         body.textContent = this.source

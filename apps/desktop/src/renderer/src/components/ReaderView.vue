@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { AlertTriangle, ChevronDown, ChevronUp, FileText, Search, Share2, X } from 'lucide-vue-next'
 import {
+  enhanceMermaidSvg,
   highlightPass,
   mermaidPass,
   mountDeclarativeComponents,
@@ -203,21 +204,13 @@ const lightbox = ref<{
   title: string
 }>({ open: false, src: '', kind: 'image', title: '' })
 
-/** 点击图片或 mermaid 图 → 打开大图 */
+/**
+ * 点击图片 → 打开大图。
+ *
+ * mermaid 图不再走点击全屏（点图是 hover 探图的常见误触），放大入口收敛为
+ * 图容器右上角的「全屏查看」按钮，经 `docvi-mermaid-expand` 事件上报。
+ */
 function openViewer(target: HTMLElement): boolean {
-  // mermaid：点击 svg 内任意位置（节点 / 文字 / 连线都算）
-  const diagram = target.closest<HTMLElement>('.at-mermaid')
-  const svg = diagram?.querySelector('svg')
-  if (diagram && svg) {
-    const label = svg.getAttribute('aria-roledescription') ?? 'mermaid'
-    lightbox.value = {
-      open: true,
-      src: svg.outerHTML,
-      kind: 'svg',
-      title: label === 'mermaid' ? '流程图' : label,
-    }
-    return true
-  }
   const img = target.closest<HTMLImageElement>('img')
   if (img?.src) {
     lightbox.value = { open: true, src: img.currentSrc || img.src, kind: 'image', title: img.alt }
@@ -225,6 +218,33 @@ function openViewer(target: HTMLElement): boolean {
   }
   return false
 }
+
+/** mermaid 图右上角的全屏按钮（renderer-core 注入，bubbles 冒泡到文章容器） */
+function onMermaidExpand(event: Event): void {
+  const detail = (event as CustomEvent<{ svg?: string; label?: string }>).detail
+  if (!detail?.svg) return
+  lightbox.value = {
+    open: true,
+    src: detail.svg,
+    kind: 'svg',
+    title: detail.label === 'mermaid' ? '流程图' : (detail.label ?? ''),
+  }
+}
+
+/*
+ * 灯箱里的 mermaid SVG 是 outerHTML 快照：is-focus / is-hot 的**样式状态**随
+ * 快照带进来，但 hover 监听不会——打开后对新注入的 DOM 重挂一次联动，
+ * 放大看图（边重叠看不清的主场景）时 hover 同样可用。
+ */
+watch(
+  () => lightbox.value.open && lightbox.value.kind === 'svg',
+  async active => {
+    if (!active) return
+    await nextTick()
+    const svg = document.querySelector<SVGSVGElement>('.lightbox__svg svg')
+    if (svg) enhanceMermaidSvg(svg)
+  },
+)
 
 /* ---------- 渲染 ---------- */
 
@@ -319,7 +339,7 @@ watch(
     try {
       await highlightPass(surface)
       if (current !== generation) return
-      await mermaidPass(surface, props.docTheme !== 'paper')
+      await mermaidPass(surface, { expandable: true })
     } catch (error) {
       console.warn('[reader] 异步渲染失败', error)
     }
@@ -502,7 +522,13 @@ defineExpose({
         </button>
       </div>
 
-      <article v-else ref="host" class="reader__page" @click="onContentClick">
+      <article
+        v-else
+        ref="host"
+        class="reader__page"
+        @click="onContentClick"
+        @docvi-mermaid-expand="onMermaidExpand"
+      >
         <!--
           元信息（路径 / 字数 / 阅读时长 / 体积）放在正文**之前**：
           读者打开一篇长文档前就该知道要花多久，而不是滚到最底部才看到。

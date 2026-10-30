@@ -95,7 +95,7 @@ async function load(): Promise<void> {
 
   try {
     await highlightPass(host)
-    await mermaidPass(host, document.documentElement.dataset.theme !== 'paper')
+    await mermaidPass(host)
   } catch {
     // 高亮 / 图表失败不阻断预览：至少组件本体能看
   }
