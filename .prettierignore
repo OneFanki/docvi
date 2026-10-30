@@ -16,3 +16,6 @@ apps/desktop/out
 # 插件语法示例：块内是 YAML，prettier 会把收尾 `:::` 当成列表延续补上缩进，
 # 改坏示例（扫描器虽容错 0-3 格，但示例本身应当展示规范写法）
 plugins/*/examples
+
+# ZCode 会话工具产物（计划、任务卡等），不属于仓库代码
+.zcode
