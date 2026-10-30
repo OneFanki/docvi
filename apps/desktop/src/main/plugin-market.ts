@@ -104,6 +104,13 @@ export function parseCatalog(raw: unknown, now: number, sourceUrl: string): Mark
   const record = (raw ?? {}) as Record<string, unknown>
   const list = Array.isArray(record.plugins) ? record.plugins : []
   const plugins: MarketEntry[] = []
+  /*
+   * `name` 是全市场的唯一键：已装插件的目录按它落位、`isInstalled` 按它匹配。
+   * 一个仓库可以登记多个插件（每个插件一条记录、各自的 name 与 artifact），
+   * 但同一个 name 出现两次就是维护失误——不去重的话界面上会出现两张卡片，
+   * 安装哪张都写同一个目录。保留首次出现的，后面的丢弃。
+   */
+  const seenNames = new Set<string>()
 
   for (const item of list) {
     if (!item || typeof item !== 'object') continue
@@ -114,6 +121,8 @@ export function parseCatalog(raw: unknown, now: number, sourceUrl: string): Mark
     if (!name || !version || !repository) continue
     // 仓库地址必须是 http(s)：`javascript:` 之类塞进 <a href> 就是一个 XSS 面
     if (!/^https?:\/\//i.test(repository)) continue
+    if (seenNames.has(name)) continue
+    seenNames.add(name)
 
     const trust =
       entry.trust === 'trusted-service' || entry.trust === 'sandbox-service'

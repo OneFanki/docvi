@@ -196,6 +196,41 @@ https://github.com/you/docs-plugin-audio/releases/download/v0.1.0/dist/style.css
 - [ ] `repository` 是公开仓库，能直接打开
 - [ ] 本地用 `node -e "JSON.parse(require('fs').readFileSync('plugins/market.json','utf8'))"` 确认 JSON 合法
 
+### 一个仓库维护多个插件（monorepo）
+
+明确支持：**`name` 是全市场的唯一键，仓库地址不是**。每个插件在清单里各占一条
+记录，共享同一个 `repository`，各有自己的 `artifact`：
+
+```json
+{
+  "plugins": [
+    {
+      "name": "acme-pack-a",
+      "version": "1.0.0",
+      "repository": "https://github.com/acme/docvi-plugins",
+      "artifact": { "manifest": "https://raw.githubusercontent.com/acme/docvi-plugins/v1/a/plugin.json" }
+    },
+    {
+      "name": "acme-pack-b",
+      "version": "2.0.0",
+      "repository": "https://github.com/acme/docvi-plugins",
+      "artifact": { "manifest": "https://raw.githubusercontent.com/acme/docvi-plugins/v1/b/plugin.json" }
+    }
+  ]
+}
+```
+
+配套要求只有两条：
+
+1. **产物分开构建**：每个插件一份自己的 `plugin.json` + `dist/`，放在不同地址
+   （同一 Release 的不同路径、或各自独立 tag 都行）。安装落盘按 manifest 的
+   `name` 走，与仓库结构无关。
+2. **`name` 互不相同**：同 `name` 的两条记录解析时只保留第一条（唯一键是它——
+   已装目录按它落位、「已安装」标记按它匹配），重复即为维护失误。
+
+star 与作者数据对同仓库的多个条目只查一次 GitHub、回写给每一条记录，
+作者无需做任何额外操作。
+
 ## 五、清单字段完整说明
 
 | 字段                | 必填 | 说明                                           |

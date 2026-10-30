@@ -86,6 +86,69 @@ test('清单解析：本地化字段双形态都可读', () => {
   assert.deepEqual(catalog.plugins[0].description, { zh: '纯字符串描述' })
 })
 
+test('清单解析：一个仓库可以登记多个插件（各占一条、各有产物）', () => {
+  /*
+   * 一仓多插件是明确支持的用法（monorepo）：每个插件在清单里各占一条记录，
+   * 共享同一个 repository、各自有自己的 artifact 地址。安装落盘按 manifest
+   * 的 name 走（不是按仓库走），两个插件互不干扰；每日 star 刷新对同一仓库
+   * 只查一次、回写给两条记录（见 scripts/market-refresh.mjs 的 collectTargets）。
+   */
+  const catalog = parseCatalog(
+    {
+      plugins: [
+        {
+          name: 'acme-pack-a',
+          version: '1.0.0',
+          repository: 'https://github.com/acme/docvi-plugins',
+          artifact: {
+            manifest: 'https://raw.githubusercontent.com/acme/docvi-plugins/v1/a/plugin.json',
+          },
+        },
+        {
+          name: 'acme-pack-b',
+          version: '2.0.0',
+          repository: 'https://github.com/acme/docvi-plugins',
+          artifact: {
+            manifest: 'https://raw.githubusercontent.com/acme/docvi-plugins/v1/b/plugin.json',
+          },
+        },
+      ],
+    },
+    1,
+    'u',
+  )
+  assert.deepEqual(
+    catalog.plugins.map(item => item.name),
+    ['acme-pack-a', 'acme-pack-b'],
+  )
+})
+
+test('清单解析：重复 name 只保留第一条（维护失误不该变成两张卡片）', () => {
+  /*
+   * name 是全市场的唯一键：安装按它落位、「已安装」按它匹配。同 name 出现
+   * 两次时界面会出现两张卡片、安装哪张都写同一个目录——保留首次出现的，
+   * 后面的丢弃，让 PR 审查去发现这份失误。
+   */
+  const catalog = parseCatalog(
+    {
+      plugins: [
+        { name: 'dup', version: '1.0.0', repository: 'https://github.com/a/one' },
+        { name: 'dup', version: '9.9.9', repository: 'https://github.com/a/two' },
+        { name: 'other', version: '1.0.0', repository: 'https://github.com/a/three' },
+      ],
+    },
+    1,
+    'u',
+  )
+  const dup = catalog.plugins.filter(item => item.name === 'dup')
+  assert.equal(dup.length, 1)
+  assert.equal(dup[0].version, '1.0.0')
+  assert.deepEqual(
+    catalog.plugins.map(item => item.name),
+    ['dup', 'other'],
+  )
+})
+
 /* ---------- 拉取与缓存 ---------- */
 
 function fakeFetch(payload, status = 200) {
