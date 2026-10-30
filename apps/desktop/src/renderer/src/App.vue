@@ -8,11 +8,21 @@ import {
   ref,
   watch,
 } from 'vue'
-import { AlertCircle, CheckCircle2, FilePlus2, FolderPlus, Link2, X } from 'lucide-vue-next'
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronsDown,
+  ChevronsDownUp,
+  FilePlus2,
+  Link2,
+  LocateFixed,
+  X,
+} from 'lucide-vue-next'
 import type {
   DocPayload,
   ExportFormat,
   PortalWorkspace,
+  TreeNode,
   WorkspaceEntry,
   WorkspaceFilesChange,
 } from '@docvi/shared'
@@ -33,6 +43,13 @@ import { useI18n, applyExternalLocale, migrateLegacyLocale } from './lib/i18n'
 import { isReadOnlyHost, isWebHost } from './lib/host'
 import { sameDocumentPath } from './lib/external-change'
 import { affectsDocument, affectsTree } from './lib/workspace-change'
+import {
+  ancestorDirs,
+  baseNameOf,
+  collectExpandPaths,
+  filterMoveTargets,
+  TREE_DND_TYPE,
+} from './lib/tree-selection'
 import {
   createHandoff,
   forgetDocument,
@@ -425,7 +442,17 @@ function askConfirm(
   message: string,
   actions: ConfirmAction[],
 ): Promise<string | null> {
-  confirmState.value = { open: true, title, message, actions }
+  /*
+   * 询问类操作恒带显式「取消」：Esc 和点遮罩虽然也能放弃，但那是看不见的
+   * 通道——用户实测「移动确认框没有取消按钮」（2026-10-28）。取消走 close
+   * 通道（choice 为 null），各调用处的「不等于确认 id 即放弃」天然兼容。
+   */
+  confirmState.value = {
+    open: true,
+    title,
+    message,
+    actions: [...actions, { id: 'cancel', label: t('dialog.cancel') }],
+  }
   return new Promise(resolve => {
     confirmResolve = resolve
   })
@@ -1941,7 +1968,7 @@ function setDocMode(mode: DocMode): void {
  * 粘贴文本会把整篇文档塞进去；而跨工作区粘贴不该被允许（两边路径根不同，
  * 复制过去等于往别人的仓库里写）。所以这是应用内的一个引用，只在同工作区内有效。
  */
-const clipboard = ref<{ workspaceId: string; relPath: string; mode: 'cut' | 'copy' } | null>(null)
+const clipboard = ref<{ workspaceId: string; paths: string[]; mode: 'cut' | 'copy' } | null>(null)
 
 const promptState = ref<{
   open: boolean
@@ -1979,23 +2006,20 @@ function treeWorkspaceId(): string | null {
   return activeTab.value?.workspaceId ?? null
 }
 
-/** 树节点的父目录（`a/b/c.md` → `a/b`；顶层 → 空串） */
-function parentDirOf(relPath: string): string {
-  const slash = relPath.lastIndexOf('/')
-  return slash < 0 ? '' : relPath.slice(0, slash)
-}
-
-/** 名字最后一段（用于把相对路径还原成文件名） */
-function baseNameOf(relPath: string): string {
-  const slash = relPath.lastIndexOf('/')
-  return slash < 0 ? relPath : relPath.slice(slash + 1)
+/** 把一组目录并进当前标签的展开集合（已展开的不动） */
+function expandDirs(dirs: string[]): void {
+  const tab = activeTab.value
+  if (!tab) return
+  const merged = new Set([...tab.expanded, ...dirs])
+  if (merged.size !== tab.expanded.length) tabs.setExpanded(tab.id, [...merged])
 }
 
 /**
  * 新建：文件或目录。
  *
  * 新建完直接打开文件——用户建一个空文档的目的就是写它，让他再去树里点一次
- * 是多余的步骤。目录建完只刷新树（没有可打开的东西）。
+ * 是多余的步骤。目录建完展开它自己：空目录现在会进树（此前被扫描器剔除，
+ * 「创建成功但看不见」），铺开让用户立刻确认它就在那里。
  */
 function newEntry(kind: 'file' | 'dir', dirRelPath = ''): void {
   const workspaceId = treeWorkspaceId()
@@ -2008,15 +2032,13 @@ function newEntry(kind: 'file' | 'dir', dirRelPath = ''): void {
     suffix: kind === 'file' ? '.md' : undefined,
     onConfirm: async value => {
       const relPath = await store.createEntry(workspaceId, dirRelPath, value, kind)
-      if (!relPath || kind !== 'file') return
-      // 展开到新文件所在目录，否则它会出现折叠着的父目录里、看不见
-      const dir = parentDirOf(relPath)
-      if (dir) {
-        const expanded = new Set(activeTab.value?.expanded ?? [])
-        const segments = dir.split('/')
-        for (let i = 1; i <= segments.length; i += 1) expanded.add(segments.slice(0, i).join('/'))
-        tabs.setExpanded(activeTab.value?.id ?? '', [...expanded])
+      if (!relPath) return
+      if (kind === 'dir') {
+        expandDirs([...ancestorDirs(relPath), relPath])
+        return
       }
+      // 展开到新文件所在目录，否则它会出现折叠着的父目录里、看不见
+      expandDirs(ancestorDirs(relPath))
       await openDoc(relPath)
     },
   })
@@ -2058,16 +2080,17 @@ async function reloadAfterMove(workspaceId: string, relPath: string): Promise<vo
  *
  * 不立即动文件：剪切只记录意图，真正移动发生在粘贴时——「剪切后反悔」
  * 只要粘贴到原处即可，不会留下「已经删了但没粘」的危险窗口。
+ * 批量选中后这里一次记录多项，粘贴时逐条执行。
  */
-function clipEntry(mode: 'cut' | 'copy', relPath: string): void {
+function clipEntry(mode: 'cut' | 'copy', paths: string[]): void {
   const workspaceId = treeWorkspaceId()
-  if (!workspaceId) return
-  clipboard.value = { workspaceId, relPath, mode }
+  if (!workspaceId || !paths.length) return
+  clipboard.value = { workspaceId, paths: [...paths], mode }
   notice.value = mode === 'cut' ? t('tree.cutHint') : t('tree.copyHint')
   window.setTimeout(() => (notice.value = null), 2200)
 }
 
-/** 粘贴到某目录：剪切走 move，复制走 copy */
+/** 粘贴到某目录：剪切走 move，复制走 copy；逐条执行，失败的跳过并计数 */
 async function pasteInto(dirRelPath: string): Promise<void> {
   const clip = clipboard.value
   if (!clip) return
@@ -2076,43 +2099,170 @@ async function pasteInto(dirRelPath: string): Promise<void> {
     store.setError(t('tree.crossWorkspace'))
     return
   }
-  const result =
-    clip.mode === 'cut'
-      ? await store.moveEntry(workspaceId, clip.relPath, dirRelPath)
-      : await store.copyEntry(workspaceId, clip.relPath, dirRelPath)
-  if (!result) return
+  let pasted = 0
+  let failed = 0
+  let lastName = ''
+  for (const path of clip.paths) {
+    const result =
+      clip.mode === 'cut'
+        ? await store.moveEntry(workspaceId, path, dirRelPath)
+        : await store.copyEntry(workspaceId, path, dirRelPath)
+    if (!result) {
+      failed += 1
+      continue
+    }
+    pasted += 1
+    lastName = baseNameOf(result)
+    await reloadAfterMove(workspaceId, result)
+  }
   if (clip.mode === 'cut') clipboard.value = null
-  await reloadAfterMove(workspaceId, result)
-  notice.value = t('tree.pasted', { name: baseNameOf(result) })
+  expandDirs(ancestorDirs(dirRelPath))
+  if (!pasted) return
+  notice.value = failed
+    ? t('tree.pastedPartial', { done: pasted, failed })
+    : pasted === 1
+      ? t('tree.pasted', { name: lastName })
+      : t('tree.pastedMany', { count: pasted })
   window.setTimeout(() => (notice.value = null), 2200)
 }
 
-/** 删除：进回收站，先问一句（文档是用户手写的内容） */
-async function trashEntry(relPath: string): Promise<void> {
+/** 删除：进回收站，先问一句（文档是用户手写的内容）；批量选中一次删多项 */
+async function trashEntries(paths: string[]): Promise<void> {
   const workspaceId = treeWorkspaceId()
-  if (!workspaceId) return
-  const choice = await askConfirm(
-    t('tree.trashTitle'),
-    t('tree.trashMessage', { name: baseNameOf(relPath) }),
-    [{ id: 'trash', label: t('tree.trash'), tone: 'danger' }],
-  )
+  if (!workspaceId || !paths.length) return
+  const message =
+    paths.length === 1
+      ? t('tree.trashMessage', { name: baseNameOf(paths[0] ?? '') })
+      : t('tree.trashManyMessage', { count: paths.length })
+  const choice = await askConfirm(t('tree.trashTitle'), message, [
+    { id: 'trash', label: t('tree.trash'), tone: 'danger' },
+  ])
   if (choice !== 'trash') return
-  const ok = await store.trashEntry(workspaceId, relPath)
-  if (!ok) return
-  tabs.dropPath(workspaceId, relPath)
-  notice.value = t('tree.trashed', { name: baseNameOf(relPath) })
+  let removed = 0
+  let lastName = ''
+  for (const path of paths) {
+    const ok = await store.trashEntry(workspaceId, path)
+    if (!ok) continue
+    tabs.dropPath(workspaceId, path)
+    removed += 1
+    lastName = baseNameOf(path)
+  }
+  if (!removed) return
+  notice.value =
+    removed === 1
+      ? t('tree.trashed', { name: lastName })
+      : t('tree.trashedMany', { count: removed })
   window.setTimeout(() => (notice.value = null), 2200)
 }
 
-/** 目录树右键菜单的总入口 */
-function onTreeFsAction(action: TreeFsAction, path: string, dir: string): void {
+/** 目录树右键菜单的总入口（paths = 选区内整组或右键的单行） */
+function onTreeFsAction(action: TreeFsAction, paths: string[], dir: string): void {
   if (action === 'newFile') newEntry('file', dir)
   else if (action === 'newDir') newEntry('dir', dir)
-  else if (action === 'rename') void renameEntry(path)
-  else if (action === 'cut') clipEntry('cut', path)
-  else if (action === 'copy') clipEntry('copy', path)
+  else if (action === 'rename') {
+    if (paths[0]) void renameEntry(paths[0])
+  } else if (action === 'cut') clipEntry('cut', paths)
+  else if (action === 'copy') clipEntry('copy', paths)
   else if (action === 'paste') void pasteInto(dir)
-  else if (action === 'trash') void trashEntry(path)
+  else if (action === 'trash') void trashEntries(paths)
+}
+
+/* ---------- 树：批量选中与拖拽移动 ---------- */
+
+/** 批量选中的路径集合（树的操作现场；DocTree 负责算 Shift 范围） */
+const treeSelection = ref<string[]>([])
+/** 「定位当前文档」的滚动信号：路径没变时 DocTree 的 watch 不触发，用递增数驱动 */
+const revealTick = ref(0)
+
+// 切换工作区标签：树换了，选区必然失效
+watch(
+  () => activeTab.value?.workspaceId,
+  () => {
+    treeSelection.value = []
+  },
+)
+
+// 树刷新（含磁盘 watcher 推送）：挑出已经不存在的路径，别让选区挂着幽灵条目
+watch(
+  () => store.tree,
+  tree => {
+    if (!treeSelection.value.length) return
+    const alive = new Set<string>()
+    const walk = (nodes: TreeNode[]): void => {
+      for (const node of nodes) {
+        alive.add(node.path)
+        walk(node.children ?? [])
+      }
+    }
+    walk(tree)
+    const next = treeSelection.value.filter(path => alive.has(path))
+    if (next.length !== treeSelection.value.length) treeSelection.value = next
+  },
+)
+
+/** 定位当前文档：展开祖先 + 滚动到行（全部收起后找回自己在哪） */
+function revealActive(): void {
+  const tab = activeTab.value
+  const relPath = activeRef.value?.relPath
+  if (!tab || !relPath) return
+  revealInTree(tab.id, relPath)
+  revealTick.value += 1
+}
+
+/** 展开所选：把选中节点的祖先与整棵子树铺开 */
+function expandChecked(): void {
+  if (!treeSelection.value.length) return
+  expandDirs(collectExpandPaths(store.tree, treeSelection.value))
+}
+
+/** 全部收起：顶层行保留，其余折叠（配合「定位当前文档」随时找回） */
+function collapseAll(): void {
+  const tab = activeTab.value
+  if (!tab) return
+  tabs.setExpanded(tab.id, [])
+}
+
+/**
+ * 拖拽落定：先确认再动——拖拽易误触，松手即移动会把「手滑」变成既成事实。
+ * 落到自身子孙 / 原地的项已被过滤（静默跳过，不是失败）；主进程 moveEntry
+ * 还有环防御与重名兜底，失败项计入汇总提示。
+ */
+async function onTreeMove(paths: string[], targetDir: string): Promise<void> {
+  const workspaceId = treeWorkspaceId()
+  if (!workspaceId) return
+  const { move } = filterMoveTargets(paths, targetDir)
+  if (!move.length) return
+  const targetName = targetDir ? baseNameOf(targetDir) : (activeScopeLabel.value ?? '')
+  const message =
+    move.length === 1
+      ? t('tree.moveMessageOne', { name: baseNameOf(move[0] ?? ''), target: targetName })
+      : t('tree.moveMessageMany', { count: move.length, target: targetName })
+  const choice = await askConfirm(t('tree.moveTitle'), message, [
+    { id: 'move', label: t('tree.moveConfirm'), tone: 'primary' },
+  ])
+  if (choice !== 'move') return
+  let done = 0
+  let failed = 0
+  let lastName = ''
+  for (const path of move) {
+    const result = await store.moveEntry(workspaceId, path, targetDir)
+    if (!result) {
+      failed += 1
+      continue
+    }
+    done += 1
+    lastName = baseNameOf(result)
+    await reloadAfterMove(workspaceId, result)
+  }
+  // 目标目录若是折叠的，移进去的东西看不见
+  expandDirs([...ancestorDirs(targetDir), ...(targetDir ? [targetDir] : [])])
+  if (!done) return
+  notice.value = failed
+    ? t('tree.movePartial', { done, failed })
+    : done === 1
+      ? t('tree.movedOne', { name: lastName })
+      : t('tree.movedMany', { count: done })
+  window.setTimeout(() => (notice.value = null), 2200)
 }
 
 /* ---------- 分屏：分隔条拖动 ---------- */
@@ -2179,6 +2329,8 @@ function onSplitRendered(): void {
 /* ---------- 拖放 ---------- */
 
 async function onDrop(event: DragEvent): Promise<void> {
+  // 树内拖拽中途松手在树之外（编辑器等区域）会落到这里：那是移动，不是打开文件
+  if (event.dataTransfer?.types.includes(TREE_DND_TYPE)) return
   const files = Array.from(event.dataTransfer?.files ?? [])
   if (!files.length) return
   const paths = window.docvi.pathsForFiles(files)
@@ -2935,44 +3087,76 @@ onBeforeUnmount(() => {
           />
         </div>
         <!--
-          工作区级新建入口：即便目录树为空（空工作区）也必须有地方新建第一篇
-          文档，否则只能去磁盘上手工建文件再回来。所以工具条放在空状态之外。
-          容器版文档只读，这一组入口整体不出现。
+          新建入口只有右键菜单（目标跟随右键节点）；空工作区没有节点可右键，
+          由下方空状态里的按钮兜底。定位 / 展开所选 / 全部收起在 DocTree 头部。
         -->
-        <div v-if="activeTab?.workspaceId && !isReadOnlyHost" class="tree-tools">
+        <!--
+          空工作区也能新建第一篇文档：树为空时没有节点可右键，新建入口只剩
+          这个空状态按钮（容器版文档只读，不出现）。
+        -->
+        <div v-if="!store.tree.length" class="sidebar__empty">
+          {{ t('empty.tree') }}
           <button
-            v-tooltip="t('tree.newFile')"
-            class="tree-tools__btn"
+            v-if="activeTab?.workspaceId && !isReadOnlyHost"
+            class="sidebar__empty-btn"
             type="button"
-            :aria-label="t('tree.newFile')"
             @click="newEntry('file')"
           >
             <FilePlus2 :size="13" :stroke-width="1.8" />
-          </button>
-          <button
-            v-tooltip="t('tree.newDir')"
-            class="tree-tools__btn"
-            type="button"
-            :aria-label="t('tree.newDir')"
-            @click="newEntry('dir')"
-          >
-            <FolderPlus :size="13" :stroke-width="1.8" />
+            {{ t('tree.newFile') }}
           </button>
         </div>
-        <div v-if="!store.tree.length" class="sidebar__empty">{{ t('empty.tree') }}</div>
         <DocTree
           v-else
           :nodes="store.tree"
           :selected-path="activeRef?.relPath ?? null"
           :expanded="activeTab?.expanded ?? []"
+          :checked-paths="treeSelection"
+          :reveal-signal="revealTick"
           :scope-label="activeScopeLabel"
           :can-paste="clipboard !== null"
           :readonly="isReadOnlyHost"
           @open="openDoc"
           @open-new-tab="openDocNewTab"
           @update-expanded="tabs.setExpanded(activeTab?.id ?? '', $event)"
+          @select="treeSelection = $event"
+          @move-requests="onTreeMove"
           @fs-action="onTreeFsAction"
-        />
+        >
+          <template #tools>
+            <button
+              v-tooltip="t('tree.reveal')"
+              class="tree-tools__btn"
+              type="button"
+              :disabled="!activeRef?.relPath"
+              :aria-label="t('tree.reveal')"
+              @click="revealActive"
+            >
+              <LocateFixed :size="13" :stroke-width="1.8" />
+            </button>
+            <button
+              v-if="!isReadOnlyHost"
+              v-tooltip="t('tree.expandChecked')"
+              class="tree-tools__btn"
+              type="button"
+              :disabled="!treeSelection.length"
+              :aria-label="t('tree.expandChecked')"
+              @click="expandChecked"
+            >
+              <ChevronsDown :size="13" :stroke-width="1.8" />
+            </button>
+            <button
+              v-tooltip="t('tree.collapseAll')"
+              class="tree-tools__btn"
+              type="button"
+              :disabled="!activeTab?.expanded.length"
+              :aria-label="t('tree.collapseAll')"
+              @click="collapseAll"
+            >
+              <ChevronsDownUp :size="13" :stroke-width="1.8" />
+            </button>
+          </template>
+        </DocTree>
       </aside>
 
       <main class="canvas">
@@ -3267,6 +3451,29 @@ onBeforeUnmount(() => {
   color: var(--dv-ui-text-dim);
 }
 
+/* 树为空时的新建入口：没有节点可右键，这里是唯一的新建途径 */
+.sidebar__empty-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--dv-ui-line-soft);
+  border-radius: var(--dv-ui-radius-sm);
+  background: transparent;
+  color: var(--dv-ui-text-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background var(--dv-ui-dur-1) var(--dv-ui-ease),
+    color var(--dv-ui-dur-1) var(--dv-ui-ease);
+}
+
+.sidebar__empty-btn:hover {
+  background: var(--dv-ui-surface-2);
+  color: var(--dv-ui-text);
+}
+
 /* 容器读者面的分支条：贴在侧栏顶部，与目录树共用一条分隔线 */
 .sidebar__branch {
   display: flex;
@@ -3276,16 +3483,10 @@ onBeforeUnmount(() => {
 }
 
 /*
- * 目录树工具条：新建文档 / 新建目录。
- * 靠右放，让它在树顶部不抢「工作区名」的位置；只在有工作区时出现。
+ * 目录树工具条按钮：定位当前文档 / 展开所选 / 全部收起。
+ * 通过 DocTree 的 tools slot 放在「工作区名」同一行右侧；新建已下沉到
+ * 右键菜单（目标跟随节点），不再占工具条。
  */
-.tree-tools {
-  display: flex;
-  justify-content: flex-end;
-  gap: 2px;
-  padding: 4px 8px 0;
-}
-
 .tree-tools__btn {
   width: 22px;
   height: 22px;
@@ -3304,6 +3505,16 @@ onBeforeUnmount(() => {
 .tree-tools__btn:hover {
   background: var(--dv-ui-surface-3);
   color: var(--dv-ui-text);
+}
+
+.tree-tools__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.tree-tools__btn:disabled:hover {
+  background: transparent;
+  color: var(--dv-ui-text-dim);
 }
 
 .canvas {

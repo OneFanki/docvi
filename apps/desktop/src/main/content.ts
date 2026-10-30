@@ -136,8 +136,9 @@ function scanDir(absDir: string, relDir: string, depth: number): RawNode[] {
     const rel = relDir ? `${relDir}/${name}` : name
     if (entry.isDirectory()) {
       if (isDirExcluded(name)) continue
+      // 空目录也要进树：用户刚建好的文件夹落盘成功却被这里剔除，界面毫无
+      // 变化，看起来像「创建失败」——这是 2026-10-28 修掉的误报源头。
       const children = scanDir(join(absDir, name), rel, depth + 1)
-      if (!children.length) continue
       // 落地页取本目录直接的 index.md/索引.md/README.md（子目录里的不算）
       const landingName = INDEX_BASENAMES.find(base =>
         children.some(c => c.type === 'doc' && `${c.name}.md` === base),
@@ -205,7 +206,9 @@ function toTreeNodes(raw: RawNode[]): TreeNode[] {
       name: node.name,
       type: 'dir',
       ...(node.landing ? { landing: node.landing } : {}),
-      ...(children.length ? { children } : {}),
+      // 空目录也带 children: []——树侧靠「有无 children 字段」画不出箭头会
+      // 误判成文件，靠 type 判断；带上空数组让「目录」这个事实自明。
+      children,
     }
   })
 }

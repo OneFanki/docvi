@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { ChevronRight, FileText, Folder, FolderOpen } from 'lucide-vue-next'
 
 import type { TreeNode } from '@docvi/shared'
+import { TREE_DND_TYPE } from '../lib/tree-selection'
 
 /**
  * 单个树节点（递归组件）。
@@ -14,9 +15,16 @@ const props = defineProps<{
   node: TreeNode
   depth: number
   expanded: Set<string>
+  /** 当前打开的文档（行级强高亮，语义是「正在读」） */
   selectedPath: string | null
+  /** 批量选中的路径集合（次级高亮，语义是「接下来要一起操作」） */
+  checked: Set<string>
   /** 键盘焦点所在节点（roving tabindex） */
   focusedPath?: string | null
+  /** 拖拽悬停的落点路径（高亮目标目录） */
+  dropTarget?: string | null
+  /** 是否可拖拽（只读宿主关闭） */
+  draggable?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -24,7 +32,16 @@ const emit = defineEmits<{
   toggle: [path: string]
   /** 右键：交给 DocTree 弹菜单（需要节点路径与是否目录） */
   context: [event: MouseEvent, path: string]
+  /** 修饰键选择：single=单选（伴随点击的默认行为）、toggle=Ctrl、range=Shift */
+  select: [mode: 'single' | 'toggle' | 'range', path: string]
+  dragStart: [event: DragEvent, path: string]
+  dragEnd: [event: DragEvent]
+  dragOverRow: [event: DragEvent, path: string]
+  dragLeaveRow: [event: DragEvent]
+  dropRow: [event: DragEvent, path: string]
 }>()
+
+const rowEl = ref<HTMLElement | null>(null)
 
 const isDir = computed(() => props.node.type === 'dir')
 const isOpen = computed(() => props.expanded.has(props.node.path))
@@ -64,7 +81,21 @@ const isSelected = computed(() => {
   return target !== null && target === props.selectedPath
 })
 
-function onRowClick(): void {
+const isChecked = computed(() => props.checked.has(props.node.path))
+
+const isDropTarget = computed(() => props.dropTarget === props.node.path)
+
+function onRowClick(event: MouseEvent): void {
+  // 修饰键选择只改选区，不触发打开/折叠——Ctrl 点目录把目录展开会直接
+  // 违背「多选不产生副作用」的预期
+  if (event.shiftKey) {
+    emit('select', 'range', props.node.path)
+    return
+  }
+  if (event.ctrlKey || event.metaKey) {
+    emit('select', 'toggle', props.node.path)
+    return
+  }
   if (isDir.value) {
     // 有落地页：点目录名 = 进入它的正文，**不折叠**。
     // 折叠与进入绑在一起会出现「刚打开的目录自己收起来，子页全部消失」，
@@ -72,32 +103,77 @@ function onRowClick(): void {
     if (canEnter.value) {
       emit('open', props.node.landing as string)
       if (!isOpen.value) emit('toggle', props.node.path)
-      return
+    } else {
+      emit('toggle', props.node.path)
     }
-    emit('toggle', props.node.path)
-    return
+  } else {
+    emit('open', props.node.path)
   }
-  emit('open', props.node.path)
+  emit('select', 'single', props.node.path)
+}
+
+/* ---------- 拖拽 ---------- */
+
+function isTreeDrag(event: DragEvent): boolean {
+  return event.dataTransfer?.types.includes(TREE_DND_TYPE) ?? false
+}
+
+function onDragStart(event: DragEvent): void {
+  emit('dragStart', event, props.node.path)
+}
+
+function onDragOver(event: DragEvent): void {
+  // 只对树内拖拽表态：外部文件拖入树区域不拦截（冒泡给 shell 打开文件）
+  if (!isTreeDrag(event)) return
+  event.preventDefault()
+  event.dataTransfer!.dropEffect = 'move'
+  emit('dragOverRow', event, props.node.path)
+}
+
+function onDragLeave(event: DragEvent): void {
+  // 进入行内子元素（图标/文字）也会触发 leave，不是真的离开
+  if (rowEl.value?.contains(event.relatedTarget as Node)) return
+  emit('dragLeaveRow', event)
+}
+
+function onDrop(event: DragEvent): void {
+  if (!isTreeDrag(event)) return
+  event.preventDefault()
+  // 树内移动到此为止，不许再冒泡给 shell 的外部文件拖放
+  event.stopPropagation()
+  emit('dropRow', event, props.node.path)
 }
 </script>
 
 <template>
   <div
     :id="`tree-node-${node.path}`"
+    ref="rowEl"
     class="row"
     role="treeitem"
     :data-tree-path="node.path"
     :aria-expanded="isDir ? isOpen : undefined"
-    :aria-selected="isSelected"
+    :aria-selected="isSelected || isChecked"
     :aria-level="depth + 1"
     :tabindex="focusedPath === node.path ? 0 : -1"
-    :class="{ 'is-selected': isSelected, 'is-group': isDir && !canEnter }"
+    :class="{
+      'is-selected': isSelected,
+      'is-checked': isChecked,
+      'is-group': isDir && !canEnter,
+      'is-drop-target': isDropTarget,
+    }"
     :style="{ '--depth': depth }"
+    :draggable="draggable ?? false"
     @click="onRowClick"
     @contextmenu="emit('context', $event, node.path)"
+    @dragstart="onDragStart"
+    @dragend="emit('dragEnd', $event)"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
   >
     <span
-      v-if="isDir && node.children?.length"
+      v-if="isDir"
       class="chevron"
       :class="{ 'is-open': isOpen }"
       aria-hidden="true"
@@ -126,10 +202,19 @@ function onRowClick(): void {
       :depth="depth + 1"
       :expanded="expanded"
       :selected-path="selectedPath"
+      :checked="checked"
       :focused-path="focusedPath"
+      :drop-target="dropTarget"
+      :draggable="draggable"
       @open="emit('open', $event)"
       @toggle="emit('toggle', $event)"
       @context="(event, path) => emit('context', event, path)"
+      @select="(mode, path) => emit('select', mode, path)"
+      @drag-start="(event, path) => emit('dragStart', event, path)"
+      @drag-end="emit('dragEnd', $event)"
+      @drag-over-row="(event, path) => emit('dragOverRow', event, path)"
+      @drag-leave-row="emit('dragLeaveRow', $event)"
+      @drop-row="(event, path) => emit('dropRow', event, path)"
     />
   </template>
 </template>
@@ -153,9 +238,21 @@ function onRowClick(): void {
   background: var(--dv-ui-surface-2);
 }
 
+/* 批量选中是次级高亮：比 hover 沉、比「当前打开的文档」浅 */
+.row.is-checked {
+  background: var(--dv-ui-surface-2);
+  color: var(--dv-ui-text);
+}
+
 .row.is-selected {
   background: var(--dv-ui-surface-3);
   color: var(--dv-ui-text);
+}
+
+/* 拖拽落点：虚线内框圈住目标目录，与 hover/选中都不同 */
+.row.is-drop-target {
+  outline: 1.5px dashed var(--dv-ui-focus);
+  outline-offset: -2px;
 }
 
 /* 键盘焦点与选中是两件事：选中表示「当前打开的文档」，焦点表示「方向键会从这里动」 */
