@@ -1,6 +1,6 @@
 {
-  "version": "0.3.0",
+  "version": "0.4.0",
   "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
-  "notes": "界面现在会实时跟随磁盘：AI 或 git 改动、增删文件后，正文、侧栏目录与全库搜索都自动跟上，不需要手动刷新。关于页新增 GitHub 入口与应用内自动更新，下载走系统代理。",
+  "notes": "目录树支持 Ctrl/Shift 批量选中与拖拽移动，右键菜单作用于整个选区。插件市场可以一键安装，产物由作者仓库自动构建、客户端逐环校验。流程图跟随文档主题配色，鼠标停在节点或连线上会点亮相关的边、对端节点与连线文字。",
   "homepage": "https://github.com/OneFanki/docvi"
 }

@@ -26,12 +26,35 @@
 
 ### 中文
 
+- （下个版本的用户可感知改动写在这里）
+
+### English
+
+- (User-visible changes for the next release go here)
+
+## [0.4.0] - 2026-11-02
+
+### 中文
+
+- **目录树支持批量操作与拖拽移动**：Ctrl/Shift 多选，右键菜单作用于整个选区，拖到目标目录即移动；新建的空文件夹立刻看得见
+- **图表跟随文档主题，悬停可见上下游**：流程图的连线文字与节点配色跟随当前主题；鼠标停在节点或连线上，相关的边、箭头、对端节点与连线文字一起亮起，其余淡出
 - **插件市场可以直接安装了**：插件产物由作者自己的仓库自动构建，客户端只负责下载与校验。市场卡片显示作者与 GitHub star 数，点「安装」即可装进来；想上架自己的插件，向清单提一个 PR 就行——规范见 `docs/plugin-market.md`
 - **图表全屏后横向居中了**：长流程图以前一进全屏就挤在左边、右侧一大片空白
 - **装包变小、启动变快**：安装包 110MB → 100MB；编辑器代码改为按需加载，冷启动少解析约 1.1MB
 
 #### 完整变更
 
+- **目录树批量选中**：Ctrl 加选、Shift 连选、普通点击清空；右键菜单与删除作用于整个选区，同目录内的移动/删除走一次落盘
+- **拖拽移动**：落点按「目录 / 文件的父目录 / 空白区域=内容根」判定，跳过了指向自身子孙与同目录的空操作；移动前弹确认框
+- **目录树工具栏改为「定位当前文档 / 展开所选 / 全部收起」**：新建与重命名下沉到右键菜单，选中项随当前文档走（搜索打开新文档不再残留旧选区）
+- **空目录进树**：扫描器此前对空目录直接 `continue`，用户新建的文件夹落盘成功却看不见，再建还提示重名。现在空目录照常出现，新建后自动展开
+- **统一确认框补「取消」按钮**
+- **mermaid 主题映射**：新增 `--dv-mermaid-*` 派生变量层，`themeVariables` 由 token 解析注入，换主题立即生效（此前 initialize 只跑一次，换主题后新渲染的图仍用旧配色）；亮暗判断改读 `data-appearance`，`mist` 等亮色主题不再被误判为暗色
+- **mermaid hover 联动**：悬停节点点亮出入口边、对端节点、箭头与连线文字，无关元素淡出；flowchart 与 erDiagram 通过 mermaid 生成的 `data-id` 精确配对边与标签（自环、平行边、密集标签下不会错位）；stateDiagram / sequenceDiagram 结构对不上，安全降级为不挂联动
+- **箭头随边一起高亮**：箭头是 mermaid 按「图 + 箭头类型」共享的 marker，直接改颜色会点亮全图；改为高亮时克隆一份专属 marker 只给命中的边用，空心标记（ER 图的鸦爪、圆圈）只描边不填色
+- **连线文字的可读性**：未命中的标签在聚焦态直接隐去（半透明文字叠在一起会糊成一团，且会抢走指针命中）；同时高亮的标签若仍重叠，沿各自的边路径找空位、按路径长度升序处理，找不到时做小范围平移兜底，高亮态底板改不透明
+- **点击图不再触发全屏**：改右上角「全屏查看」按钮（悬停时显现），避免 hover 探图时误触；灯箱内 hover 同样可用
+- **插件市场支持一个仓库登记多个插件**：按插件名去重，monorepo 场景下的清单写法补进 `docs/plugin-market.md`
 - **插件市场改为「拉产物」**：清单条目新增 `artifact`（manifest 的绝对地址 + 可选 SHA-256），客户端取回 manifest 后按其 `entry` / `styles` 逐个下载纯文本文件直接落盘——因此不需要解压库，桌面安装包仍然零运行时依赖
 - **安装链路逐环校验**：https + 可信域（GitHub）→ 拒收 HTML 错误页 → 校验 SHA-256 → 校验 manifest 的 name/version 与清单一致 → 包内路径逐段验安全（拒绝 `..`、绝对路径、含冒号的盘符）→ 先写临时目录再整体落位
 - **作者与 star 由每日 CI 刷新**：清单的 `repo` 字段由 GitHub Actions 每日批量更新（GraphQL 一次查询带 100 个仓库，认证后限额千级）。客户端**零 GitHub API 调用**——未认证限额 60 次/小时按 IP 共享，逐仓查询在几十个插件时就会撞死
@@ -44,12 +67,25 @@
 
 ### English
 
+- **Batch selection and drag-to-move in the file tree**: Ctrl/Shift to select several entries, act on the whole selection from the context menu, and drag to move; newly created empty folders show up right away
+- **Diagrams follow the document theme, and hovering reveals connections**: node and edge-label colours track the active theme; hovering a node or edge lights up the edges, the arrowheads, the far-end nodes and the edge labels, and fades the rest
 - **The plugin market can install now**: artifacts are built by each plugin's own repository; the app only downloads and verifies them. Cards show the author and GitHub stars, and one click installs. To list your plugin, open a PR against the catalog — see `docs/plugin-market.md`
 - **Diagrams are horizontally centred in fullscreen**: tall flowcharts used to sit against the left edge with empty space on the right
 - **Smaller installer, faster start**: 110MB → 100MB, and the editor is now loaded on demand, cutting ~1.1MB from cold-start parsing
 
 #### Full changes
 
+- **Batch selection in the tree**: Ctrl adds, Shift extends, a plain click clears. The context menu and delete act on the whole selection, and moving/deleting inside one directory goes through a single filesystem operation
+- **Drag to move**: the drop target resolves to "a directory", "the file's parent directory" or "empty space = content root", skipping no-ops that point at the entry itself, its own descendants, or its current directory. A confirmation dialog comes first
+- **Tree toolbar is now "locate current document / expand selection / collapse all"**: create and rename moved into the context menu, and the selection follows the current document (opening another file from search no longer leaves a stale selection)
+- **Empty directories appear in the tree**: the scanner used to `continue` past empty directories, so a freshly created folder was written to disk but stayed invisible — and creating it again reported a duplicate name. Empty directories now show up, and a new one is expanded automatically
+- **Every confirmation dialog gained a "Cancel" button**
+- **mermaid theme mapping**: a new `--dv-mermaid-*` derived-variable layer feeds `themeVariables`, and switching themes takes effect immediately (previously `initialize` ran only once, so diagrams rendered after a theme change kept the old palette). Light/dark detection reads `data-appearance`, so light themes such as `mist` are no longer misread as dark
+- **mermaid hover linking**: hovering a node lights up its incoming and outgoing edges, the arrowheads, the far-end nodes and the edge labels, fading everything else. Flowchart and erDiagram edges are paired with their labels via the `data-id` mermaid emits (no mispairing with self-loops, parallel edges or crowded labels). stateDiagram/sequenceDiagram expose no such structure and safely fall back to no linking
+- **Arrowheads light up with their edge**: arrowheads are `<marker>` elements mermaid defines once per diagram and arrow type, so recolouring them lit up the whole diagram. A dedicated clone is now created for the highlighted edge only; hollow markers (ER crow's feet, circles) get a stroke but no fill
+- **Readable edge labels**: unmatched labels are hidden outright in the focus state (semi-transparent text stacked on top of itself turns into mush, and would also swallow pointer events); if the highlighted labels still overlap, each one looks for a free spot along its own edge, processed shortest-path-first, with a small local shift as a last resort, and the highlighted labels get an opaque background
+- **Clicking a diagram no longer opens fullscreen**: a "Fullscreen" button appears in the top-right on hover instead, so probing a diagram with the pointer no longer triggers it. Hover works inside the lightbox too
+- **The market accepts several plugins per repository**: entries are deduplicated by plugin name, and the monorepo layout is documented in `docs/plugin-market.md`
 - **Market switched to pulling artifacts**: entries gain an `artifact` field (absolute manifest URL plus optional SHA-256); the app reads the manifest, then downloads its `entry` / `styles` as plain text. No archive extractor is needed, so the desktop package still has zero runtime deps
 - **Every install step is verified**: https + trusted host (GitHub) → reject HTML error pages → verify SHA-256 → check manifest name/version against the catalog → validate every in-package path (no `..`, no absolute paths, no drive letters) → stage in a temp dir, then move into place
 - **Author and stars refreshed daily by CI**: the catalog's `repo` field is updated daily by GitHub Actions (GraphQL batches 100 repositories per query; authenticated limits are in the thousands). The client makes **zero GitHub API calls** — the unauthenticated limit is 60/hour shared per IP, which per-repo queries would exhaust within a few dozen plugins
