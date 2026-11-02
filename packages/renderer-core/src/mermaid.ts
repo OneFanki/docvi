@@ -83,6 +83,8 @@ export async function mermaidPass(
       const holder = document.createElement('div')
       holder.className = 'at-mermaid'
       holder.innerHTML = svg
+      // 先挂进文档再挂联动：hover 的标签错层要读 getBBox()，未挂载的 SVG 上它全 0
+      pre.replaceWith(holder)
       const el = holder.querySelector('svg')
       // 解析不了结构的图类型返回 noop，保持 mermaid 原样
       if (el) enhanceMermaidSvg(el)
@@ -106,7 +108,6 @@ export async function mermaidPass(
         })
         holder.appendChild(button)
       }
-      pre.replaceWith(holder)
     } catch (error) {
       console.warn('[renderer] mermaid 渲染失败（保留原文）:', error)
       pre.dataset.mermaidDone = ''

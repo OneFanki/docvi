@@ -563,11 +563,22 @@
   transition: opacity var(--dv-dur-1) var(--dv-ease);
 }
 
+/* 图形元素（节点/边）淡出但保持可读：0.15 会把无关分支压到看不清，聚焦变成「隐藏」 */
 :is(.at-doc .at-mermaid, .lightbox__svg)
   svg.is-focus
-  :is(.node, path.flowchart-link, path.relationshipLine, g.edgeLabel):not(.is-hot) {
-  /* 淡出但保持可读：0.15 会把无关分支压到看不清，聚焦变成「隐藏」 */
+  :is(.node, path.flowchart-link, path.relationshipLine):not(.is-hot) {
   opacity: 0.35;
+}
+
+/*
+ * 边标签是**文字**，不能像图形那样半透明：标签密集时（自环 + 平行出边常把两个
+ * 标签放在相距 14px 的位置、每个标签高 24px）半透明的两层文字叠在一起就糊成一团，
+ * 看起来像「连线文本没显示」。所以未命中时直接隐去并让出指针命中——
+ * 否则隐藏的标签仍会截获 pointerover，把 hover 抢到看不见的标签上。
+ */
+:is(.at-doc .at-mermaid, .lightbox__svg) svg.is-focus g.edgeLabel:not(.is-hot) {
+  opacity: 0;
+  pointer-events: none;
 }
 
 :is(.at-doc .at-mermaid, .lightbox__svg) svg .node.is-hot > :is(rect, polygon, circle, path) {
@@ -584,6 +595,29 @@
 :is(.at-doc .at-mermaid, .lightbox__svg) svg g.edgeLabel.is-hot span,
 :is(.at-doc .at-mermaid, .lightbox__svg) svg g.edgeLabel.is-hot text {
   color: var(--dv-doc-accent) !important;
+  fill: var(--dv-doc-accent) !important;
+}
+
+/*
+ * 高亮标签的底板改成不透明：mermaid 给边标签铺的是 50% 透明的 labelBkg，
+ * 两个标签哪怕只错开几个像素，半透明叠加也会让文字发虚。不透明的底板
+ * 让叠在上面的那条完全清爽，也让错位兜底失败时的轻微重叠仍然可读。
+ */
+:is(.at-doc .at-mermaid, .lightbox__svg) svg g.edgeLabel.is-hot .labelBkg {
+  background-color: var(--dv-mermaid-bg) !important;
+}
+
+/*
+ * 箭头标记：mermaid 按「图 + 箭头类型」只定义一份 marker，同图所有实线箭头
+ * 共用，直接改它会连累全图（「要么全亮」的另一半来源）。所以高亮时由
+ * enhanceMermaidSvg 克隆一份专属 marker，这里只给克隆体上色。
+ * 实心/空心由克隆时打的 data 属性区分——给空心标记填色会糊成一个色块。
+ */
+:is(.at-doc .at-mermaid, .lightbox__svg) svg marker.is-hot-marker [data-hot-stroke] {
+  stroke: var(--dv-doc-accent) !important;
+}
+
+:is(.at-doc .at-mermaid, .lightbox__svg) svg marker.is-hot-marker [data-hot-fill] {
   fill: var(--dv-doc-accent) !important;
 }
 
