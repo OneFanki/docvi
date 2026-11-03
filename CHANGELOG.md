@@ -26,11 +26,49 @@
 
 ### 中文
 
-- （下个版本的用户可感知改动写在这里）
+### English
+
+## [0.5.0] - 2026-11-03
+
+### 中文
+
+- **AI 现在能直接给你写文档了**：MCP 新增写入能力，你说「帮我写篇 XX 的文档」，它就能落笔成 .md 文件，界面随即显示。默认只新建、绝不静默覆盖已有文档；改旧文档要求先读一遍、带上版本戳再写，期间被别人改过会失败并让你重读
+- **首次启动会建一个默认文档库**：`文档/docvi`（Windows 的「文档」目录下），AI 没指定位置时写这里。它带「默认工作区」角标、**不可移除**；默认按修改时间排序，刚写的那篇永远在最上面。你确实不想要它时，删掉这个目录即可
+- **目录树可以按修改时间排序了**：工具栏新增排序面板（按配置顺序 / 按修改时间，带勾选态，当前用哪种一眼可见），偏好按工作区记住；默认工作区出厂就是 mtime
+
+#### 完整变更
+
+- **默认工作区 = AI 的兜底落笔处**：MCP `instructions` 与 `list_workspaces` 都明确写死优先级「用户明确指定的位置 > 项目规范约定 > 默认工作区」。默认工作区只是「完全没线索时有个地方能写」，不覆盖用户/项目规范给出的位置
+- **默认工作区不可移除**：卡片角标标明身份、不显示移除按钮、右键菜单也没有该项；主进程 `workspaceRemove` 对它返回 `E_FORBIDDEN`（防止别的入口绕过界面）。想停用就删目录——拒的只是移除登记
+- **目录树排序（工作区级偏好）**：`manual`（frontmatter `order` → 名称自然序，沿用既有口径）与 `mtime`（修改时间倒序，同毫秒回落名称保证稳定）。工具栏面板切换并持久化到 `workspaces.json` 的 `treeSort`；目录始终排在文件之前，两类各自排序
+- **MCP 新增两个工具**：`list_workspaces`（可写入范围清单，标出默认落笔处）与 `write_doc`（`path` / `text` / `workspace?` / `mode?` / `baseMtime?`）。桌面端八个工具，容器端七个——容器的工作树是构建副本、没有 commit/push，写进去不会回传仓库，所以**不声明**写工具（工具面 = 宿主能力）
+- **写入语义保守优先**：`mode=create` 缺省、只新建；`overwrite` 必须带 `read_doc` 返回的 `baseMtime`（mtime 不匹配报冲突，与编辑器保存同一套判定）；`append` 文件须已存在。只写 `.md` / `.markdown`，路径拒绝绝对路径、`..`、点开头段与扫描排除目录（规则与扫描器共用一份，杜绝「写得进去但树上看不见」）。**不提供删除**
+- **写入失败回 `isError: true`**：工具处理器第一次支持错误态。写失败若被当成普通文本，AI 会向用户报告「已写入」而磁盘上什么都没有——这种静默失败比报错难查一个量级
+- **目标解析顺序确定不猜**：显式 `workspace` → 容器前缀 → 既有文件唯一命中 → 唯一工作区 → 默认工作区 → 报错让 AI 先 `list_workspaces`
+- **内建默认工作区**：`<系统文档>/docvi`，settings 记 `defaultWorkspaceSeeded` 只播种一次。用户删掉后不再重建——那是「不想要」，不是「缺配置」。播种失败只记日志，不阻塞启动
+- **服务层抽出三块共享件**：`doc-paths.mjs`（路径规则）、`doc-write.mjs`（写入语义）、`fs-atomic.mjs`（原子写：临时文件 + fsync + rename）。桌面编辑器保存与 MCP 写入共用同一份原子写实现
+- **桌面端 MCP 请求体上限 256KB → 2MB**（单篇 1MB + JSON 开销）；容器端仍为 256KB（无写工具）
+- **`read_doc` 返回值追加 `mtime`**，AI 据此做覆盖冲突判定
 
 ### English
 
-- (User-visible changes for the next release go here)
+- **AI can now write documents for you**: MCP gained write support, so "write me a doc about X" produces a real .md file that shows up in the app immediately. It only creates by default and never overwrites silently; changing an existing document requires reading it first and passing the version stamp, and fails if someone else changed it meanwhile
+- **A default library is created on first launch**: `Documents/docvi`, where AI writes when no location is given. It carries a "Default" badge, **cannot be removed**, and sorts by last modified so the newest file stays on top. Deleting the directory is how you opt out
+- **The file tree can sort by last modified**: a toolbar menu with checkmarks switches between documented order and last-modified (so the active mode is always visible), remembered per workspace; the default library ships with last-modified
+
+#### Full changes
+
+- **The default library is AI's fallback landing spot**: both the MCP `instructions` and `list_workspaces` state the priority explicitly — "a location the user named > a location the project conventions define > the default library". It only covers "no clue at all" and never overrides a location the user or the project already specified
+- **The default library cannot be removed**: the card carries a badge, shows no remove button, and the context menu omits the item; the main process also answers `E_FORBIDDEN` from `workspaceRemove` so other callers cannot bypass the UI. Deleting the directory is how you opt out — only the registration is protected
+- **Tree sorting as a per-workspace preference**: `manual` (frontmatter `order`, then natural name order — the existing behaviour) and `mtime` (newest first, ties broken by name so rescans are stable). A toolbar menu with checkmarks (so the active mode is read rather than inferred) persists it to `treeSort` in `workspaces.json`; directories always precede files, each group sorted on its own
+- **Two new MCP tools**: `list_workspaces` (writable scopes, with the default landing spot marked) and `write_doc` (`path` / `text` / `workspace?` / `mode?` / `baseMtime?`). Eight tools on desktop, seven in the container — the container's worktree is a build copy with no commit/push, so writes would never reach the repo, and the tool is therefore **not declared** (tool surface = host capability)
+- **Conservative write semantics**: `mode=create` is the default and only creates; `overwrite` requires the `baseMtime` returned by `read_doc` (a mismatch is a conflict — the same check the editor uses); `append` requires an existing file. Only `.md` / `.markdown`; paths reject absolute paths, `..`, dot-leading segments and scan-excluded directories (shared rules with the scanner, so nothing can be written that the tree never shows). **No delete tool**
+- **Write failures return `isError: true`**: tool handlers support an error state for the first time. A write failure reported as ordinary text would make the AI tell the user "written" while nothing exists on disk — silent failure is an order of magnitude harder to diagnose than an error
+- **Deterministic target resolution**: explicit `workspace` → container prefix → unique existing file → sole workspace → default workspace → error asking the AI to call `list_workspaces`
+- **Built-in default workspace**: `<Documents>/docvi`, seeded once via the `defaultWorkspaceSeeded` setting. Deleting it is respected and never recreated — that means "don't want it", not "missing config". Seeding failures are logged, never block startup
+- **Three shared modules extracted**: `doc-paths.mjs` (path rules), `doc-write.mjs` (write semantics), `fs-atomic.mjs` (atomic write: temp file + fsync + rename). The editor's save path and MCP writes share one implementation
+- **Desktop MCP body limit 256KB → 2MB** (1MB document plus JSON overhead); the container keeps 256KB (no write tool)
+- **`read_doc` now returns `mtime`**, which the AI uses for overwrite conflict checks
 
 ## [0.4.0] - 2026-11-02
 

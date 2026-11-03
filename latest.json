@@ -1,6 +1,6 @@
 {
-  "version": "0.4.0",
+  "version": "0.5.0",
   "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
-  "notes": "目录树支持 Ctrl/Shift 批量选中与拖拽移动，右键菜单作用于整个选区。插件市场可以一键安装，产物由作者仓库自动构建、客户端逐环校验。流程图跟随文档主题配色，鼠标停在节点或连线上会点亮相关的边、对端节点与连线文字。",
+  "notes": "AI 现在能直接给你写文档了：MCP 新增写入能力，说「帮我写篇 XX 的文档」就落笔成 .md 文件，界面随即显示。默认只新建、绝不静默覆盖；改旧文档要求先读一遍带上版本戳。首次启动会自动建一个默认文档库（文档/docvi），AI 没指定位置时写这里，按修改时间排序、不可移除。",
   "homepage": "https://github.com/OneFanki/docvi"
 }
