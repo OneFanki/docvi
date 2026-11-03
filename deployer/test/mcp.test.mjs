@@ -60,6 +60,8 @@ function makeDeps(overrides = {}) {
         calls.push({ path })
         return '没有找到文档'
       },
+      // 容器宿主提供范围清单但不提供写入（见「容器 = 只读宿主」用例）
+      listWorkspaces: () => [{ workspace: '工程手册@main', root: '/srv/worktrees/handbook/main' }],
       ...overrides,
     },
   }
@@ -98,7 +100,7 @@ test('initialize：协议版本协商回显 / 回退最新；容器自报 docvi'
   }
 })
 
-test('tools/list：容器注入检索依赖后是六个工具（含文档工具）', async () => {
+test('tools/list：容器注入检索依赖后是七个工具（文档只读，无 write_doc）', async () => {
   const res = await rpc(req('tools/list', {}, 'abc'))
   const out = JSON.parse(res.body)
   assert.equal(out.id, 'abc')
@@ -112,17 +114,28 @@ test('tools/list：容器注入检索依赖后是六个工具（含文档工具�
       'get_plugin_docs',
       'search_docs',
       'read_doc',
+      'list_workspaces',
     ],
+  )
+  /*
+   * 容器端刻意没有 write_doc：工作树是构建副本、git.mjs 没有 commit/push，
+   * 写进去不会回传远端仓库。这条断言是「工具面 = 宿主能力」的守门人。
+   */
+  assert.ok(
+    !tools.some(tool => tool.name === 'write_doc'),
+    '容器不提供写入：没有 commit/push 能力时不能声明 write_doc',
   )
   for (const tool of tools) {
     assert.equal(typeof tool.description, 'string')
     assert.ok(tool.description.length > 10, `${tool.name} 描述应说明何时用`)
     assert.equal(tool.inputSchema.type, 'object')
   }
-  assert.deepEqual(tools[2].inputSchema.required, ['kind'])
-  assert.deepEqual(tools[3].inputSchema.required, ['name'])
-  assert.deepEqual(tools[4].inputSchema.required, ['query'])
-  assert.deepEqual(tools[5].inputSchema.required, ['path'])
+  // 按名字查而不是按下标：以后新增工具不会连锁打红一批断言
+  const byName = name => tools.find(tool => tool.name === name)
+  assert.deepEqual(byName('get_component_docs').inputSchema.required, ['kind'])
+  assert.deepEqual(byName('get_plugin_docs').inputSchema.required, ['name'])
+  assert.deepEqual(byName('search_docs').inputSchema.required, ['query'])
+  assert.deepEqual(byName('read_doc').inputSchema.required, ['path'])
 })
 
 test('tools/call list_components：活跃组件清单（本地化 zh → en → 首值；kind 永不翻译）', async () => {

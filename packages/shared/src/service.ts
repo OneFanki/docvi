@@ -12,6 +12,13 @@ export interface ServiceWorkspace {
   name: string
   /** 绝对路径 */
   root: string
+  /**
+   * AI 未指定写入位置时的默认落笔处（内建默认工作区）。
+   *
+   * 由主进程按「当前默认工作区根」标出，不落进 workspaces.json——用户删掉默认
+   * 工作区后不该留下一个指向不存在目录的标记。
+   */
+  default?: boolean
 }
 
 /** 已启用插件的只读快照：MCP 的插件类工具直接读它，不回查主进程 */

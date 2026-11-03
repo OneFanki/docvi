@@ -70,7 +70,25 @@ function makeDeps(overrides = {}) {
     readDoc: path =>
       path === 'missing.md'
         ? '没有找到文档：missing.md'
-        : { workspace: '文档@main', path, title: 'A', text: '# A\n\n正文' },
+        : { workspace: '文档@main', path, title: 'A', text: '# A\n\n正文', mtime: 1717000000000 },
+    listWorkspaces: () => {
+      calls.push('listWorkspaces')
+      return [
+        { workspace: '文档', root: '/tmp/docs', default: true },
+        { workspace: '另一个', root: '/tmp/other' },
+      ]
+    },
+    writeDoc: input => {
+      calls.push({ write: input })
+      if (input.path === 'taken.md') return { error: '文档已存在：taken.md' }
+      return {
+        status: 'created',
+        workspace: input.workspace ?? '文档',
+        path: input.path,
+        bytes: Buffer.byteLength(input.text, 'utf8'),
+        mtime: 1717000001000,
+      }
+    },
     ...overrides,
   }
   return { deps, calls }
@@ -160,7 +178,7 @@ test('未知方法与未知工具：-32601 / -32602', async () => {
   assert.equal(unknownTool.body.error.code, -32602)
 })
 
-test('tools/list：全量六个工具、都有 inputSchema，处理器不进输出', async () => {
+test('tools/list：全量八个工具、都有 inputSchema，处理器不进输出', async () => {
   const { deps } = makeDeps()
   const { body } = await call(deps, { jsonrpc: '2.0', id: 5, method: 'tools/list' })
   assert.deepEqual(
@@ -172,9 +190,11 @@ test('tools/list：全量六个工具、都有 inputSchema，处理器不进输�
       'get_plugin_docs',
       'search_docs',
       'read_doc',
+      'list_workspaces',
+      'write_doc',
     ],
   )
-  assert.equal(toolNames().length, 6)
+  assert.equal(toolNames().length, 8)
   for (const tool of body.result.tools) {
     assert.equal(tool.inputSchema.type, 'object')
     assert.ok(tool.description.length > 10, `${tool.name} 需要可读描述`)
@@ -184,12 +204,17 @@ test('tools/list：全量六个工具、都有 inputSchema，处理器不进输�
   assert.deepEqual(search.inputSchema.required, ['query'])
   const read = body.result.tools.find(tool => tool.name === 'read_doc')
   assert.deepEqual(read.inputSchema.required, ['path'])
+  const write = body.result.tools.find(tool => tool.name === 'write_doc')
+  assert.deepEqual(write.inputSchema.required, ['path', 'text'])
+  assert.deepEqual(write.inputSchema.properties.mode.enum, ['create', 'overwrite', 'append'])
 })
 
 test('工具面 = 宿主能力：检索依赖缺席时只列四个插件工具', async () => {
   const { deps } = makeDeps()
   delete deps.searchDocs
   delete deps.readDoc
+  delete deps.listWorkspaces
+  delete deps.writeDoc
   const { body } = await call(deps, { jsonrpc: '2.0', id: 6, method: 'tools/list' })
   assert.deepEqual(
     body.result.tools.map(tool => tool.name),
@@ -198,6 +223,7 @@ test('工具面 = 宿主能力：检索依赖缺席时只列四个插件工具',
 
   const init = await call(deps, { jsonrpc: '2.0', id: 7, method: 'initialize' })
   assert.doesNotMatch(init.body.result.instructions, /search_docs/, '无检索能力时不提该工作流')
+  assert.doesNotMatch(init.body.result.instructions, /write_doc/, '无写入能力时不提该工作流')
 
   const denied = await call(deps, {
     jsonrpc: '2.0',
@@ -208,7 +234,36 @@ test('工具面 = 宿主能力：检索依赖缺席时只列四个插件工具',
   assert.equal(denied.body.error.code, -32602, '未声明的工具按未知工具处理')
 })
 
-test('tools/call：六个工具返回文本内容且 isError=false', async () => {
+test('工具面：容器端只读时 write_doc 不出现，list_workspaces 仍可列出', async () => {
+  /*
+   * 容器的工作树是构建副本、没有 commit/push，写入不会回传远端仓库，
+   * 所以不注入 writeDoc。但「能往哪写」仍是有效信息——list_workspaces 独立开关。
+   */
+  const { deps } = makeDeps()
+  delete deps.writeDoc
+  const { body } = await call(deps, { jsonrpc: '2.0', id: 61, method: 'tools/list' })
+  const names = body.result.tools.map(tool => tool.name)
+  assert.ok(names.includes('list_workspaces'), '只读宿主也可以暴露工作区清单')
+  assert.ok(!names.includes('write_doc'), '没有写入能力就不声明该工具')
+
+  const denied = await call(deps, {
+    jsonrpc: '2.0',
+    id: 62,
+    method: 'tools/call',
+    params: { name: 'write_doc', arguments: { path: 'a.md', text: 'x' } },
+  })
+  assert.equal(denied.body.error.code, -32602)
+})
+
+test('工具面：有 writeDoc 但没有 listWorkspaces 时也不声明 write_doc', async () => {
+  // 写入失败时 AI 需要追问「有哪些工作区」，缺了它等于给一个报错无门的工具
+  const { deps } = makeDeps()
+  delete deps.listWorkspaces
+  const { body } = await call(deps, { jsonrpc: '2.0', id: 63, method: 'tools/list' })
+  assert.ok(!body.result.tools.some(tool => tool.name === 'write_doc'))
+})
+
+test('tools/call：八个工具返回文本内容且 isError=false', async () => {
   const { deps } = makeDeps()
   const cases = [
     { name: 'list_plugins', arguments: {}, expect: '示例包' },
@@ -217,6 +272,8 @@ test('tools/call：六个工具返回文本内容且 isError=false', async () =>
     { name: 'get_plugin_docs', arguments: { name: 'demo' }, expect: '# 包用法' },
     { name: 'search_docs', arguments: { query: '流程' }, expect: 'guides/a.md' },
     { name: 'read_doc', arguments: { path: 'guides/a.md' }, expect: '# A' },
+    { name: 'list_workspaces', arguments: {}, expect: '默认落笔处' },
+    { name: 'write_doc', arguments: { path: '新篇.md', text: '# 新篇' }, expect: '已新建' },
   ]
   for (const item of cases) {
     const { body } = await call(deps, {
@@ -282,7 +339,10 @@ test('read_doc：成功给头部 + 全文；失败说明原样透出且不是协
     params: { name: 'read_doc', arguments: { path: 'guides/a.md' } },
   })
   const text = ok.body.result.content[0].text
-  assert.match(text, /^workspace: 文档@main ｜ path: guides\/a\.md ｜ title: A\n\n# A/)
+  assert.match(
+    text,
+    /^workspace: 文档@main ｜ path: guides\/a\.md ｜ title: A ｜ mtime: \d+\n\n# A/,
+  )
 
   const missing = await call(deps, {
     jsonrpc: '2.0',
@@ -292,6 +352,94 @@ test('read_doc：成功给头部 + 全文；失败说明原样透出且不是协
   })
   assert.equal(missing.body.result.isError, false)
   assert.equal(missing.body.result.content[0].text, '没有找到文档：missing.md')
+})
+
+test('write_doc：成功回路径与 mtime，明确标 isError=false', async () => {
+  const { deps, calls } = makeDeps()
+  const res = await call(deps, {
+    jsonrpc: '2.0',
+    id: 20,
+    method: 'tools/call',
+    params: { name: 'write_doc', arguments: { path: '指南/入门.md', text: '# 入门\n' } },
+  })
+  assert.equal(res.body.result.isError, false)
+  const text = res.body.result.content[0].text
+  assert.match(text, /已新建：文档 ｜ 指南\/入门\.md/)
+  assert.match(text, /mtime: \d+/)
+  // 默认 mode=create，且原样把 mode 传给宿主（不做隐式升级成覆盖）
+  assert.deepEqual(calls.at(-1).write.mode, 'create')
+})
+
+test('write_doc：写入失败必须 isError=true（否则 AI 会以为写成了）', async () => {
+  const { deps } = makeDeps()
+  const res = await call(deps, {
+    jsonrpc: '2.0',
+    id: 21,
+    method: 'tools/call',
+    params: { name: 'write_doc', arguments: { path: 'taken.md', text: 'x' } },
+  })
+  assert.equal(res.body.result.isError, true, '写失败必须是 isError，与「查不到」区分开')
+  assert.match(res.body.result.content[0].text, /写入失败：文档已存在/)
+})
+
+test('write_doc：宿主抛错也转成 isError，不冒泡成协议错误', async () => {
+  const { deps } = makeDeps({
+    writeDoc: () => {
+      throw new Error('磁盘只读')
+    },
+  })
+  const res = await call(deps, {
+    jsonrpc: '2.0',
+    id: 22,
+    method: 'tools/call',
+    params: { name: 'write_doc', arguments: { path: 'a.md', text: 'x' } },
+  })
+  // 处理器内部异常由 dispatch 兜成 -32603（内部错误），不能被当成成功
+  assert.equal(res.body.result?.isError ?? true, true)
+})
+
+test('write_doc：参数错误走 -32602（mode 非法 / baseMtime 非数字 / 缺 text）', async () => {
+  const { deps } = makeDeps()
+  for (const args of [
+    { path: 'a.md', text: 'x', mode: 'upsert' },
+    { path: 'a.md', text: 'x', baseMtime: '123' },
+    { path: 'a.md' },
+  ]) {
+    const res = await call(deps, {
+      jsonrpc: '2.0',
+      id: 23,
+      method: 'tools/call',
+      params: { name: 'write_doc', arguments: args },
+    })
+    assert.equal(res.body.error?.code, -32602, JSON.stringify(args))
+  }
+})
+
+test('write_doc：text 允许空串（清空一篇文档是合法操作）', async () => {
+  const { deps, calls } = makeDeps()
+  const res = await call(deps, {
+    jsonrpc: '2.0',
+    id: 24,
+    method: 'tools/call',
+    params: {
+      name: 'write_doc',
+      arguments: { path: 'a.md', text: '', mode: 'overwrite', baseMtime: 1 },
+    },
+  })
+  assert.equal(res.body.result.isError, false)
+  assert.equal(calls.at(-1).write.text, '')
+})
+
+test('list_workspaces：无工作区时给可操作提示，不是空字符串', async () => {
+  const { deps } = makeDeps({ listWorkspaces: () => [] })
+  const res = await call(deps, {
+    jsonrpc: '2.0',
+    id: 25,
+    method: 'tools/call',
+    params: { name: 'list_workspaces', arguments: {} },
+  })
+  assert.equal(res.body.result.isError, false, '「没有工作区」是正常答案')
+  assert.match(res.body.result.content[0].text, /没有可用的工作区/)
 })
 
 test('活查询：插件停用后 list_plugins 与 list_components 立即反映', async () => {
@@ -357,4 +505,36 @@ test('内部异常：-32603', async () => {
   })
   assert.equal(body.error.code, -32603)
   assert.ok(body.error.message.includes('炸了'))
+})
+
+test('instructions：默认工作区被描述成兜底，优先级在明确指令之后', async () => {
+  /*
+   * 这是防「AI 图省事把所有文档都写进默认工作区」的唯一约束点——
+   * 用户或项目规范若已指明位置，兜底不该覆盖。措辞顺序即优先级，用断言钉住。
+   */
+  const { deps } = makeDeps()
+  const init = await call(deps, { jsonrpc: '2.0', id: 30, method: 'initialize' })
+  const text = init.body.result.instructions
+  assert.match(text, /用户明确指定/, '必须提到用户明确指定的位置优先')
+  assert.match(text, /项目规范/, '必须提到项目规范优先')
+  assert.match(text, /兜底/, '默认工作区必须被描述成兜底而不是首选')
+  // 优先级顺序：用户 > 项目规范 > 默认
+  assert.ok(
+    text.indexOf('用户明确指定') < text.indexOf('项目规范') &&
+      text.indexOf('项目规范') < text.indexOf('兜底'),
+    '优先级表述顺序应为 用户 → 项目规范 → 默认工作区',
+  )
+})
+
+test('list_workspaces：标出默认落笔处，并复述优先级', async () => {
+  const { deps } = makeDeps()
+  const res = await call(deps, {
+    jsonrpc: '2.0',
+    id: 31,
+    method: 'tools/call',
+    params: { name: 'list_workspaces', arguments: {} },
+  })
+  const text = res.body.result.content[0].text
+  assert.match(text, /默认落笔处/)
+  assert.match(text, /用户明确指定的位置 > 项目规范约定 > 标着「默认落笔处」的那个/)
 })

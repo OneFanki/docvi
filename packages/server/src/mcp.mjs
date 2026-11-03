@@ -10,12 +10,15 @@
  *     供自带 HTTP 面的宿主复用；
  *   - `handleMcp(req, res, deps)`：完整端点（读体 → 分发 → 状态码），容器直接挂载。
  *
- * 工具面 = 插件 / 组件四件套 + 文档读写两件套；`searchDocs` / `readDoc` 依赖缺省时
- * 后两个不出现在 tools/list 里——工具面即宿主能力，不能声明自己兑现不了的查询。
+ * 工具面 = 插件 / 组件四件套 + 文档读写；`searchDocs` / `readDoc` 依赖缺省时
+ * 对应的工具不出现在 tools/list 里——工具面即宿主能力，不能声明自己兑现不了的查询。
+ * 写入同理：容器端的工作树是构建副本、没有 commit/push，因此不注入 writeDoc，
+ * `write_doc` 自然不出现（容器只读）。
  *
  * 工具数据全部由 deps 注入（宿主组装成活查询回调），本模块不触磁盘、不缓存——
- * 插件启停 / 组件启停 / 升级即查询即变。工具结果一律是 `isError: false` 的说明文本：
+ * 插件启停 / 组件启停 / 升级即查询即变。工具结果默认是 `isError: false` 的说明文本：
  * 「查不到」是正常答案而非协议错误，只有「请求本身不合法」（缺参数、未知工具）才回 -32602。
+ * **写入失败是例外**：它必须带 `isError: true`，否则 AI 会把「没写成」当成「写成了」。
  *
  * deps 契约：
  *   serverVersion: string
@@ -25,7 +28,9 @@
  *   componentDocs(kind): string | null          所属插件 docs/SKILL.md 全文
  *   pluginDocs(name): string | null             同上（按插件名）
  *   searchDocs?(query, limit): Array<{workspace, path, title, snippet}>
- *   readDoc?(path): {workspace, path, title, text} | string   字符串即可读的失败说明
+ *   readDoc?(path): {workspace, path, title, text, mtime} | string   字符串即可读的失败说明
+ *   listWorkspaces?(): Array<{workspace, root, default?}>            写入目标清单
+ *   writeDoc?(input): {status, workspace, path, bytes, mtime} | {error}   失败用 error 字段
  */
 
 /** 支持的协议版本（initialize 协商：客户端值在列则回显，否则回最新——MCP 规范行为） */
@@ -142,7 +147,61 @@ function toolReadDoc(args, deps) {
   const path = argString(args, 'path')
   const result = deps.readDoc?.(path)
   if (typeof result === 'string' || !result) return result || `没有找到文档：${path}`
-  return `workspace: ${result.workspace} ｜ path: ${result.path} ｜ title: ${result.title}\n\n${result.text}`
+  // mtime 必须回给 AI：overwrite 要拿它做冲突判定，否则只能盲覆盖
+  const mtime = typeof result.mtime === 'number' ? ` ｜ mtime: ${result.mtime}` : ''
+  return `workspace: ${result.workspace} ｜ path: ${result.path} ｜ title: ${result.title}${mtime}\n\n${result.text}`
+}
+
+/** list_workspaces：可写入的范围清单（AI 需要知道能往哪写、默认落笔处是哪个） */
+function toolListWorkspaces(_args, deps) {
+  const workspaces = deps.listWorkspaces?.() ?? []
+  if (!workspaces.length) {
+    return '当前没有可用的工作区（桌面端请在应用内添加一个文档目录）。'
+  }
+  const lines = workspaces.map(item => {
+    const mark = item.default ? ' ｜ 默认落笔处（没指定位置时的兜底）' : ''
+    return `- ${item.workspace} ｜ ${item.root}${mark}`
+  })
+  return (
+    `可用工作区 ${workspaces.length} 个（write_doc 的 workspace 参数取这里的名字）：\n\n${lines.join('\n')}\n\n` +
+    '写到哪里的优先级：用户明确指定的位置 > 项目规范约定 > 标着「默认落笔处」的那个。'
+  )
+}
+
+/** write_doc 的 mode 允许值（与 doc-write.mjs 的 WRITE_MODES 一致） */
+const WRITE_MODE_VALUES = ['create', 'overwrite', 'append']
+
+/** write_doc：写入 Markdown 文档；成功回路径与 mtime，失败回 isError=true */
+function toolWriteDoc(args, deps) {
+  const path = argString(args, 'path')
+  if (typeof args.text !== 'string') {
+    throw new RpcParamError('参数错误：缺少必填字符串参数 text（可以为空串）')
+  }
+  const workspace = typeof args.workspace === 'string' ? args.workspace : undefined
+  const mode = args.mode === undefined ? 'create' : args.mode
+  if (!WRITE_MODE_VALUES.includes(mode)) {
+    throw new RpcParamError(`参数错误：mode 只能是 ${WRITE_MODE_VALUES.join(' / ')}`)
+  }
+  const baseMtime = args.baseMtime
+  if (baseMtime !== undefined && (typeof baseMtime !== 'number' || !Number.isFinite(baseMtime))) {
+    throw new RpcParamError('参数错误：baseMtime 必须是数字（read_doc 返回的 mtime）')
+  }
+
+  const result = deps.writeDoc?.({ path, text: args.text, workspace, mode, baseMtime })
+  if (!result || typeof result === 'string') {
+    return { text: result || '写入失败：宿主未返回结果。', isError: true }
+  }
+  if ('error' in result && result.error) {
+    return { text: `写入失败：${result.error}`, isError: true }
+  }
+  const verb =
+    result.status === 'created' ? '已新建' : result.status === 'appended' ? '已追加' : '已更新'
+  return [
+    `${verb}：${result.workspace} ｜ ${result.path}`,
+    `字节数：${result.bytes} ｜ mtime: ${result.mtime}`,
+    // 覆盖时提示下一次覆盖要用新 mtime，省一轮 read_doc
+    `（再次覆盖请用这个 mtime 作为 baseMtime）`,
+  ].join('\n')
 }
 
 /** 工具面（描述说明「何时用」——AI 的选择依据；必填参数经 inputSchema 声明） */
@@ -206,7 +265,7 @@ const TOOLS = [
   {
     name: 'read_doc',
     description:
-      '读取一篇 Markdown 文档全文。path 用 search_docs 返回的 path（桌面宿主也接受工作区内的绝对路径）。',
+      '读取一篇 Markdown 文档全文。path 用 search_docs 返回的 path（桌面宿主也接受工作区内的绝对路径）。返回值带 mtime，覆盖写时要把它作为 baseMtime。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -217,13 +276,56 @@ const TOOLS = [
     },
     handler: toolReadDoc,
   },
+  {
+    name: 'list_workspaces',
+    description:
+      '列出可写入的工作区（name / root / 是否为默认落笔处）。何时用：多处可写、或 write_doc 报「无法确定写入到哪个工作区」时，用这里的 name 作为 workspace 参数。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    handler: toolListWorkspaces,
+  },
+  {
+    name: 'write_doc',
+    description:
+      '把 Markdown 写入工作区（只支持 .md / .markdown，新建默认不覆盖，无删除能力）。mode=create 只新建（已存在则失败）；mode=overwrite 整篇替换，必须带 read_doc 返回的 baseMtime（期间被改过则冲突失败）；mode=append 追加到末尾（文件须已存在）。path 为工作区内相对路径；不指定 workspace 时落到默认工作区。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: '工作区内的相对路径，如 “指南/入门.md”（不接受绝对路径与 ..）',
+        },
+        text: { type: 'string', description: '完整文档内容（append 模式下为追加内容）' },
+        workspace: {
+          type: 'string',
+          description: '目标工作区名（list_workspaces 返回的 name）；省略则用默认工作区',
+        },
+        mode: {
+          type: 'string',
+          enum: ['create', 'overwrite', 'append'],
+          description: '缺省 create：只新建，绝不静默覆盖已有文档',
+        },
+        baseMtime: {
+          type: 'number',
+          description: 'overwrite 必填：read_doc 返回的 mtime，用于冲突判定',
+        },
+      },
+      required: ['path', 'text'],
+      additionalProperties: false,
+    },
+    handler: toolWriteDoc,
+  },
 ]
 
-/** 宿主实际提供的工具面：检索依赖缺席时后两个不出现在 tools/list */
+/** 宿主实际提供的工具面：检索 / 写入依赖缺席时对应工具不出现在 tools/list */
 export function availableTools(deps) {
   return TOOLS.filter(tool => {
     if (tool.name === 'search_docs') return typeof deps.searchDocs === 'function'
     if (tool.name === 'read_doc') return typeof deps.readDoc === 'function'
+    if (tool.name === 'list_workspaces') return typeof deps.listWorkspaces === 'function'
+    // write_doc 出现的前提是既能写、也能列出目标——否则 AI 报错时无从追问
+    if (tool.name === 'write_doc') {
+      return typeof deps.writeDoc === 'function' && typeof deps.listWorkspaces === 'function'
+    }
     return true
   })
 }
@@ -238,15 +340,30 @@ function publicSpec(tool) {
   return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema }
 }
 
-/** initialize 的 instructions：连接即获知工作流（先看组件、再看写法、再查存量文档） */
+/**
+ * initialize 的 instructions：连接即获知工作流（看组件 → 看写法 → 查存量 → 写）。
+ *
+ * 写入这一句刻意把「默认工作区」定位成**兜底**而不是首选：用户或项目规范
+ * 已经指明位置时必须遵循——兜底只解决「完全没线索」的情形，不能覆盖明确指令。
+ * 这段文本会被 AI 直接读进上下文，措辞的顺序即优先级。
+ */
 function instructionsOf(deps) {
   const canRead =
     typeof deps.searchDocs === 'function' && typeof deps.readDoc === 'function'
       ? '写文档前用 search_docs 检索既有内容，用 read_doc 读全文（path 用检索结果里的路径）。'
       : ''
+  const canWrite =
+    typeof deps.writeDoc === 'function' && typeof deps.listWorkspaces === 'function'
+      ? '写入用 write_doc：默认 mode=create 只新建、绝不覆盖；改已有文档先 read_doc 拿 mtime，' +
+        '再 mode=overwrite 带 baseMtime（期间被别人改过会失败，重读再写）。' +
+        '写到哪里的优先级：用户明确指定的位置 > 项目规范约定 > list_workspaces 里标着「默认落笔处」的工作区。' +
+        '后者是兜底——只在完全没有线索时用，不要因为它方便就绕过用户说过的位置。' +
+        '不确定有哪些工作区时先调 list_workspaces。不提供删除。'
+      : ''
   return (
     '先 list_components 查看可用组件（kind 即文档标签名 at-<kind>），再 get_component_docs(kind) 获取写法。' +
     canRead +
+    canWrite +
     '文档写法：frontmatter 的 components 段放数据，正文用 <at-kind data-key="键"> 引用。'
   )
 }
@@ -268,7 +385,13 @@ function initializeResult(params, deps) {
   }
 }
 
-/** tools/call：未知工具 / 缺参报 -32602；工具业务一律返回 isError=false 的说明文本 */
+/**
+ * 处理器返回 string 或 `{ text, isError? }`。
+ *
+ * 为什么允许 isError：现有查询工具「查不到」是正常答案（isError:false），但
+ * **写入失败必须能区分**——否则 AI 看到一段说明文字就以为写成功了，用户等了半天
+ * 发现文件根本没落盘。只有处理器显式标记 isError 时才置真。
+ */
 function toolsCall(params, deps) {
   const record = params && typeof params === 'object' ? params : null
   const name = record?.name
@@ -281,8 +404,14 @@ function toolsCall(params, deps) {
   if (rawArgs === null || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
     throw new RpcParamError('参数错误：arguments 应为对象')
   }
-  const text = tool.handler(rawArgs, deps)
-  return { content: [{ type: 'text', text }], isError: false }
+  const outcome = tool.handler(rawArgs, deps)
+  if (typeof outcome === 'string') {
+    return { content: [{ type: 'text', text: outcome }], isError: false }
+  }
+  return {
+    content: [{ type: 'text', text: outcome.text }],
+    isError: outcome.isError === true,
+  }
 }
 
 /** 方法名 → 处理器（Map 防原型键误命中） */

@@ -1,8 +1,9 @@
 /**
- * MCP 的文档语料层：跨范围检索与全文读取（单一实现，桌面与容器共用）。
+ * MCP 的文档语料层：跨范围检索、全文读取与写入目标解析（单一实现，桌面与容器共用）。
  *
- * 范围（scope）由宿主注入，形状 `{workspace, root, prefix?}`：
+ * 范围（scope）由宿主注入，形状 `{workspace, root, prefix?, default?}`：
  *   - 桌面：每个已打开工作区一个范围，workspace = 工作区名，prefix 省略（path 即工作区相对路径）；
+ *     `default: true` 标记「AI 未指定位置时的落笔处」（内建默认工作区）；
  *   - 容器：每个仓库的默认分支工作树一个范围，workspace = `<仓库名>@<分支>`，
  *     prefix = `<slug>/`（检索结果带仓库前缀，read_doc 据此定位到唯一仓库）。
  *
@@ -13,16 +14,8 @@
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
-const EXCLUDED_DIRS = new Set([
-  'node_modules',
-  '.git',
-  '.vitepress',
-  'dist',
-  '.idea',
-  '.obsidian',
-  'snippets',
-  'assets',
-])
+import { EXCLUDED_DIRS, validateDocRelativePath } from './doc-paths.mjs'
+
 const MAX_DEPTH = 16
 /** 单篇索引上限：尾部内容不会成为检索目标，读满会把内存吃穿 */
 const MAX_DOC_BYTES = 1024 * 1024
@@ -57,6 +50,15 @@ function readText(file) {
   try {
     if (statSync(file).size > MAX_DOC_BYTES * 4) return null
     return readFileSync(file, 'utf8').slice(0, MAX_DOC_BYTES)
+  } catch {
+    return null
+  }
+}
+
+/** 文件 mtime（写入冲突判定用）；取不到返回 null */
+function mtimeOf(file) {
+  try {
+    return statSync(file).mtimeMs
   } catch {
     return null
   }
@@ -178,6 +180,7 @@ export function createCorpus(listScopes) {
             path: displayPath(scope, rel),
             title: titleOf(text, rel),
             text,
+            mtime: mtimeOf(abs),
           }
         }
         return `路径不在任何可读范围内：${path}`
@@ -210,9 +213,107 @@ export function createCorpus(listScopes) {
           path: displayPath(scope, rel),
           title: titleOf(text, rel),
           text,
+          mtime: mtimeOf(abs),
         }
       }
       return `没有找到文档：${path}（先调用 search_docs 查找可用路径）`
     },
+
+    /**
+     * 把「AI 给的写入路径」解析到唯一一个范围，返回 `{ workspace, root, relPath }`。
+     *
+     * 解析顺序**确定、不猜**——写错地方比写失败更糟，所以每一级都有明确理由：
+     *  1. 显式 `workspace` 参数：AI / 用户已指明，找不到就报错并列出可用项（不静默改投别处）；
+     *  2. 容器前缀 `<slug>/…`：与 readDoc 同一口径，命中即定；
+     *  3. 目标文件已存在且唯一命中：说明调用方拿到的是真实路径（overwrite / append 走这级）；
+     *  4. 只有一个范围：无需选择；
+     *  5. 有 `default` 标记的范围：内建默认工作区（「随手写篇文档」的落点）；
+     *  6. 以上都不成立 → 报错，让 AI 先调 list_workspaces 指定位置。
+     *
+     * 新文件的父目录必须先存在或可创建：`..`、绝对路径、非 .md、点开头段与扫描排除目录
+     * 一律在 `validateDocRelativePath` 里拒掉，与扫描口径共用一份规则。
+     */
+    resolveWrite(rawPath, workspace) {
+      const active = scopes()
+      if (!active.length) {
+        return { error: '当前没有可写入的工作区（未打开工作区 / 尚无已发布分支）。' }
+      }
+
+      let rel
+      try {
+        rel = validateDocRelativePath(rawPath)
+      } catch (error) {
+        return { error: error.message }
+      }
+
+      // 1. 显式 workspace：别名按名字匹配（桌面 = 工作区名；容器 = `<仓库>@<分支>`）
+      if (typeof workspace === 'string' && workspace.trim()) {
+        const wanted = workspace.trim()
+        const hit = active.find(scope => scope.workspace === wanted)
+        if (!hit) {
+          const names = active.map(scope => scope.workspace).join(' / ')
+          return {
+            error: `工作区不存在：${wanted}。可用工作区：${names}（不指定则落到默认工作区）`,
+          }
+        }
+        return { workspace: hit.workspace, root: hit.root, relPath: stripPrefix(hit, rel) }
+      }
+
+      // 2. 容器前缀
+      const prefixed = active
+        .filter(scope => scope.prefix && rel.startsWith(scope.prefix))
+        .sort((a, b) => (b.prefix?.length ?? 0) - (a.prefix?.length ?? 0))
+      const byPrefix = prefixed[0]
+      if (byPrefix) {
+        return {
+          workspace: byPrefix.workspace,
+          root: byPrefix.root,
+          relPath: rel.slice(byPrefix.prefix?.length ?? 0),
+        }
+      }
+
+      // 3. 目标已存在且唯一命中（overwrite / append 的常见路径）
+      const existing = []
+      for (const scope of active) {
+        const abs = resolve(scope.root, ...rel.split('/'))
+        if (inside(scope.root, abs)) existing.push({ scope, abs })
+      }
+      if (existing.length === 1) {
+        const only = existing[0]
+        return { workspace: only.scope.workspace, root: only.scope.root, relPath: rel }
+      }
+      if (existing.length > 1) {
+        const names = existing.map(item => item.scope.workspace).join(' / ')
+        return {
+          error: `同名文档存在于多个工作区：${names}——请用 workspace 参数指定写到哪一个。`,
+        }
+      }
+
+      // 4. 唯一范围
+      const sole = active.length === 1 ? active[0] : undefined
+      if (sole)
+        return { workspace: sole.workspace, root: sole.root, relPath: stripPrefix(sole, rel) }
+
+      // 5. 内建默认工作区
+      const fallback = active.find(scope => scope.default)
+      if (fallback) {
+        return {
+          workspace: fallback.workspace,
+          root: fallback.root,
+          relPath: stripPrefix(fallback, rel),
+        }
+      }
+
+      // 6. 无从判断
+      return {
+        error: `无法确定写入到哪个工作区（当前有 ${active.length} 个）——请用 list_workspaces 查看后，用 workspace 参数指定。`,
+      }
+    },
   }
+}
+
+/** 去掉范围前缀（容器 `slug/`）；桌面无前缀时原样返回 */
+function stripPrefix(scope, relPath) {
+  if (!scope.prefix) return relPath
+  return relPath.startsWith(scope.prefix) ? relPath.slice(scope.prefix.length) : relPath
 }

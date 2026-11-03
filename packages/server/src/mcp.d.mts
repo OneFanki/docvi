@@ -37,6 +37,35 @@ export interface ReadDocResult {
   path: string
   title: string
   text: string
+  /** 文件 mtime（毫秒）；overwrite 时作为 baseMtime。取不到为 null */
+  mtime?: number | null
+}
+
+/** 可写入的工作区（桌面 = 已打开工作区；容器不提供写能力） */
+export interface McpWorkspace {
+  /** 工作区名（write_doc 的 workspace 参数取值） */
+  workspace: string
+  /** 绝对路径 */
+  root: string
+  /** 是否为 AI 未指定位置时的默认落笔处 */
+  default?: boolean
+}
+
+export interface WriteDocInput {
+  path: string
+  text: string
+  workspace?: string
+  mode?: 'create' | 'overwrite' | 'append'
+  baseMtime?: number
+}
+
+export interface WriteDocResult {
+  status: 'created' | 'updated' | 'appended'
+  workspace: string
+  /** 工作区相对路径 */
+  path: string
+  bytes: number
+  mtime: number
 }
 
 export interface McpDeps {
@@ -52,6 +81,10 @@ export interface McpDeps {
   searchDocs?(query: string, limit: number): SearchHit[]
   /** 提供后 read_doc 出现在工具面；字符串即「可读的失败说明」 */
   readDoc?(path: string): ReadDocResult | string
+  /** 提供后 list_workspaces 出现在工具面 */
+  listWorkspaces?(): McpWorkspace[]
+  /** 提供后 write_doc 出现在工具面（需同时提供 listWorkspaces）；失败用 error 字段 */
+  writeDoc?(input: WriteDocInput): WriteDocResult | { error: string } | string
 }
 
 export interface ToolSpec {

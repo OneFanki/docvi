@@ -124,7 +124,9 @@ try {
 
   const tools = await rpc({ jsonrpc: '2.0', id: 4, method: 'tools/list' })
   const names = tools.result.tools.map(tool => tool.name)
-  if (names.length !== 6) throw new Error(`工具数应为 6，实际 ${names.join(',')}`)
+  // 容器只读：七个工具，且绝不能出现 write_doc（无 commit/push 能力）
+  if (names.length !== 7) throw new Error(`工具数应为 7，实际 ${names.join(',')}`)
+  if (names.includes('write_doc')) throw new Error('容器端不应声明 write_doc（只读宿主）')
 
   console.log('[smoke] search_docs：')
   console.log(

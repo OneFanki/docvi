@@ -155,3 +155,104 @@ test('范围列表每次调用现取（活查询）：新增范围立刻可见',
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+/* ---------- 写入目标解析（resolveWrite） ---------- */
+
+test('readDoc：返回 mtime，供 overwrite 做冲突判定', () => {
+  const { root, scopes } = fixture()
+  try {
+    const corpus = createCorpus(() => scopes)
+    const result = corpus.readDoc('random.md')
+    assert.equal(typeof result, 'object')
+    assert.equal(typeof result.mtime, 'number')
+    assert.ok(result.mtime > 0)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('resolveWrite：显式 workspace 优先，找不到时报错并列出可用项', () => {
+  const { root, scopes } = fixture()
+  try {
+    const corpus = createCorpus(() => scopes)
+    const picked = corpus.resolveWrite('新篇.md', '本地工作区')
+    assert.equal(picked.workspace, '本地工作区')
+    assert.equal(picked.relPath, '新篇.md')
+
+    const missing = corpus.resolveWrite('新篇.md', '不存在的')
+    assert.match(missing.error, /工作区不存在/)
+    assert.match(missing.error, /本地工作区/, '必须列出可用工作区，否则 AI 无从追问')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('resolveWrite：容器前缀命中唯一范围，且剥掉前缀', () => {
+  const { root, scopes } = fixture()
+  try {
+    const corpus = createCorpus(() => scopes)
+    const target = corpus.resolveWrite('handbook/新篇.md')
+    assert.equal(target.workspace, '工程手册@main')
+    assert.equal(target.relPath, '新篇.md', '落盘路径必须去掉容器前缀')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('resolveWrite：目标已存在且唯一命中时按既有文件定位', () => {
+  const { root, scopes } = fixture()
+  try {
+    const corpus = createCorpus(() => scopes)
+    // guides/deploy.md 在两个范围里都有 → 歧义，必须要求指定
+    const ambiguous = corpus.resolveWrite('guides/deploy.md')
+    assert.match(ambiguous.error, /多个工作区/)
+
+    // random.md 只在桌面范围 → 唯一命中
+    const unique = corpus.resolveWrite('random.md')
+    assert.equal(unique.workspace, '本地工作区')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('resolveWrite：多工作区无 default 时报错，有 default 时落到它', () => {
+  const { root, scopes } = fixture()
+  try {
+    const noDefault = createCorpus(() => scopes)
+    assert.match(noDefault.resolveWrite('全新.md').error, /无法确定写入到哪个工作区/)
+
+    // 给其中一个打上 default 标记（内建默认工作区）
+    const withDefault = createCorpus(() =>
+      scopes.map(scope => (scope.workspace === '本地工作区' ? { ...scope, default: true } : scope)),
+    )
+    const target = withDefault.resolveWrite('全新.md')
+    assert.equal(target.workspace, '本地工作区')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('resolveWrite：唯一工作区时不必指定', () => {
+  const { root, scopes } = fixture()
+  try {
+    const corpus = createCorpus(() => [scopes[0]])
+    assert.equal(corpus.resolveWrite('全新.md').workspace, '本地工作区')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('resolveWrite：空范围与非法路径都给可读说明，不抛错', () => {
+  const empty = createCorpus(() => [])
+  assert.match(empty.resolveWrite('a.md').error, /没有可写入的工作区/)
+
+  const { root, scopes } = fixture()
+  try {
+    const corpus = createCorpus(() => scopes)
+    assert.match(corpus.resolveWrite('../逃逸.md').error, /\.\./)
+    assert.match(corpus.resolveWrite('a.txt').error, /Markdown/)
+    assert.match(corpus.resolveWrite('node_modules/a.md').error, /排除/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

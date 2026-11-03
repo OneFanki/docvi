@@ -910,6 +910,13 @@ export function createHttpd(ctx) {
     pluginDocs: name => readPluginDocs(name),
     searchDocs: (query, limit) => mcpCorpus.search(query, limit),
     readDoc: docPath => mcpCorpus.readDoc(docPath),
+    /*
+     * 容器只读：**不注入 writeDoc**——工作树是构建副本、git 层没有 commit/push，
+     * 写进去不会回传远端仓库，声明了就是骗 AI（工具面 = 宿主能力）。
+     * 但「能查哪些范围」仍然有用，所以 list_workspaces 正常提供。
+     */
+    listWorkspaces: () =>
+      mcpScopeCache.scopes.map(scope => ({ workspace: scope.workspace, root: scope.root })),
   }
 
   return function handler(req, res) {
