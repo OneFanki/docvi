@@ -144,8 +144,13 @@ git 客户端与插件安装。运维面在 `/_/admin`，由 `OPS_TOKEN` 门禁�
 http://127.0.0.1:<port>/mcp
 ```
 
-六个工具：`list_plugins`、`list_components`、`get_component_docs`、
-`get_plugin_docs`、`search_docs`、`read_doc`。工作区增减会自动同步到服务。
+八个工具：`list_plugins`、`list_components`、`get_component_docs`、
+`get_plugin_docs`、`search_docs`、`read_doc`、`list_workspaces`、`write_doc`。
+工作区增减会自动同步到服务。
+
+`write_doc` 默认只新建、不覆盖已有文档；改已有文档要先 `read_doc` 拿到 mtime，
+再带 `baseMtime` 覆盖（期间被别人改过会失败）。不指定位置时写进 `文档/docvi`——
+首次启动会自动建好这个默认工作区，所以你直接说「帮我写篇 XX 的文档」就行。
 
 所以你可以直接问「订单为什么不能回退状态」，它去你的文档里找答案，而不是凭印象编。
 端点与令牌在 设置 → 对外访问 里，一键复制成一整段客户端配置。默认只绑 `127.0.0.1`，

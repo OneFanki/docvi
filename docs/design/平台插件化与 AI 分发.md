@@ -217,7 +217,10 @@ plugins:
 
 - 容器：`http(s)://<host>/mcp`（与读者面同源，局域网同事的 AI 直连）；
 - app：**本地服务进程托管**（`apps/desktop/src/service`（本地服务进程），独立于平台进程——**平台退出不影响服务运行**）；`http://127.0.0.1:<port>/mcp`（端口由平台管理，默认 8610、面板可改）；「本地服务」面板显示地址 + 一键复制（局域网开启时附 LAN 地址）；**用户配置 = 一条 URL，无需 command / args**；
-- 工具面（六工具，两端同源）：`list_plugins` / `list_components` / `get_component_docs(kind)` / `get_plugin_docs(name)` / `search_docs(query, limit?)` / `read_doc(path)`；协议实现只有一份（`packages/server/src/mcp.mjs`），宿主只注入取数回调——**检索回调缺席时后两个工具不出现在 `tools/list`**（工具面 = 宿主能力）；
+- 工具面（八工具，按宿主能力裁剪）：`list_plugins` / `list_components` / `get_component_docs(kind)` / `get_plugin_docs(name)` / `search_docs(query, limit?)` / `read_doc(path)` / `list_workspaces()` / `write_doc(path, text, workspace?, mode?, baseMtime?)`；协议实现只有一份（`packages/server/src/mcp.mjs`），宿主只注入取数回调——**回调缺席时对应工具不出现在 `tools/list`**（工具面 = 宿主能力）。容器端没有 commit/push 能力，不注入 `writeDoc`，因此只有七个工具（ADR-0005）；
+- `write_doc` 的写入语义（保守优先）：`mode=create`（缺省）只新建、目标已存在即失败；`mode=overwrite` 整篇替换且**必须**带 `read_doc` 返回的 `baseMtime`，mtime 不匹配报冲突；`mode=append` 追加且文件须已存在。只写 `.md` / `.markdown`，路径拒绝绝对路径 / `..` / 点开头段 / 扫描排除目录（规则与扫描器共用 `doc-paths.mjs`）。**不提供删除**。写入失败回 `isError: true`——与「查不到」的 `isError: false` 明确区分，避免 AI 把没写成当成写成了；
+- `write_doc` 的目标解析顺序（`corpus.resolveWrite`，确定且不猜）：显式 `workspace` 参数 → 容器前缀 → 既有文件唯一命中 → 唯一工作区 → 带 `default` 标记的工作区（桌面内建默认工作区 `<文档>/docvi`）→ 报错让 AI 先 `list_workspaces`；
+- **落笔优先级（写进 `instructions`）**：用户明确指定的位置 > 项目规范约定的位置 > 默认工作区。默认工作区只是「完全没线索时的兜底」，不得因为它方便就绕过用户说过的位置；该工作区不可移除（`workspaceRemove` 返回 `E_FORBIDDEN`，界面不提供入口），默认按修改时间排序；
 - `search_docs` 的检索范围：桌面 = 已打开工作区（范围名即工作区名，path 为工作区相对路径）；容器 = 每仓默认分支的工作树（范围名 `<仓库名>@<分支>`，path 带 `<slug>/` 前缀，`read_doc` 据此定向到唯一仓库）。检索为多词 AND、标题命中优先、单篇 1 MB 截断；
 - `read_doc` 路径规则：先按前缀匹配，再按范围顺序尝试裸相对路径；绝对路径只在落于某范围内时可读；`..` 段与 realpath 逃逸一律给可读说明（说明文本，不是协议错误）；
 - `list_components` 每项返回 `kind / title / description / plugin`（plugin 为全限定身份，description 即 AI 的选择依据）；**每 kind 仅列活跃实现（至多一条）——AI 看到什么就能写什么**；停用插件、停用组件均不出现；`get_component_docs` 对停用 kind 返回「已停用（所属插件 X）」说明而非内容；

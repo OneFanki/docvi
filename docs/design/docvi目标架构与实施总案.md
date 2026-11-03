@@ -611,38 +611,38 @@ Button（primary/secondary/ghost/danger × sm/md/lg）、IconButton、Input、Te
 
 ## 十、旧功能迁移映射（全量对齐）
 
-| #   | 旧功能                                  | 旧落点                          | 新落点                    | 对齐判据                                 |
-| --- | --------------------------------------- | ------------------------------- | ------------------------- | ---------------------------------------- |
-| 1   | Markdown 渲染（GFM、表格、任务列表）    | shell/render/markdown.ts        | renderer-core             | 同一文档渲染结果一致（DOM 结构快照对比） |
-| 2   | 术语块 / 步骤标题 / 设问标题            | markdown core 规则              | renderer-core             | 700 处存量文档抽样 30 篇，块级结构一致   |
-| 3   | 行内代码颜色增强                        | code_inline 规则                | renderer-core             | 颜色字面量全部识别，非颜色不受影响       |
-| 4   | Shiki 高亮                              | shell/render/highlight.ts       | renderer-core             | 代码块高亮与语言按需加载                 |
-| 5   | Mermaid                                 | shell/render/mermaid.ts         | renderer-core             | 图表渲染 + 缩放拖拽                      |
-| 6   | 24 个通用组件                           | plugins/base（custom elements） | plugins/base（Vue 原生）  | 24 个示例全部渲染，交互可用              |
-| 7   | 3 个音频组件                            | plugins/audio                   | plugins/audio（可选插件） | 3 个示例渲染                             |
-| 8   | 组件示例预览                            | `/_/preview/:name/:kind`        | 插件面板内预览            | 每个 kind 可预览                         |
-| 9   | 目录树 / 落地页 / 文件夹图标            | shell/host                      | apps/desktop 侧栏         | 三种节点状态一致                         |
-| 10  | 工作区（添加/探测/多仓/持久化）         | workspace-store                 | 主进程 + Pinia            | 添加目录、探测子目录、列表持久化         |
-| 11  | 最近打开                                | host/recent-files               | 主进程设置 + 库视图       | 上限 40（旧版 24，按小写路径去重）       |
-| 12  | 多标签（根标签钉住、复用、滚动恢复）    | tabs.ts                         | 新 TabStore + Pinia       | 旧 8 项单测语义全过                      |
-| 13  | 单文件打开（拖放/命令行/关联/二次启动） | desktop + shell                 | 主进程 + preload          | 四条入口落到同一标签，只读单文件         |
-| 14  | 文档内查找                              | webContents.findInPage          | 阅读态沿用；编辑态 CM6    | 计数、循环、Esc 关闭                     |
-| 15  | 全局搜索                                | minisearch                      | worker 索引 + 命令面板    | 5000 文档索引 < 3s，查询 < 50ms          |
-| 16  | 大纲                                    | 右侧目录                        | 大纲面板                  | 滚动联动、点击跳转                       |
-| 17  | 内容宽度 / 侧栏折叠                     | 视图控制                        | 顶部/状态栏控件 + 持久化  | 4 档宽度、折叠状态记忆                   |
-| 18  | 深浅主题                                | tokens.css                      | 主题系统 paper/graphite   | 对比度门禁通过                           |
-| 19  | 中英 i18n（245 条）                     | i18n-en                         | 同结构迁移                | 键完整性检查、无回退遗漏                 |
-| 20  | 插件面板（安装/启停/同名切换）          | host/plugin-panel               | 插件面板                  | 安装、禁用、冲突切换                     |
-| 21  | 本地服务（MCP/分享/端口/自启动/托盘）   | packages/server + desktop       | service 进程 + 服务插件   | MCP 六工具、分享链接、局域网开关         |
-| 22  | 临时分享（文件/目录）                   | shares                          | 服务插件                  | 链接可用、停用即失效                     |
-| 23  | git（克隆/分支/工作树/状态）            | desktop/git                     | 受信服务插件              | 克隆、切分支、状态显示                   |
-| 24  | 自绘窗口 chrome / 标题栏 / 状态栏       | app-chrome.css                  | apps/desktop              | 拖拽区、窗口按钮、状态栏信息             |
-| 25  | `.md` 文件关联 / 拖放                   | electron-builder + preload      | 同左（新 appId）          | 安装后双击打开                           |
-| 26  | 托盘 / 自启动                           | main                            | main                      | 关闭到托盘、开机启动                     |
-| 27  | 全屏组件（表图/表页签）                 | fullscreen.ts                   | 新全屏容器                | 无裁切、无吸底                           |
-| 28  | 图组件缩放拖拽                          | useZoomPan                      | 沿用                      | 缩放文字不糊、连线不错位                 |
-| 29  | 静态导出 / 单文件 viewer                | build:viewer                    | **冻结**                  | 不纳入本轮                               |
-| 30  | 容器部署器 deployer                     | deployer/                       | **冻结**                  | 不纳入本轮                               |
+| #   | 旧功能                                  | 旧落点                          | 新落点                    | 对齐判据                                         |
+| --- | --------------------------------------- | ------------------------------- | ------------------------- | ------------------------------------------------ |
+| 1   | Markdown 渲染（GFM、表格、任务列表）    | shell/render/markdown.ts        | renderer-core             | 同一文档渲染结果一致（DOM 结构快照对比）         |
+| 2   | 术语块 / 步骤标题 / 设问标题            | markdown core 规则              | renderer-core             | 700 处存量文档抽样 30 篇，块级结构一致           |
+| 3   | 行内代码颜色增强                        | code_inline 规则                | renderer-core             | 颜色字面量全部识别，非颜色不受影响               |
+| 4   | Shiki 高亮                              | shell/render/highlight.ts       | renderer-core             | 代码块高亮与语言按需加载                         |
+| 5   | Mermaid                                 | shell/render/mermaid.ts         | renderer-core             | 图表渲染 + 缩放拖拽                              |
+| 6   | 24 个通用组件                           | plugins/base（custom elements） | plugins/base（Vue 原生）  | 24 个示例全部渲染，交互可用                      |
+| 7   | 3 个音频组件                            | plugins/audio                   | plugins/audio（可选插件） | 3 个示例渲染                                     |
+| 8   | 组件示例预览                            | `/_/preview/:name/:kind`        | 插件面板内预览            | 每个 kind 可预览                                 |
+| 9   | 目录树 / 落地页 / 文件夹图标            | shell/host                      | apps/desktop 侧栏         | 三种节点状态一致                                 |
+| 10  | 工作区（添加/探测/多仓/持久化）         | workspace-store                 | 主进程 + Pinia            | 添加目录、探测子目录、列表持久化                 |
+| 11  | 最近打开                                | host/recent-files               | 主进程设置 + 库视图       | 上限 40（旧版 24，按小写路径去重）               |
+| 12  | 多标签（根标签钉住、复用、滚动恢复）    | tabs.ts                         | 新 TabStore + Pinia       | 旧 8 项单测语义全过                              |
+| 13  | 单文件打开（拖放/命令行/关联/二次启动） | desktop + shell                 | 主进程 + preload          | 四条入口落到同一标签，只读单文件                 |
+| 14  | 文档内查找                              | webContents.findInPage          | 阅读态沿用；编辑态 CM6    | 计数、循环、Esc 关闭                             |
+| 15  | 全局搜索                                | minisearch                      | worker 索引 + 命令面板    | 5000 文档索引 < 3s，查询 < 50ms                  |
+| 16  | 大纲                                    | 右侧目录                        | 大纲面板                  | 滚动联动、点击跳转                               |
+| 17  | 内容宽度 / 侧栏折叠                     | 视图控制                        | 顶部/状态栏控件 + 持久化  | 4 档宽度、折叠状态记忆                           |
+| 18  | 深浅主题                                | tokens.css                      | 主题系统 paper/graphite   | 对比度门禁通过                                   |
+| 19  | 中英 i18n（245 条）                     | i18n-en                         | 同结构迁移                | 键完整性检查、无回退遗漏                         |
+| 20  | 插件面板（安装/启停/同名切换）          | host/plugin-panel               | 插件面板                  | 安装、禁用、冲突切换                             |
+| 21  | 本地服务（MCP/分享/端口/自启动/托盘）   | packages/server + desktop       | service 进程 + 服务插件   | MCP 八工具（含 write_doc）、分享链接、局域网开关 |
+| 22  | 临时分享（文件/目录）                   | shares                          | 服务插件                  | 链接可用、停用即失效                             |
+| 23  | git（克隆/分支/工作树/状态）            | desktop/git                     | 受信服务插件              | 克隆、切分支、状态显示                           |
+| 24  | 自绘窗口 chrome / 标题栏 / 状态栏       | app-chrome.css                  | apps/desktop              | 拖拽区、窗口按钮、状态栏信息                     |
+| 25  | `.md` 文件关联 / 拖放                   | electron-builder + preload      | 同左（新 appId）          | 安装后双击打开                                   |
+| 26  | 托盘 / 自启动                           | main                            | main                      | 关闭到托盘、开机启动                             |
+| 27  | 全屏组件（表图/表页签）                 | fullscreen.ts                   | 新全屏容器                | 无裁切、无吸底                                   |
+| 28  | 图组件缩放拖拽                          | useZoomPan                      | 沿用                      | 缩放文字不糊、连线不错位                         |
+| 29  | 静态导出 / 单文件 viewer                | build:viewer                    | **冻结**                  | 不纳入本轮                                       |
+| 30  | 容器部署器 deployer                     | deployer/                       | **冻结**                  | 不纳入本轮                                       |
 
 **对齐口径**：1–28 全部通过即视为「功能对齐」；29–30 明确不在本轮范围，代码保留但不随新架构维护。
 截至 2026-10-22：**1–28 全部对齐**（#8 组件示例预览、#17 侧栏折叠持久化、#10 工作区子目录探测、
@@ -708,7 +708,7 @@ Button（primary/secondary/ghost/danger × sm/md/lg）、IconButton、Input、Te
 ### S5 服务与工作流（约 1 周）
 
 1. service 进程（utilityProcess / `--service`）+ 托盘 + 自启动。
-2. MCP 端点（六工具：插件四件套 + `search_docs` / `read_doc`；协议与检索层沉在 `packages/server`，两端共用）。
+2. MCP 端点（八工具：插件四件套 + `search_docs` / `read_doc` / `list_workspaces` / `write_doc`；协议与检索层沉在 `packages/server`，两端共用；容器只读、无 write_doc，见 ADR-0005）。
 3. 临时分享（文件/目录）+ 局域网开关。
 4. git 受信插件（克隆、分支、状态）。
 
@@ -727,15 +727,15 @@ Button（primary/secondary/ghost/danger × sm/md/lg）、IconButton、Input、Te
 
 ### 11.1 落地进度（S0–S6 截至 2026-10-21）
 
-| 阶段                   | 状态     | 提交                  | 运行时验收              | 备注                                                      |
-| ---------------------- | -------- | --------------------- | ----------------------- | --------------------------------------------------------- |
-| S0 地基                | 完成     | `f34070f`             | —                       | electron-vite 三段构建、身份改造、IPC 契约                |
-| S1 阅读内核 + 三层主题 | 完成     | `b66590d` + `19bd83e` | content 全量渲染        | 零 typecheck 错误、verify 13/13                           |
-| S2 工作区与导航        | 完成     | `f251855` + `1408600` | 25/25                   | 多标签、命令面板、全库搜索、四入口、文档内查找            |
-| S3 编辑器              | 完成     | `2f00658` + `a4f3dfc` | 19/19                   | CM6 Live Preview、IME 冻结、原子保存、草稿恢复            |
-| S4 插件体系            | 完成     | `3fdd6b6`             | 20/20                   | manifest 校验、容器、三层信任、主题即插件、合并单元格表格 |
-| S5 服务与工作流        | 完成     | `5dcfd44`             | 服务 26/26 + 桌面 15/15 | MCP 六工具、临时分享、设置页；git 托管工作区见 11.3       |
-| S6 打磨与发布          | 部分完成 | `b912bfa`             | 18/18 + i18n 10/10      | 键盘导航、快捷键帮助、i18n、错误/空态；打包与开源资产未做 |
+| 阶段                   | 状态     | 提交                  | 运行时验收              | 备注                                                                                 |
+| ---------------------- | -------- | --------------------- | ----------------------- | ------------------------------------------------------------------------------------ |
+| S0 地基                | 完成     | `f34070f`             | —                       | electron-vite 三段构建、身份改造、IPC 契约                                           |
+| S1 阅读内核 + 三层主题 | 完成     | `b66590d` + `19bd83e` | content 全量渲染        | 零 typecheck 错误、verify 13/13                                                      |
+| S2 工作区与导航        | 完成     | `f251855` + `1408600` | 25/25                   | 多标签、命令面板、全库搜索、四入口、文档内查找                                       |
+| S3 编辑器              | 完成     | `2f00658` + `a4f3dfc` | 19/19                   | CM6 Live Preview、IME 冻结、原子保存、草稿恢复                                       |
+| S4 插件体系            | 完成     | `3fdd6b6`             | 20/20                   | manifest 校验、容器、三层信任、主题即插件、合并单元格表格                            |
+| S5 服务与工作流        | 完成     | `5dcfd44`             | 服务 26/26 + 桌面 15/15 | MCP 八工具（2026-11-02 补写入与工作区清单）、临时分享、设置页；git 托管工作区见 11.3 |
+| S6 打磨与发布          | 部分完成 | `b912bfa`             | 18/18 + i18n 10/10      | 键盘导航、快捷键帮助、i18n、错误/空态；打包与开源资产未做                            |
 
 **S5/S6 明确未做**（下一批）：
 

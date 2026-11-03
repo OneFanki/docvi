@@ -52,9 +52,10 @@
 
 ## 索引
 
-| 编号                                         | 标题                                    | 状态   |
-| -------------------------------------------- | --------------------------------------- | ------ |
-| [0001](0001-desktop-host-electron.md)        | 桌面宿主迁移到 Electron                 | 已采纳 |
-| [0002](0002-packages-monorepo.md)            | 仓库改为 packages/ 多包结构             | 已采纳 |
-| [0003](0003-single-server-implementation.md) | 服务层单一实现（MCP / 分享 / 插件注册） | 已采纳 |
-| [0004](0004-docvi-architecture-rewrite.md)   | docvi 架构重构                          | 已采纳 |
+| 编号                                            | 标题                                    | 状态   |
+| ----------------------------------------------- | --------------------------------------- | ------ |
+| [0001](0001-desktop-host-electron.md)           | 桌面宿主迁移到 Electron                 | 已采纳 |
+| [0002](0002-packages-monorepo.md)               | 仓库改为 packages/ 多包结构             | 已采纳 |
+| [0003](0003-single-server-implementation.md)    | 服务层单一实现（MCP / 分享 / 插件注册） | 已采纳 |
+| [0004](0004-docvi-architecture-rewrite.md)      | docvi 架构重构                          | 已采纳 |
+| [0005](0005-mcp-write-and-default-workspace.md) | MCP 写入能力与内建默认工作区            | 已采纳 |
