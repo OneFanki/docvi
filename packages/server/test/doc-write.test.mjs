@@ -17,6 +17,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -118,9 +119,18 @@ test('overwrite：别人改过（mtime 变了）就报冲突，不覆盖', () =>
   const { dir, cleanup } = tempRoot()
   try {
     const created = writeDocText({ root: dir, relPath: 'a.md', text: '旧\n' })
-    // 模拟另一处写入：内容与 mtime 都变
+    /*
+     * 模拟另一处写入：内容变、mtime 也要变。
+     *
+     * mtime 用 utimesSync 显式拉开，不依赖「两次写入落在不同时间戳」——CI 上
+     * 文件系统时间粒度可能是秒级，连续两次写入会得到同一个 mtime，这条断言
+     * 就会偶发地变成「冲突没检出」（实测 GitHub runner 上遇过）。
+     */
     writeFileSync(join(dir, 'a.md'), '别人改的\n', 'utf8')
+    const bumped = created.mtime + 5000
+    utimesSync(join(dir, 'a.md'), bumped / 1000, bumped / 1000)
     const fresh = statSync(join(dir, 'a.md')).mtimeMs
+    assert.notEqual(Math.round(fresh), Math.round(created.mtime), '前置条件：mtime 确实变了')
 
     // 用旧 mtime 写入必须被拒
     assert.equal(

@@ -67,7 +67,43 @@ function runOne(check) {
   })
 }
 
-function tail(text, maxLines) {
+/**
+ * 失败的检查要能在日志里**定位到具体用例**，不能只留尾巴。
+ *
+ * 曾经踩过：`node --test` 的失败详情在输出前部，按尾部截 120 行后整段丢失，
+ * CI 上只看到「服务层测试 失败」，不知道是哪一条挂的（2026-11-03）。
+ * 所以失败时先原样保留所有「失败标识行」，再补上尾部上下文。
+ */
+const FAIL_MARKERS =
+  /^(not ok|✖|✗|# (fail|tests|pass)\b)|^\s*(AssertionError|Error:|TypeError:)|^\s*expected:|^\s*actual:|^\s*code:/
+
+function excerpt(text, maxLines) {
+  const lines = text.split('\n').filter(line => line.trim() !== '')
+  if (lines.length === 0) return ''
+  const kept = lines.slice(-maxLines)
+  if (lines.length <= maxLines) return kept.map(line => `  │ ${line}`).join('\n') + '\n'
+
+  const keptSet = new Set(kept)
+  const markers = lines
+    .filter(line => FAIL_MARKERS.test(line.trim()) && !keptSet.has(line))
+    .slice(0, 40)
+  if (markers.length === 0) {
+    return [
+      `…（前 ${lines.length - maxLines} 行省略）`,
+      ...kept.map(line => `  │ ${line}`),
+      '',
+    ].join('\n')
+  }
+  return [
+    `…（共 ${lines.length} 行：先列失败标识行，再补尾部 ${maxLines} 行）`,
+    ...markers.map(line => `  │ ${line}`),
+    '  │ …',
+    ...kept.map(line => `  │ ${line}`),
+    '',
+  ].join('\n')
+}
+
+const tail = (text, maxLines) => {
   const lines = text.split('\n').filter(line => line.trim() !== '')
   if (lines.length === 0) return ''
   const kept = lines.slice(-maxLines)
@@ -103,7 +139,8 @@ for (const { check, exitCode, output, durationMs, crash } of results) {
   )
   if (crash) process.stdout.write(`  │ 执行器异常：${crash}\n`)
   if (output.trim() !== '') {
-    process.stdout.write(tail(output, failed ? TAIL_LINES_FAIL : TAIL_LINES_PASS))
+    // 失败时保留失败标识行（否则详情在前部时会被尾部截断整段吞掉）
+    process.stdout.write(failed ? excerpt(output, TAIL_LINES_FAIL) : tail(output, TAIL_LINES_PASS))
   }
   if (failed) failures.push({ name: check.name, exitCode })
 }
