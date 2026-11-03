@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Check } from 'lucide-vue-next'
 
 /**
  * 通用上下文菜单。
@@ -20,6 +21,15 @@ export interface MenuItem {
   disabled?: boolean
   /** 与前一项之间画分隔线 */
   separatorBefore?: boolean
+  /**
+   * 勾选态（单选项用）：给定时这一项渲染成 `menuitemradio` + 左侧勾。
+   *
+   * 为什么放进通用菜单而不是另写一个下拉：勾选是**标准菜单能力**，
+   * 与「色板」「开关」这类特定形态不同，塞进来不会把通用菜单撑歪。
+   * 注意 `undefined` 与 `false` 有别——前者是普通命令项，后者是「未选中的单选项」，
+   * 所以这里用 `!== undefined` 判断，不能用真值判断。
+   */
+  checked?: boolean
 }
 
 const props = defineProps<{
@@ -27,6 +37,12 @@ const props = defineProps<{
   x: number
   y: number
   items: MenuItem[]
+  /**
+   * 触发按钮（下拉菜单用）。点在它上面不算「点外部」——否则 mousedown 会先把
+   * 菜单关掉，紧接着的 click 又打开，第二次点触发按钮永远关不上。
+   * 右键菜单不需要它，省略即可。
+   */
+  anchor?: HTMLElement | null
 }>()
 
 const emit = defineEmits<{
@@ -38,6 +54,12 @@ const root = ref<HTMLElement | null>(null)
 const cursor = ref(0)
 /** 实际渲染坐标：先按点击点放，量出尺寸后再纠偏 */
 const position = ref({ left: props.x, top: props.y })
+
+/**
+ * 含单选项的菜单要**每一行都留出勾的位置**：只给选中行渲染图标会让未选行的
+ * 提示文字左右跳一下，两行长度不齐看起来像没对齐。
+ */
+const isCheckable = computed(() => props.items.some(item => item.checked !== undefined))
 
 watch(
   () => props.open,
@@ -53,12 +75,24 @@ watch(
     const margin = 8
     let left = props.x
     let top = props.y
-    if (left + rect.width + margin > window.innerWidth)
-      left = Math.max(margin, props.x - rect.width)
+    if (left + rect.width + margin > window.innerWidth) left = props.x - rect.width
     if (top + rect.height + margin > window.innerHeight) {
-      top = Math.max(margin, window.innerHeight - rect.height - margin)
+      top = window.innerHeight - rect.height - margin
     }
-    position.value = { left, top }
+    /*
+     * 最后统一夹进视口：视口窄到装不下菜单时，上面的翻转会算出负坐标，
+     * 面板顶部被切掉、勾选行看不见。夹紧后至少从左上角露出来。
+     */
+    position.value = {
+      left: Math.min(
+        Math.max(margin, left),
+        Math.max(margin, window.innerWidth - rect.width - margin),
+      ),
+      top: Math.min(
+        Math.max(margin, top),
+        Math.max(margin, window.innerHeight - rect.height - margin),
+      ),
+    }
     element.querySelector<HTMLElement>('[data-active="true"]')?.focus()
   },
 )
@@ -109,17 +143,23 @@ function onPointerDown(event: MouseEvent): void {
   if (!props.open) return
   const target = event.target as Node | null
   if (target && root.value?.contains(target)) return
+  if (target && props.anchor?.contains(target)) return
   emit('close')
+}
+
+function onResize(): void {
+  if (props.open) emit('close')
 }
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown, true)
   window.addEventListener('mousedown', onPointerDown, true)
-  window.addEventListener('resize', () => emit('close'))
+  window.addEventListener('resize', onResize)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, true)
   window.removeEventListener('mousedown', onPointerDown, true)
+  window.removeEventListener('resize', onResize)
 })
 </script>
 
@@ -138,7 +178,8 @@ onBeforeUnmount(() => {
           class="menu__item"
           :class="{ 'is-danger': item.danger, 'is-active': cursor === index }"
           type="button"
-          role="menuitem"
+          :role="item.checked === undefined ? 'menuitem' : 'menuitemradio'"
+          :aria-checked="item.checked === undefined ? undefined : item.checked"
           :data-active="cursor === index"
           :disabled="item.disabled"
           :tabindex="cursor === index ? 0 : -1"
@@ -147,6 +188,14 @@ onBeforeUnmount(() => {
         >
           <span class="menu__label">{{ item.label }}</span>
           <span v-if="item.hint" class="menu__hint">{{ item.hint }}</span>
+          <Check
+            v-if="item.checked"
+            :size="13"
+            :stroke-width="2.4"
+            class="menu__check"
+            aria-hidden="true"
+          />
+          <span v-else-if="isCheckable" class="menu__check" aria-hidden="true" />
         </button>
       </template>
     </div>
@@ -214,5 +263,13 @@ onBeforeUnmount(() => {
   flex: none;
   font-size: 10.5px;
   color: var(--dv-ui-text-dim);
+}
+
+/* 勾选标记放在行尾：与 ThemeMenu 的选中勾同一位置，两处菜单读起来是同一套 */
+/* 定宽 13px = 图标尺寸：未选中的行用同宽空位占住，提示文字不会左右跳 */
+.menu__check {
+  flex: none;
+  width: 13px;
+  color: var(--dv-ui-accent);
 }
 </style>

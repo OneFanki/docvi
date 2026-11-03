@@ -79,14 +79,22 @@ export function pluginSnapshot(plugins: PluginStore): ServicePlugin[] {
     })
 }
 
-/** 工作区 → 服务快照 */
+/**
+ * 工作区 → 服务快照。
+ *
+ * `defaultRoot` 由调用方传入（而非在这里算 Documents 路径）：默认工作区的判定
+ * 只在一处（default-workspace.ts），服务层不该知道它放在哪。
+ * 标记随快照走、不落 workspaces.json——用户删掉默认工作区后不该留下悬空标记。
+ */
 export function workspaceSnapshot(
   store: WorkspaceStore,
-): Array<{ id: string; name: string; root: string }> {
+  defaultRoot?: string | null,
+): Array<{ id: string; name: string; root: string; default?: boolean }> {
   return store.list().map((entry: WorkspaceEntry) => ({
     id: entry.id,
     name: entry.name,
     root: entry.root,
+    ...(defaultRoot && entry.root === defaultRoot ? { default: true } : {}),
   }))
 }
 
@@ -113,6 +121,8 @@ export function createServiceBridge(
   store: WorkspaceStore,
   plugins: PluginStore,
   dataDir: string,
+  /** 默认工作区根（AI 未指定位置时的落笔处）；空/缺省表示没有默认工作区 */
+  defaultRoot?: string | null,
 ): ServiceBridge {
   const settings = loadSettings()
   /** 记住的首选端口：改端口后设置页要显示「下次启动用哪个」，不能只看当前实际端口 */
@@ -127,7 +137,7 @@ export function createServiceBridge(
     preferredPort: settings.port,
     lan: settings.lan,
     token: settings.token,
-    workspaces: workspaceSnapshot(store),
+    workspaces: workspaceSnapshot(store, defaultRoot),
     plugins: pluginSnapshot(plugins),
   })
 
@@ -150,7 +160,7 @@ export function createServiceBridge(
     removeShare: id => manager.removeShare(id),
     onState: listener => manager.onState(listener),
     sync() {
-      manager.update(workspaceSnapshot(store), pluginSnapshot(plugins))
+      manager.update(workspaceSnapshot(store, defaultRoot), pluginSnapshot(plugins))
     },
     stop: () => manager.stop(),
   }

@@ -16,7 +16,12 @@ import { dispatch, type McpDeps } from '../../../../packages/server/src/mcp.mjs'
  * 令牌只对 MCP 生效：分享链接要能直接粘给别人，不能再要求额外凭证。
  */
 
-const MCP_BODY_LIMIT = 256 * 1024
+/*
+ * 桌面侧 MCP 请求体上限：自带 write_doc（单篇 1MB 上限 + JSON 转义与其余字段开销）。
+ * 256KB 会让「写一篇像样的文档」直接 413，而工具明明声明了能写。
+ * 容器端仍走 handleMcp 自带的 256KB（那边没有写工具），两处互不牵连。
+ */
+const MCP_BODY_LIMIT = 2 * 1024 * 1024
 const SHARE_ID_RE = /^[a-f0-9]{16}$/
 
 /** 可直出的静态类型：分享里的图片/PDF 等，不执行任何脚本 */

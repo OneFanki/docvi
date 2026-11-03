@@ -1,20 +1,9 @@
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-  writeSync,
-  fsyncSync,
-} from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import type { DraftPayload, WriteDocRequest, WriteDocResult } from '@docvi/shared'
+
+import { atomicWriteText } from '../../../../packages/server/src/fs-atomic.mjs'
 
 import { dataDir } from './paths.ts'
 
@@ -24,10 +13,13 @@ import { dataDir } from './paths.ts'
  * 三条硬约束：
  *  1. **原子写**：先写同目录临时文件再 rename。直接覆盖写在中途崩溃时会留下
  *     半截文件，rename 在同一文件系统上是原子的，要么旧要么新。
+ *     实现复用 `packages/server/src/fs-atomic.mjs`——MCP 的 write_doc 走同一份，
+ *     两处若各写一套，早晚会在 fsync / 临时文件命名上漂移。
  *  2. **冲突判定在写之前**：比较载入时的 mtime 与当前磁盘 mtime，不同就返回
  *     conflict，由渲染层让用户选「覆盖 / 放弃 / 看差异」——绝不静默覆盖别人的改动。
- *  3. **写入前 fsync**：rename 之前把临时文件刷到磁盘，否则断电时可能 rename
- *     成功但内容是空页（POSIX 上 rename 只保证目录项原子，不保证数据落盘）。
+ *     这条判定与 MCP 的 overwrite 语义相同（同一个 1ms 容差口径）。
+ *  3. **写入前 fsync**：由 atomicWriteText 内部完成（POSIX 上 rename 只保证
+ *     目录项原子，不保证数据落盘）。
  */
 
 const MAX_WRITE_BYTES = 20 * 1024 * 1024
@@ -62,33 +54,9 @@ export function writeDoc(request: WriteDocRequest): WriteDocResult {
     return { status: 'conflict', mtime: before.mtimeMs, size: before.size }
   }
 
-  const directory = dirname(absolutePath)
-  const tmp = join(directory, `.${randomUUID()}.docvi-tmp`)
-  let fd: number | null = null
   try {
-    fd = openSync(tmp, 'w')
-    const buffer = Buffer.from(text, 'utf8')
-    let written = 0
-    while (written < buffer.length) {
-      written += writeSync(fd, buffer, written, buffer.length - written)
-    }
-    fsyncSync(fd)
-    closeSync(fd)
-    fd = null
-    renameSync(tmp, absolutePath)
+    atomicWriteText(absolutePath, text)
   } catch (error) {
-    if (fd !== null) {
-      try {
-        closeSync(fd)
-      } catch {
-        // 已在异常路径上，关闭失败不再掩盖原始错误
-      }
-    }
-    try {
-      if (existsSync(tmp)) unlinkSync(tmp)
-    } catch {
-      // 临时文件清理失败不影响错误上报
-    }
     throw ioError(error instanceof Error ? error.message : '写入失败')
   }
 

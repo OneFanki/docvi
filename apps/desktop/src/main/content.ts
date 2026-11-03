@@ -9,7 +9,7 @@ import {
 } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
-import type { DocPayload, SearchDoc, TreeNode } from '@docvi/shared'
+import type { DocPayload, SearchDoc, TreeNode, TreeSortMode } from '@docvi/shared'
 
 import { readConfig, CONFIG_FILENAME } from './config.ts'
 
@@ -21,7 +21,8 @@ import { readConfig, CONFIG_FILENAME } from './config.ts'
  *  - 排除 `node_modules` / `.git` / `dist` / 点开头目录；
  *  - `snippets` / `assets` 是素材目录，不进树（正文仍可引用）；
  *  - 落地页优先级 index.md → 索引.md → README.md；
- *  - 排序 = frontmatter `order` 升序，其次名称自然序（zh-CN, numeric）。
+ *  - 排序默认 = frontmatter `order` 升序，其次名称自然序（zh-CN, numeric）；
+ *    工作区可切到 mtime 模式（修改时间倒序），见 `TreeSortMode`。
  */
 
 const EXCLUDED_DIRS = new Set([
@@ -77,6 +78,13 @@ interface RawNode {
   name: string
   type: 'dir' | 'doc'
   order: number | null
+  /**
+   * 修改时间（毫秒）。mtime 排序用；读不到时为 0（排到最后）。
+   *
+   * 目录取它自己的 stat.mtime——目录项里新增/删除文件会更新它，
+   * 正好对应「这个文件夹最近有动静」的直觉。
+   */
+  mtime: number
   landing?: string
   children: RawNode[]
   relPath: string
@@ -91,6 +99,15 @@ interface RawNode {
  * 一个夹着几篇大文档的库，保存一次就要读几十 MB 只为取一个 order。
  */
 const META_HEAD_BYTES = 4096
+
+/** 文件/目录的修改时间（毫秒）；读不到给 0，mtime 排序时落到最后 */
+function mtimeOf(absPath: string): number {
+  try {
+    return statSync(absPath).mtimeMs
+  } catch {
+    return 0
+  }
+}
 
 function readDocMeta(absPath: string): { title: string | null; order: number | null } {
   let fd: number | null = null
@@ -118,7 +135,7 @@ function readDocMeta(absPath: string): { title: string | null; order: number | n
   }
 }
 
-function scanDir(absDir: string, relDir: string, depth: number): RawNode[] {
+function scanDir(absDir: string, relDir: string, depth: number, sort: TreeSortMode): RawNode[] {
   if (depth > MAX_DEPTH) return []
 
   let entries
@@ -138,7 +155,8 @@ function scanDir(absDir: string, relDir: string, depth: number): RawNode[] {
       if (isDirExcluded(name)) continue
       // 空目录也要进树：用户刚建好的文件夹落盘成功却被这里剔除，界面毫无
       // 变化，看起来像「创建失败」——这是 2026-10-28 修掉的误报源头。
-      const children = scanDir(join(absDir, name), rel, depth + 1)
+      const dirAbs = join(absDir, name)
+      const children = scanDir(dirAbs, rel, depth + 1, sort)
       // 落地页取本目录直接的 index.md/索引.md/README.md（子目录里的不算）
       const landingName = INDEX_BASENAMES.find(base =>
         children.some(c => c.type === 'doc' && `${c.name}.md` === base),
@@ -147,16 +165,19 @@ function scanDir(absDir: string, relDir: string, depth: number): RawNode[] {
         name,
         type: 'dir',
         order: null,
+        mtime: mtimeOf(dirAbs),
         ...(landingName ? { landing: rel ? `${rel}/${landingName}` : landingName } : {}),
         children,
         relPath: rel,
       })
     } else if (entry.isFile() && name.toLowerCase().endsWith('.md')) {
-      const meta = readDocMeta(join(absDir, name))
+      const absFile = join(absDir, name)
+      const meta = readDocMeta(absFile)
       docs.push({
         name: name.replace(/\.md$/i, ''),
         type: 'doc',
         order: meta.order,
+        mtime: mtimeOf(absFile),
         children: [],
         relPath: rel,
       })
@@ -172,6 +193,10 @@ function scanDir(absDir: string, relDir: string, depth: number): RawNode[] {
         const aLanding = `${a.name}.md` === landingDoc
         const bLanding = `${b.name}.md` === landingDoc
         if (aLanding !== bLanding) return aLanding ? -1 : 1
+      }
+      if (sort === 'mtime') {
+        // 最新改动的排最前；同毫秒回落到名称，保证顺序稳定（否则每次重扫都可能抖）
+        return b.mtime - a.mtime || naturalCompare(a.name, b.name)
       }
       return sortKey(a) - sortKey(b) || naturalCompare(a.name, b.name)
     })
@@ -213,9 +238,9 @@ function toTreeNodes(raw: RawNode[]): TreeNode[] {
   })
 }
 
-export function scanTree(root: string): TreeNode[] {
+export function scanTree(root: string, sort: TreeSortMode = 'manual'): TreeNode[] {
   const config = readConfig(root)
-  const scanned = toTreeNodes(scanDir(root, '', 0))
+  const scanned = toTreeNodes(scanDir(root, '', 0, sort))
 
   // 无 sidebar 声明：整棵树直接作为根列表（自动扫描模式）
   if (!config?.sidebar?.length) return scanned

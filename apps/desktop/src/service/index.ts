@@ -155,14 +155,19 @@ async function main(): Promise<void> {
   let runtime: Runtime = { port: null, host: null, error: null }
 
   const renderer = createShareRenderer()
-  // 检索范围 = 已打开工作区（MCP 的 search_docs / read_doc 只读这一层，不碰窗口状态）
+  // 检索与写入范围 = 已打开工作区（MCP 只认这一层，不碰窗口状态）
   const corpus: Corpus = createCorpus(() =>
-    workspaces.map(workspace => ({ workspace: workspace.name, root: workspace.root })),
+    workspaces.map(workspace => ({
+      workspace: workspace.name,
+      root: workspace.root,
+      ...(workspace.default ? { default: true } : {}),
+    })),
   )
 
   const mcpDeps: McpDeps = createServiceMcpDeps({
     serverVersion: SERVER_VERSION,
     plugins: () => plugins,
+    workspaces: () => workspaces,
     readPluginFile,
     corpus,
   })

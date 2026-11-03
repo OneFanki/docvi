@@ -64,6 +64,7 @@ const api: DocviApi = {
   },
   workspaceRemove: id => ipcRenderer.invoke(IPC.workspaceRemove, id),
   workspaceTouch: id => ipcRenderer.invoke(IPC.workspaceTouch, id),
+  workspaceSetTreeSort: (id, mode) => ipcRenderer.invoke(IPC.workspaceSetTreeSort, id, mode),
 
   treeList: workspaceId => ipcRenderer.invoke(IPC.treeList, workspaceId),
   docRead: (workspaceId, path) => ipcRenderer.invoke(IPC.docRead, workspaceId, path),

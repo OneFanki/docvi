@@ -94,7 +94,10 @@ const menuItems = computed<MenuItem[]>(() => {
                 { id: 'pull', label: t('git.pullNow') },
               ]
             : []),
-          { id: 'remove', label: t('ws.remove'), danger: true, separatorBefore: true },
+          // 内建默认工作区不提供移除：见卡片按钮处的说明
+          ...(menuWorkspace.value?.default
+            ? []
+            : [{ id: 'remove', label: t('ws.remove'), danger: true, separatorBefore: true }]),
         ]),
   ]
 })
@@ -347,6 +350,18 @@ function formatTime(ts: number): string {
           >
             <div class="card__head">
               <h3 class="card__name">{{ ws.name }}</h3>
+              <!--
+                内建默认工作区：标出它是「AI 兜底落笔处」。
+                不给移除入口——它不是用户挑的目录，删了会让 AI 无处落笔，
+                而用户不会把这个后果和「删了一张卡片」联系起来。
+              -->
+              <span
+                v-if="ws.default"
+                v-tooltip="t('library.defaultWorkspaceHint')"
+                class="card__badge"
+              >
+                {{ t('library.defaultWorkspace') }}
+              </span>
               <div v-if="!readonly" class="card__head-actions">
                 <!--
                   分享与删除都是「对这张卡片的动作」，放在同一组图标里。
@@ -363,6 +378,7 @@ function formatTime(ts: number): string {
                   <Share2 :size="14" :stroke-width="1.7" />
                 </button>
                 <button
+                  v-if="!ws.default"
                   v-tooltip="t('library.removeHint')"
                   class="card__icon card__icon--danger"
                   type="button"
@@ -667,6 +683,27 @@ function formatTime(ts: number): string {
   display: flex;
   align-items: center;
   gap: 2px;
+}
+
+/*
+ * 内建默认工作区的角标：它承担「AI 兜底落笔处」这个额外职责，
+ * 卡片上不说清楚，用户会以为它和别的目录一样只是个普通工作区。
+ * flex: none 避免被长目录名挤压成一条线；margin-left:auto 让它靠右贴住操作区。
+ */
+.card__badge {
+  flex: none;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: var(--dv-ui-radius-sm);
+  /*
+   * 底色用 color-mix 而不是新增一个 --dv-ui-accent-soft 变量：UI 层没有
+   * soft 档（只有 doc 层有），为单个角标扩一套 token 不划算。
+   */
+  background: color-mix(in srgb, var(--dv-ui-accent) 16%, transparent);
+  color: var(--dv-ui-accent);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
 }
 
 /*

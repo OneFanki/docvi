@@ -165,3 +165,73 @@ test('scanTree：深层空目录与含文档目录并存，结构完整', () => 
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+/* ---------- 排序方式 ---------- */
+
+test('scanTree：manual 模式按名称自然序（缺省），与改造前一致', () => {
+  const root = mkdtempSync(join(tmpdir(), 'docvi-sort-manual-'))
+  try {
+    writeFileSync(join(root, 'b.md'), '# B\n', 'utf8')
+    writeFileSync(join(root, 'a.md'), '# A\n', 'utf8')
+    writeFileSync(join(root, 'c.md'), '# C\n', 'utf8')
+    const names = scanTree(root).map(node => node.name)
+    assert.deepEqual(names, ['a', 'b', 'c'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('scanTree：mtime 模式按修改时间倒序，最新改的排最上面', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'docvi-sort-mtime-'))
+  try {
+    // 依次写，拉开 mtime：a 最旧、c 最新
+    const { utimesSync } = await import('node:fs')
+    const now = Date.now() / 1000
+    writeFileSync(join(root, 'a.md'), '# A\n', 'utf8')
+    utimesSync(join(root, 'a.md'), now - 3000, now - 3000)
+    writeFileSync(join(root, 'b.md'), '# B\n', 'utf8')
+    utimesSync(join(root, 'b.md'), now - 2000, now - 2000)
+    writeFileSync(join(root, 'c.md'), '# C\n', 'utf8')
+    utimesSync(join(root, 'c.md'), now - 1000, now - 1000)
+
+    const names = scanTree(root, 'mtime').map(node => node.name)
+    assert.deepEqual(names, ['c', 'b', 'a'], '最新的在最上面')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('scanTree：mtime 模式下目录仍在文件之前（两类不混排）', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'docvi-sort-mix-'))
+  try {
+    const { utimesSync } = await import('node:fs')
+    const now = Date.now() / 1000
+    mkdirSync(join(root, 'zzz-dir'))
+    utimesSync(join(root, 'zzz-dir'), now - 5000, now - 5000)
+    writeFileSync(join(root, 'a.md'), '# A\n', 'utf8')
+    utimesSync(join(root, 'a.md'), now - 1000, now - 1000)
+
+    const types = scanTree(root, 'mtime').map(node => node.type)
+    assert.deepEqual(types, ['dir', 'doc'], '目录始终在文件前，各自内部再按 mtime')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('scanTree：mtime 相同回落到名称序（顺序稳定，重扫不抖）', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'docvi-sort-tie-'))
+  try {
+    const { utimesSync } = await import('node:fs')
+    const stamp = Math.floor(Date.now() / 1000)
+    for (const name of ['b.md', 'a.md', 'c.md']) {
+      writeFileSync(join(root, name), `# ${name}\n`, 'utf8')
+      utimesSync(join(root, name), stamp, stamp)
+    }
+    const first = scanTree(root, 'mtime').map(n => n.name)
+    const second = scanTree(root, 'mtime').map(n => n.name)
+    assert.deepEqual(first, ['a', 'b', 'c'], '同 mtime 按名称')
+    assert.deepEqual(second, first, '两次扫描结果一致')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

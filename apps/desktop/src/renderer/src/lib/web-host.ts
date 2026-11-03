@@ -271,6 +271,8 @@ export function createWebHost(options: WebHostOptions = {}): DocviApi {
       sidebarCollapsed: false,
       editorWrap: 'wrap',
       desktop: { autostart: false, closeToTray: false },
+      // 容器宿主没有「本地默认工作区」概念（内容根由部署方编排），置真表示无需播种
+      defaultWorkspaceSeeded: true,
     }
     try {
       const raw = localStorage.getItem(settingsKey)
@@ -590,6 +592,10 @@ export function createWebHost(options: WebHostOptions = {}): DocviApi {
     },
     async workspaceRemove() {
       return deny('容器版不支持移除仓库')
+    },
+    async workspaceSetTreeSort() {
+      // 容器读者面的目录顺序由部署产物决定（构建时生成 tree.json），客户端不改
+      return deny('容器版不支持修改目录排序')
     },
 
     async gitState() {

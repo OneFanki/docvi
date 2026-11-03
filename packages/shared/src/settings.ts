@@ -79,6 +79,14 @@ export interface AppSettings {
    */
   editorWrap: EditorWrap
   desktop: DesktopPreferences
+  /**
+   * 是否已经播种过内建默认工作区（`<文档>/docvi`）。
+   *
+   * 只播种一次：用户把这个工作区删掉，就是不想要它，重启再建出来是骚扰。
+   * 放进 settings 而不是「看目录在不在」——目录是否存在无法区分「从没建过」
+   * 与「用户主动删了」。
+   */
+  defaultWorkspaceSeeded: boolean
 }
 
 export const TAB_WIDTH_MIN = 120
@@ -110,6 +118,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
    * 开机自启动仍然默认关闭——那才是「用户明确想要」才该开的开关。
    */
   desktop: { autostart: false, closeToTray: true },
+  // 首次启动时主进程会播种默认工作区并把这一位翻成 true
+  defaultWorkspaceSeeded: false,
 }
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -186,5 +196,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
       // 键不存在时用默认值（默认是开）——写成 `=== true` 会把「没存过」误判成「关」
       closeToTray: bool(desktopRaw.closeToTray, DEFAULT_SETTINGS.desktop.closeToTray),
     },
+    // 缺省视为未播种：老用户的 settings.json 里没有这一位，升级后应当补建一次
+    defaultWorkspaceSeeded: record.defaultWorkspaceSeeded === true,
   }
 }

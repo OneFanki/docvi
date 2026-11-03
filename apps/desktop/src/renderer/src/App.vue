@@ -13,9 +13,11 @@ import {
   CheckCircle2,
   ChevronsDown,
   ChevronsDownUp,
+  ClockArrowDown,
   FilePlus2,
   Link2,
   LocateFixed,
+  ListOrdered,
   X,
 } from 'lucide-vue-next'
 import type {
@@ -23,6 +25,7 @@ import type {
   ExportFormat,
   PortalWorkspace,
   TreeNode,
+  TreeSortMode,
   WorkspaceEntry,
   WorkspaceFilesChange,
 } from '@docvi/shared'
@@ -76,6 +79,7 @@ import TitleBar from './components/TitleBar.vue'
 import TabBar from './components/TabBar.vue'
 import TabSwitcher from './components/TabSwitcher.vue'
 import DocTree, { type TreeFsAction } from './components/DocTree.vue'
+import ContextMenu, { type MenuItem } from './components/ContextMenu.vue'
 import LibraryView from './components/LibraryView.vue'
 import ReaderView from './components/ReaderView.vue'
 import OutlinePanel from './components/OutlinePanel.vue'
@@ -2222,6 +2226,65 @@ function collapseAll(): void {
   tabs.setExpanded(tab.id, [])
 }
 
+/** 当前工作区的目录树排序方式（缺省 manual，与主进程口径一致） */
+const treeSortMode = computed<TreeSortMode>(() => store.activeWorkspace?.treeSort ?? 'manual')
+
+/**
+ * 排序下拉面板的位置。
+ *
+ * 为什么不做「点一下直接翻转」：只有两个选项时翻转勉强够用，但用户看不出
+ * 「当前到底是哪种」——按钮图标只是个模糊提示。面板把两个选项和勾选态一起
+ * 摆出来，当前状态是**读出来的**而不是**推断出来的**。
+ *
+ * 面板挂在按钮正下方（贴底边时 ContextMenu 会自动翻到上方）。
+ */
+const treeSortMenu = ref({ open: false, x: 0, y: 0 })
+/** 触发按钮：既用来量位置，也告诉菜单「点它不算点外部」 */
+const treeSortButton = ref<HTMLElement | null>(null)
+
+function toggleTreeSortMenu(): void {
+  if (treeSortMenu.value.open) {
+    treeSortMenu.value = { ...treeSortMenu.value, open: false }
+    return
+  }
+  const rect = treeSortButton.value?.getBoundingClientRect()
+  if (!rect) return
+  treeSortMenu.value = { open: true, x: rect.left, y: rect.bottom + 4 }
+}
+
+const treeSortMenuItems = computed<MenuItem[]>(() =>
+  (
+    [
+      { id: 'manual', label: t('tree.sortManual'), hint: t('tree.sortManualHint') },
+      { id: 'mtime', label: t('tree.sortMtime'), hint: t('tree.sortMtimeHint') },
+    ] as const
+  ).map(item => ({ ...item, checked: treeSortMode.value === item.id })),
+)
+
+/**
+ * 应用排序方式：写回工作区偏好后重扫。
+ *
+ * 树是主进程扫出来的（顺序也在那边定），所以不能只在前端重排——重扫一次
+ * 让「磁盘上看到什么」与「界面呈现什么」始终是同一条链路。
+ * 选中的就是当前方式时不写盘也不重扫：菜单点一下不该产生无意义的 IO。
+ */
+async function applyTreeSort(mode: TreeSortMode): Promise<void> {
+  const workspace = store.activeWorkspace
+  if (!workspace || workspace.treeSort === mode) return
+  const result = await window.docvi.workspaceSetTreeSort(workspace.id, mode)
+  if (!result.ok) {
+    store.error = result.error.message
+    return
+  }
+  store.applyWorkspace(result.data)
+  await store.loadTree(workspace.id, { quiet: true })
+}
+
+/** 菜单回传的是字符串 id；只有两种取值，收敛在这里做一次类型判定 */
+function onTreeSortSelect(id: string): void {
+  if (id === 'manual' || id === 'mtime') void applyTreeSort(id)
+}
+
 /**
  * 拖拽落定：先确认再动——拖拽易误触，松手即移动会把「手滑」变成既成事实。
  * 落到自身子孙 / 原地的项已被过滤（静默跳过，不是失败）；主进程 moveEntry
@@ -3124,6 +3187,29 @@ onBeforeUnmount(() => {
           @fs-action="onTreeFsAction"
         >
           <template #tools>
+            <!--
+              排序切换放在定位按钮之前：它改的是「整棵树的呈现顺序」，
+              优先级高于下面三个「在树里找位置」的动作。
+            -->
+            <!--
+              排序：点开一个带勾选态的面板，而不是「点一下翻转」。
+              翻转在只有两个选项时勉强够用，但用户看不出当前是哪一种。
+              图标反映当前方式，作为面板之外的辅助提示。
+            -->
+            <button
+              ref="treeSortButton"
+              v-tooltip="t('tree.sort')"
+              class="tree-tools__btn"
+              :class="{ 'is-on': treeSortMode === 'mtime' }"
+              type="button"
+              :aria-label="t('tree.sort')"
+              :aria-haspopup="true"
+              :aria-expanded="treeSortMenu.open"
+              @click="toggleTreeSortMenu"
+            >
+              <ClockArrowDown v-if="treeSortMode === 'mtime'" :size="13" :stroke-width="1.8" />
+              <ListOrdered v-else :size="13" :stroke-width="1.8" />
+            </button>
             <button
               v-tooltip="t('tree.reveal')"
               class="tree-tools__btn"
@@ -3371,6 +3457,20 @@ onBeforeUnmount(() => {
       @close="branchWorkspace = null"
     />
 
+    <!--
+      目录树排序面板：与 ThemeMenu 同一套「按钮 → 下拉 → 勾选」形态。
+      只给两个选项，但勾选态让「现在用的是哪种」一眼可见——切换式按钮做不到这点。
+    -->
+    <ContextMenu
+      :open="treeSortMenu.open"
+      :x="treeSortMenu.x"
+      :y="treeSortMenu.y"
+      :items="treeSortMenuItems"
+      :anchor="treeSortButton"
+      @select="onTreeSortSelect"
+      @close="treeSortMenu.open = false"
+    />
+
     <div v-if="notice" class="notice" role="status" aria-live="polite">
       <CheckCircle2 :size="15" :stroke-width="1.8" aria-hidden="true" />
       <span class="notice__text">{{ notice }}</span>
@@ -3515,6 +3615,11 @@ onBeforeUnmount(() => {
 .tree-tools__btn:disabled:hover {
   background: transparent;
   color: var(--dv-ui-text-dim);
+}
+
+/* 排序切到 mtime 时常亮：这是「当前状态」而不是「一次性动作」 */
+.tree-tools__btn.is-on {
+  color: var(--dv-ui-accent);
 }
 
 .canvas {

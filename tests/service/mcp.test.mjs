@@ -9,6 +9,9 @@
  * 不启动 HTTP 服务、不 spawn 进程；工厂 / 归一化 / 分发都是纯逻辑。
  */
 import assert from 'node:assert/strict'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { dispatch, toolNames } from '../../packages/server/src/mcp.mjs'
@@ -76,7 +79,17 @@ function fakeCorpus() {
       calls.push({ kind: 'readDoc', path })
       return path === 'missing.md'
         ? '没有找到文档：missing.md'
-        : { workspace: '内容', path, title: 'A', text: '# A\n\n正文' }
+        : { workspace: '内容', path, title: 'A', text: '# A\n\n正文', mtime: 1717000000000 }
+    },
+    /**
+     * 写入目标解析：真实的六级顺序在 corpus 测试里验证，这里只需「显式 / 越界 / 报错」
+     * 三态，用来确认适配层把解析结果与落盘正确串起来。
+     */
+    resolveWrite(rawPath, workspace) {
+      calls.push({ kind: 'resolveWrite', rawPath, workspace })
+      if (rawPath === '../逃逸.md') return { error: '路径不能包含 .. 段：../逃逸.md' }
+      if (workspace === '不存在') return { error: '工作区不存在：不存在' }
+      return { workspace: workspace ?? '内容', root: '/tmp/内容', relPath: rawPath }
     },
   }
 }
@@ -86,6 +99,10 @@ function deps(overrides = {}) {
   return createServiceMcpDeps({
     serverVersion: '9.9.9',
     plugins: () => PLUGINS,
+    workspaces: () => [
+      { id: 'ws-1', name: '内容', root: '/tmp/内容', default: true },
+      { id: 'ws-2', name: '资料', root: '/tmp/资料' },
+    ],
     readPluginFile: (dir, rel) => (rel === 'docs/SKILL.md' ? `# ${dir} 的文档` : null),
     corpus: fakeCorpus(),
     ...overrides,
@@ -117,9 +134,11 @@ test('tools/list 暴露 6 个工具（含 search_docs / read_doc）', () => {
       'get_plugin_docs',
       'search_docs',
       'read_doc',
+      'list_workspaces',
+      'write_doc',
     ],
   )
-  assert.equal(toolNames().length, 6)
+  assert.equal(toolNames().length, 8)
 })
 
 test('initialize 回显支持的协议版本，未知版本回最新；serverInfo 为 docvi', () => {
@@ -265,4 +284,77 @@ test('工具内部抛异常回 -32603（与参数错误分开报码）', () => {
   )
   assert.equal(outcome.code, -32603)
   assert.ok(outcome.message.includes('boom'))
+})
+
+/* ---------- 写入适配（桌面 = 全能力宿主） ---------- */
+
+test('list_workspaces：透出工作区名、根与默认落笔处标记', () => {
+  const text = callText('list_workspaces', {})
+  assert.match(text, /内容/)
+  assert.match(text, /资料/)
+  assert.match(text, /默认落笔处/, '默认工作区必须被标出来，AI 才知道省略 workspace 会落哪')
+})
+
+test('write_doc：解析目标 → 落盘 → 回路径与 mtime', () => {
+  // 真写临时目录：这条链路的核心就是「解析出的 root 真能落盘」，
+  // 用假 root 只验得出「没抛错」。（测试不碰真实用户数据目录）
+  const workdir = mkdtempSync(join(tmpdir(), 'docvi-svc-write-'))
+  try {
+    const corpus = {
+      resolveWrite: () => ({ workspace: '内容', root: workdir, relPath: '指南/入门.md' }),
+    }
+    const text = callText('write_doc', { path: '指南/入门.md', text: '# 入门\n' }, deps({ corpus }))
+    assert.match(text, /已新建：内容 ｜ 指南\/入门\.md/)
+    assert.equal(readFileSync(join(workdir, '指南', '入门.md'), 'utf8'), '# 入门\n')
+  } finally {
+    rmSync(workdir, { recursive: true, force: true })
+  }
+})
+
+test('write_doc：解析失败回 isError=true 而不是普通文本', () => {
+  const outcome = call(
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'write_doc', arguments: { path: '../逃逸.md', text: 'x' } },
+    },
+    deps(),
+  )
+  assert.equal(outcome.result.isError, true)
+  assert.match(outcome.result.content[0].text, /写入失败/)
+  assert.match(outcome.result.content[0].text, /\.\./)
+})
+
+test('write_doc：落盘抛错也回 isError=true（不冒泡成协议错误）', () => {
+  const corpus = {
+    resolveWrite: () => ({ workspace: '内容', root: '/nonexistent-root-xyz', relPath: 'a.md' }),
+  }
+  const outcome = call(
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'write_doc', arguments: { path: 'a.md', text: 'x' } },
+    },
+    deps({ corpus }),
+  )
+  assert.equal(outcome.result.isError, true)
+})
+
+test('write_doc：workspace 参数透传给解析层', () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'docvi-svc-write2-'))
+  try {
+    const corpus = {
+      calls: [],
+      resolveWrite(rawPath, workspace) {
+        this.calls.push({ rawPath, workspace })
+        return { workspace: workspace ?? '内容', root: workdir, relPath: rawPath }
+      },
+    }
+    callText('write_doc', { path: 'a.md', text: 'x', workspace: '资料' }, deps({ corpus }))
+    assert.equal(corpus.calls.at(-1).workspace, '资料')
+  } finally {
+    rmSync(workdir, { recursive: true, force: true })
+  }
 })

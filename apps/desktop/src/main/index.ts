@@ -7,6 +7,7 @@ import { IPC } from '@docvi/shared'
 
 import { registerIpc, createStore, createRecent, type DesktopHostOptions } from './ipc.ts'
 import type { WorkspaceStore } from './store.ts'
+import { ensureDefaultWorkspace } from './default-workspace.ts'
 import { createLocalAssetRegistry, type LocalAssetRegistry } from './local-assets.ts'
 import { pruneUpdateCache } from './update.ts'
 import { readAutostart, writeAutostart } from './autostart.ts'
@@ -456,11 +457,29 @@ app.whenReady().then(() => {
     settingsFile: settingsFilePath(dataDir()),
     sessionFile: sessionFilePath(dataDir()),
   })
+
+  /*
+   * 内建默认工作区（`<文档>/docvi`）：只播种一次，给 AI 一个「不指定位置也能落笔」
+   * 的地方。必须在 createServiceBridge 之前——首份服务快照要带上它的 default 标记。
+   * 失败只记日志：为一个便利功能让应用起不来是本末倒置。
+   *
+   * 已知边界：Electron 的 `documents` 路径在用户移动/重定向「文档」目录后会变，
+   * 此时旧记录仍指向旧位置、不会被自动迁移——那属于用户的文件管理决定，不代劳。
+   */
+  const defaultRoot = ensureDefaultWorkspace({
+    store: workspaces,
+    documentsDir: app.getPath('documents'),
+    isSeeded: () => settings.get().defaultWorkspaceSeeded,
+    markSeeded: () => settings.update({ defaultWorkspaceSeeded: true }),
+    log: message => console.log(`[default-workspace] ${message}`),
+  }).root
+
   const service = createServiceBridge(
     createServiceManager(serviceEntryPath(__dirname)),
     workspaces,
     plugins,
     dataDir(),
+    defaultRoot,
   )
   // 服务状态变化 → 渲染层（启动失败、端口顺延、崩溃重启都要能被看见）
   service.onState(state => mainWindow?.webContents.send(IPC.serviceChanged, state))
@@ -573,6 +592,7 @@ app.whenReady().then(() => {
     settings,
     desktopHost,
     localAssets,
+    defaultRoot,
   )
 
   // preload 在窗口创建前同步取一次设置：避免首帧用默认主题再切回来（闪一下）。

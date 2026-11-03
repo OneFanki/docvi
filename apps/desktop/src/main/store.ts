@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { createHash } from 'node:crypto'
+import { basename, dirname } from 'node:path'
 
-import type { RecentEntry, WorkspaceEntry } from '@docvi/shared'
+import type { RecentEntry, TreeSortMode, WorkspaceEntry } from '@docvi/shared'
 
 /**
  * 极简 JSON 持久化：读写整份文件，写入走临时文件 + rename 保证原子性。
@@ -43,6 +44,36 @@ export interface WorkspaceStore {
   remove(id: string): void
   touch(id: string): void
   find(id: string): WorkspaceEntry | undefined
+  /** 改目录树排序方式并落盘；工作区不存在时不做事 */
+  setTreeSort(id: string, mode: TreeSortMode): WorkspaceEntry | undefined
+}
+
+/**
+ * 由目录绝对路径派生工作区 id。
+ *
+ * 规则只允许存在这一处：`docvi://asset/<id>/…`、标签会话恢复、服务端检索范围
+ * 都依赖「同一目录 → 同一 id」。多个入口各自拼一遍，早晚会漂移成
+ * 「同目录两个工作区」或「资源 404」。
+ */
+export function workspaceIdFor(root: string): string {
+  return createHash('sha1').update(root).digest('hex').slice(0, 12)
+}
+
+/**
+ * 由目录绝对路径构造工作区记录（普通本地目录）。
+ *
+ * 带 `git` / `portal` 的托管工作区不走这里——它们由 clone / 切分支自己拼记录，
+ * 但 id 必须用 `workspaceIdFor`。
+ */
+export function createWorkspaceEntry(root: string): WorkspaceEntry {
+  const now = Date.now()
+  return {
+    id: workspaceIdFor(root),
+    name: basename(root),
+    root,
+    addedAt: now,
+    lastOpenedAt: now,
+  }
 }
 
 export function createWorkspaceStore(file: string): WorkspaceStore {
@@ -73,6 +104,13 @@ export function createWorkspaceStore(file: string): WorkspaceStore {
       if (!target) return
       target.lastOpenedAt = Date.now()
       persist()
+    },
+    setTreeSort(id, mode) {
+      const target = entries.find(e => e.id === id)
+      if (!target) return undefined
+      target.treeSort = mode
+      persist()
+      return target
     },
     find: id => entries.find(e => e.id === id),
   }

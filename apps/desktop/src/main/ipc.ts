@@ -1,5 +1,4 @@
 import { ipcMain, dialog, BrowserWindow, app, net, shell } from 'electron'
-import { createHash } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import { basename, isAbsolute, join } from 'node:path'
 
@@ -54,10 +53,13 @@ import type { SettingsStore } from './settings-store.ts'
 import type { ServiceBridge } from './service-bridge.ts'
 import {
   createRecentStore,
+  createWorkspaceEntry,
   createWorkspaceStore,
+  workspaceIdFor,
   type RecentStore,
   type WorkspaceStore,
 } from './store.ts'
+import { isRemovableWorkspace } from './default-workspace.ts'
 import { recentFile, workspacesFile } from './paths.ts'
 
 /**
@@ -105,6 +107,13 @@ export function registerIpc(
   settings: SettingsStore,
   desktop: DesktopHostOptions,
   localAssets: LocalAssetRegistry,
+  /**
+   * 内建默认工作区的根（AI 未指定落笔处时的兜底位置）。
+   *
+   * 只用来做两件事：在返回工作区时标 `default: true`、拒绝移除它。
+   * 标记是**派生**的（不落 workspaces.json）——用户删不到它，也就不存在悬空标记。
+   */
+  defaultWorkspaceRoot?: string | null,
 ): void {
   // 各 handler 内部用这些短名，避免长链式调用刷屏
   const desktopPrefs = desktop.desktopPrefs
@@ -112,6 +121,16 @@ export function registerIpc(
   const setCloseToTray = desktop.setCloseToTray
   /** git 服务：副本与工作树全部落在数据目录内，绝不触碰用户目录 */
   const git = createGitService(app.getPath('userData'))
+
+  /** 工作区列表 → 对外形状：标出内建默认工作区（派生字段，不落盘） */
+  const listWorkspaces = (): WorkspaceEntry[] =>
+    store
+      .list()
+      .map(entry =>
+        defaultWorkspaceRoot && entry.root === defaultWorkspaceRoot
+          ? { ...entry, default: true }
+          : entry,
+      )
 
   ipcMain.handle(IPC.appInfo, () =>
     ok({
@@ -192,7 +211,7 @@ export function registerIpc(
     }
   })
 
-  ipcMain.handle(IPC.workspaceList, () => ok(store.list()))
+  ipcMain.handle(IPC.workspaceList, () => ok(listWorkspaces()))
 
   ipcMain.handle(IPC.workspacePick, async (event): Promise<Result<string | null>> => {
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -206,18 +225,10 @@ export function registerIpc(
     return ok(picked.canceled ? null : (picked.filePaths[0] ?? null))
   })
 
-  /** 路径 → 工作区记录并落库（两个添加入口共用，保证 id 派生规则只有一处） */
+  /** 路径 → 工作区记录并落库（两个添加入口共用，id 派生规则见 store.createWorkspaceEntry） */
   function addWorkspaceRoot(root: string): WorkspaceEntry {
-    const entry: WorkspaceEntry = {
-      // id 由路径派生：同一目录反复添加得到同一 id，列表不会出现两条
-      id: createHash('sha1').update(root).digest('hex').slice(0, 12),
-      name: basename(root),
-      root,
-      addedAt: Date.now(),
-      lastOpenedAt: Date.now(),
-    }
-    const added = store.add(entry)
-    // 新工作区立刻可被 MCP 的 search_docs / read_doc 检索到
+    const added = store.add(createWorkspaceEntry(root))
+    // 新工作区立刻可被 MCP 的 search_docs / read_doc / write_doc 用上
     service.sync()
     return added
   }
@@ -269,12 +280,37 @@ export function registerIpc(
 
   ipcMain.handle(IPC.workspaceRemove, (_event, id: unknown): Result<null> => {
     if (typeof id !== 'string') return fail('E_INVALID', 'id 必须是字符串')
-    if (!store.find(id)) return fail('E_NOT_FOUND', '工作区不存在')
+    const entry = store.find(id)
+    if (!entry) return fail('E_NOT_FOUND', '工作区不存在')
+    /*
+     * 内建默认工作区不可移除：它承担「AI 不知道写哪里时的兜底」职责。
+     * 一旦被顺手删掉，AI 的 write_doc 就回到「无法确定写到哪里」，
+     * 而用户根本不会把这个后果和「删了一张卡片」联系起来。
+     * 想彻底停用它时，删 `<文档>/docvi` 目录即可——这里拒的只是移除登记。
+     */
+    if (!isRemovableWorkspace(entry, defaultWorkspaceRoot)) {
+      return fail('E_FORBIDDEN', '内建默认工作区不能移除（AI 默认写到这里）')
+    }
     // 监视句柄必须随工作区一起解除：留着会持续占 inotify 配额且再也无人消费
     watcher.unwatchTree(id)
     store.remove(id)
     service.sync()
     return ok(null)
+  })
+
+  ipcMain.handle(IPC.workspaceSetTreeSort, (_event, id: unknown, mode: unknown) => {
+    if (typeof id !== 'string') return fail('E_INVALID', 'id 必须是字符串')
+    if (mode !== 'manual' && mode !== 'mtime') {
+      return fail('E_INVALID', 'mode 只能是 manual 或 mtime')
+    }
+    const updated = store.setTreeSort(id, mode)
+    if (!updated) return fail('E_NOT_FOUND', '工作区不存在')
+    // 排序是呈现方式，不影响检索范围：不调 service.sync()
+    const marked =
+      defaultWorkspaceRoot && updated.root === defaultWorkspaceRoot
+        ? { ...updated, default: true }
+        : updated
+    return ok(marked)
   })
 
   /* ---------- git（平台自持副本 + 分支工作树） ---------- */
@@ -323,7 +359,7 @@ export function registerIpc(
         onProgress: progress => desktop.pushGitProgress({ workspaceName: name, ...progress }),
       })
       const entry: WorkspaceEntry = {
-        id: createHash('sha1').update(result.path).digest('hex').slice(0, 12),
+        id: workspaceIdFor(result.path),
         name,
         root: result.path,
         addedAt: Date.now(),
@@ -371,7 +407,7 @@ export function registerIpc(
       store.remove(entry.id)
       const next: WorkspaceEntry = {
         ...entry,
-        id: createHash('sha1').update(result.path).digest('hex').slice(0, 12),
+        id: workspaceIdFor(result.path),
         root: result.path,
         lastOpenedAt: Date.now(),
         git: { ...entry.git!, branch: result.branch },
@@ -396,7 +432,7 @@ export function registerIpc(
       if (typeof workspaceId !== 'string') return fail('E_INVALID', 'workspaceId 必须是字符串')
       const entry = store.find(workspaceId)
       if (!entry) return fail('E_NOT_FOUND', '工作区不存在')
-      return ok(scanTree(entry.root))
+      return ok(scanTree(entry.root, entry.treeSort ?? 'manual'))
     } catch (error) {
       return toFailure(error)
     }

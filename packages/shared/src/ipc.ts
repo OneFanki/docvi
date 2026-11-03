@@ -47,6 +47,7 @@ export const IPC = {
   gitProgress: 'docvi:git:progress',
   workspaceRemove: 'docvi:workspace:remove',
   workspaceTouch: 'docvi:workspace:touch',
+  workspaceSetTreeSort: 'docvi:workspace:set-tree-sort',
 
   treeList: 'docvi:tree:list',
   docRead: 'docvi:doc:read',
@@ -308,6 +309,23 @@ export interface WorkspaceEntry {
   addedAt: number
   lastOpenedAt: number
   /**
+   * 内建默认工作区（AI 未指定落笔处时的兜底位置）。
+   *
+   * **派生字段，不落盘**：由主进程按「当前默认工作区根」在返回时标出。
+   * 存进 workspaces.json 会在用户删除工作区后留下一个悬空标记。
+   * 界面据此显示角标并隐藏移除入口；主进程也会拒绝移除它。
+   */
+  default?: boolean
+  /**
+   * 目录树排序方式（缺省 manual）。
+   *
+   * manual = frontmatter `order` 升序、其次名称自然序（沿用 docs.config.yaml 的
+   * 编排意图）；mtime = 按修改时间倒序，最新改动的排最上面。
+   * 内建默认工作区播种为 mtime——它是 AI 的「随手写这里」，用户靠「最近改的」
+   * 找文件比靠文件名快得多。
+   */
+  treeSort?: TreeSortMode
+  /**
    * git 托管的平台副本信息（缺省 = 普通本地目录工作区）。
    *
    * 托管工作区的 root 指向分支工作树 `worktrees/<repo>/<branch>/`——平台自持，
@@ -398,6 +416,15 @@ export interface WorkspaceProbeResult {
 }
 
 export type TreeNodeType = 'dir' | 'doc'
+
+/**
+ * 目录树排序方式。
+ *  manual —— frontmatter `order` 升序，其次名称自然序（尊重 docs.config.yaml 的编排）
+ *  mtime  —— 修改时间倒序，最新改动的排最上面（找「刚写的那篇」用）
+ */
+export type TreeSortMode = 'manual' | 'mtime'
+
+export const TREE_SORT_MODES: readonly TreeSortMode[] = ['manual', 'mtime']
 
 export interface TreeNode {
   /** 相对 workspace 根的 POSIX 路径；根目录为空串 */
@@ -653,6 +680,13 @@ export interface DocviApi {
   workspaceAddAt(root: string): Promise<Result<WorkspaceEntry | null>>
   /** 探测一个目录：是否内容根 / 一层子目录里的候选 / 有没有直接 .md */
   workspaceProbe(root: string): Promise<Result<WorkspaceProbeResult>>
+  /**
+   * 改目录树排序方式（manual / mtime）。
+   *
+   * 按工作区持久化：这是「这个库我习惯怎么找文件」的偏好，不是窗口现场；
+   * 切标签、重启都应当保留。改完由调用方重扫树。
+   */
+  workspaceSetTreeSort(id: string, mode: TreeSortMode): Promise<Result<WorkspaceEntry>>
 
   /** git 是否可用（读 `git --version`，不可用时给安装指引） */
   gitState(): Promise<Result<GitState>>

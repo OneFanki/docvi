@@ -329,12 +329,22 @@ export const useAppStore = defineStore('app', () => {
    * 切分支会换一棵工作树，工作区 id 随之变化（id 由路径派生）：这里按位置替换
    * 条目而不是重新排序，用户的卡片顺序不该因为切分支而跳动。
    */
+  /**
+   * 原地替换一条工作区记录（不重新排序）。
+   *
+   * 用于「改属性」而不是「增删工作区」：改排序方式、切分支这类操作不该让
+   * 卡片在列表里跳动——那会让人以为自己点错了什么。
+   */
+  function applyWorkspace(entry: WorkspaceEntry): void {
+    const index = workspaces.value.findIndex(item => item.id === entry.id)
+    if (index >= 0) workspaces.value.splice(index, 1, entry)
+    else workspaces.value = [entry, ...workspaces.value]
+  }
+
   async function switchBranch(id: string, branch: string): Promise<WorkspaceEntry | null> {
     const entry = unwrap(await window.docvi.gitSwitchBranch(id, branch))
     if (!entry) return null
-    const index = workspaces.value.findIndex(item => item.id === id)
-    if (index >= 0) workspaces.value.splice(index, 1, entry)
-    else workspaces.value = [entry, ...workspaces.value]
+    applyWorkspace(entry)
     if (activeWorkspaceId.value === id) {
       activeWorkspaceId.value = entry.id
       await loadTree(entry.id)
@@ -534,6 +544,7 @@ export const useAppStore = defineStore('app', () => {
     listBranches,
     pullWorkspace,
     switchBranch,
+    applyWorkspace,
     removeWorkspace,
     openWorkspace,
     loadTree,
