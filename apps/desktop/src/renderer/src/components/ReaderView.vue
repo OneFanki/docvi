@@ -18,6 +18,7 @@ import { isStandaloneDoc } from '@docvi/shared'
 import ImageLightbox from '@plugins/base/src/components/ImageLightbox.vue'
 import { createHostRegistry } from '../lib/component-registry'
 import { isReadOnlyHost } from '../lib/host'
+import { linkToAssetUrl, openHtmlInSandbox } from '../lib/html-sandbox'
 import { usePluginStore } from '../stores/plugins'
 import { useI18n } from '../lib/i18n'
 import { clearMatches, collectMatches, paintMatches, scrollToRange } from '../lib/find-in-doc'
@@ -388,6 +389,38 @@ async function onContentClick(event: MouseEvent): Promise<void> {
     event.preventDefault()
     if (/^(https?:|mailto:)/i.test(href)) {
       await window.docvi.appOpenExternal(href)
+      return
+    }
+    /*
+     * 自包含 HTML：用图解沙箱页开新窗口。
+     *
+     * 不能让宿主按站内路由去"打开文档"——它不是 Markdown，路由层拿不到内容；
+     * 也不能 `window.open` 资产地址——桌面端那是 `docvi://asset/…`，系统浏览器
+     * 打不开自定义协议。走沙箱页才能既渲染出来、又不丢「读不到应用存储」的边界。
+     * 必须在 preventDefault 之后**同步**发起：内部先开窗再拉内容，保住用户激活。
+     */
+    if (/\.html?$/i.test(href)) {
+      const result = await openHtmlInSandbox({
+        title: href.split('/').pop() ?? 'HTML',
+        load: async () => {
+          const url = linkToAssetUrl(href, {
+            linkPrefix: props.linkPrefix ?? '',
+            assetPrefix: props.assetPrefix ?? '',
+          })
+          try {
+            const response = await fetch(encodeURI(url))
+            if (!response.ok) {
+              emit('error', `图解加载失败：HTTP ${response.status}`)
+              return null
+            }
+            return await response.text()
+          } catch (error) {
+            emit('error', `图解加载失败：${error instanceof Error ? error.message : String(error)}`)
+            return null
+          }
+        },
+      })
+      if (!result.ok && result.reason) emit('error', result.reason)
       return
     }
     // 站内绝对路径（容器版的分享链接形态）：交给 App 按 SPA 路由打开
