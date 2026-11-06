@@ -1,6 +1,6 @@
 {
-  "version": "0.5.0",
+  "version": "0.6.0",
   "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
-  "notes": "AI 现在能直接给你写文档了：MCP 新增写入能力，说「帮我写篇 XX 的文档」就落笔成 .md 文件，界面随即显示。默认只新建、绝不静默覆盖；改旧文档要求先读一遍带上版本戳。首次启动会自动建一个默认文档库（文档/docvi），AI 没指定位置时写这里，按修改时间排序、不可移除。",
+  "notes": "md 里现在可以直接引用 HTML 文件，不用再把整份内容粘进来（一篇 64KB 的方案文档能缩到 8KB）；正文里的 .html 链接点一下就在新窗口打开。顺带修好了 HTML 图解只剩骨架、图表全空的问题，新窗口按 Ctrl+R 刷新也不会再白屏。",
   "homepage": "https://github.com/OneFanki/docvi"
 }
