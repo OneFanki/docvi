@@ -48,30 +48,30 @@ components:
 
 ## 组件速查（24 个）
 
-| kind               | 用途                                                                       | 关键字段                                            |
-| ------------------ | -------------------------------------------------------------------------- | --------------------------------------------------- |
-| `tutorial-shell`   | 教程页页眉：课程名 + 第几步/共几步 + 学习目标（不渲染 H1）                 | `courseTitle` `step` `stepTotal` `goals`            |
-| `flow-diagram`     | 有序流程（节点 + 带标注连线，点节点下钻）                                  | `nodes` `edges` `title`                             |
-| `file-tree`        | 教学目录树 + 职责说明（可折叠）                                            | `data` `title`                                      |
-| `call-tree`        | 调用树：谁调了谁（可折叠）                                                 | `data` `title`                                      |
-| `code-walkthrough` | 分步代码讲解：行号 + 每步高亮 + 上一步/下一步                              | `code` `steps` `language` `filename` `source`       |
-| `code-block`       | 普通代码块 + 文件名 + 出处徽标 + 一键复制                                  | `code` `filename` `source` `language` `lineNumbers` |
-| `decision-card`    | 关键设计决策（决策 + 原因 + 证据；`kind: why/avoid`）                      | `decisions` `title`                                 |
-| `checklist`        | 验收/自检清单（勾选 + 进度 + localStorage 记忆，用 `storageKey` 隔离）     | `items` `title` `storageKey`                        |
-| `next-up`          | 下一步阅读卡（多目标 + 徽标）                                              | `items` `title`                                     |
-| `api-contract`     | 模块输入/输出契约与不变量（教学向）                                        | `inputs` `outputs` `invariants` `title`             |
-| `endpoint-list`    | HTTP 接口清单：默认折叠点击展开；支持非 HTTP（WS/EVENT/INTERNAL）          | `endpoints` `title`                                 |
-| `table-tabs`       | 表设计：一表一页签（字段全量放这里）                                       | `tables` `relations` `title`                        |
-| `table-graph`      | 表关系图：关键字段 + 外键连线（概览用）                                    | `tables` `relations` `title`                        |
-| `evidence-note`    | 教学片段 ↔ 真实项目快照的证据关联卡                                        | `source` `snapshot` `teachingScope`                 |
-| `debug-table`      | 按症状筛选的故障排查表                                                     | `rows` `filters` `severity`                         |
-| `diff-view`        | 演进/重构 diff 视图（+/- 着色、统计、复制）                                | `diff` `title` `filename` `source`                  |
-| `html-embed`       | 单文件 HTML 图解内嵌（sandbox iframe，零外部请求）                         | `html` `title` `height` `source`                    |
-| `state-flow`       | 状态机流转图（分层布局 + 贝塞尔连线，`current` 高亮）                      | `states` `transitions` `current` `title`            |
-| `message-flow`     | 可步进消息时序图（泳道 + 单步高亮）                                        | `participants` `messages` `title`                   |
-| `metric-row`       | 指标卡组（数值 + 变化 + 语义色）                                           | `items` `title`                                     |
-| `timeline`         | 竖向时间轴（时间 + 标题 + 状态色）                                         | `items` `title`                                     |
-| `merged-table`     | **结构化块**：合并单元格表格（`::: merged` 里写 YAML，不走 components 段） | `title` `columns` `caption` `rows`                  |
+| kind               | 用途                                                                             | 关键字段                                            |
+| ------------------ | -------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `tutorial-shell`   | 教程页页眉：课程名 + 第几步/共几步 + 学习目标（不渲染 H1）                       | `courseTitle` `step` `stepTotal` `goals`            |
+| `flow-diagram`     | 有序流程（节点 + 带标注连线，点节点下钻）                                        | `nodes` `edges` `title`                             |
+| `file-tree`        | 教学目录树 + 职责说明（可折叠）                                                  | `data` `title`                                      |
+| `call-tree`        | 调用树：谁调了谁（可折叠）                                                       | `data` `title`                                      |
+| `code-walkthrough` | 分步代码讲解：行号 + 每步高亮 + 上一步/下一步                                    | `code` `steps` `language` `filename` `source`       |
+| `code-block`       | 普通代码块 + 文件名 + 出处徽标 + 一键复制                                        | `code` `filename` `source` `language` `lineNumbers` |
+| `decision-card`    | 关键设计决策（决策 + 原因 + 证据；`kind: why/avoid`）                            | `decisions` `title`                                 |
+| `checklist`        | 验收/自检清单（勾选 + 进度 + localStorage 记忆，用 `storageKey` 隔离）           | `items` `title` `storageKey`                        |
+| `next-up`          | 下一步阅读卡（多目标 + 徽标）                                                    | `items` `title`                                     |
+| `api-contract`     | 模块输入/输出契约与不变量（教学向）                                              | `inputs` `outputs` `invariants` `title`             |
+| `endpoint-list`    | HTTP 接口清单：默认折叠点击展开；支持非 HTTP（WS/EVENT/INTERNAL）                | `endpoints` `title`                                 |
+| `table-tabs`       | 表设计：一表一页签（字段全量放这里）                                             | `tables` `relations` `title`                        |
+| `table-graph`      | 表关系图：关键字段 + 外键连线（概览用）                                          | `tables` `relations` `title`                        |
+| `evidence-note`    | 教学片段 ↔ 真实项目快照的证据关联卡                                              | `source` `snapshot` `teachingScope`                 |
+| `debug-table`      | 按症状筛选的故障排查表                                                           | `rows` `filters` `severity`                         |
+| `diff-view`        | 演进/重构 diff 视图（+/- 着色、统计、复制）                                      | `diff` `title` `filename` `source`                  |
+| `html-embed`       | 单文件 HTML 图解内嵌（sandbox iframe，零外部请求；`src` 引用文件或 `html` 内联） | `html` `src` `title` `height` `source`              |
+| `state-flow`       | 状态机流转图（分层布局 + 贝塞尔连线，`current` 高亮）                            | `states` `transitions` `current` `title`            |
+| `message-flow`     | 可步进消息时序图（泳道 + 单步高亮）                                              | `participants` `messages` `title`                   |
+| `metric-row`       | 指标卡组（数值 + 变化 + 语义色）                                                 | `items` `title`                                     |
+| `timeline`         | 竖向时间轴（时间 + 标题 + 状态色）                                               | `items` `title`                                     |
+| `merged-table`     | **结构化块**：合并单元格表格（`::: merged` 里写 YAML，不走 components 段）       | `title` `columns` `caption` `rows`                  |
 
 ## 合并单元格表格（`::: merged`）
 

@@ -43,7 +43,17 @@ test('裸锚点、外链、协议相对、带扩展名资产原样放行', () =>
   assert.equal(resolveLink('mailto:x@y.com', '/a'), 'mailto:x@y.com')
   assert.equal(resolveLink('//cdn.example.com/a', '/a'), '//cdn.example.com/a')
   assert.equal(resolveLink('assets/pic.png', '/guide/index'), 'assets/pic.png')
-  assert.equal(resolveLink('assets/diagram.html', '/guide/index'), 'assets/diagram.html')
+})
+
+/*
+ * .html 是唯一的例外：它既不是文档（不剥扩展名、不走 SPA 路由），也不是
+ * 「原样放行」的纯资产——宿主需要一个能直接 fetch 的根相对地址才能把它交给
+ * 沙箱页打开。相对形态原样交给宿主，桌面端会拼成渲染产物目录下的路径（404）。
+ */
+test('.html 链接归一为根相对（保留扩展名），交给宿主按资产协议打开', () => {
+  assert.equal(resolveLink('assets/diagram.html', '/guide/index'), '/guide/assets/diagram.html')
+  assert.equal(resolveLink('../assets/demo.htm', '/guide/ch/index'), '/guide/assets/demo.htm')
+  assert.equal(resolveLink('https://example.com/a.html', '/a'), 'https://example.com/a.html')
 })
 
 test('目录链接折叠尾斜杠（章节间链接到课程首页 /course/）', () => {

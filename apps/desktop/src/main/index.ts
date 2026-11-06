@@ -36,6 +36,30 @@ const DEV_URL = process.env.DOCVI_RENDERER_URL
 const RENDERER_DIST = join(__dirname, '../renderer')
 
 /**
+ * 图解沙箱页的路径（渲染层 public 下，构建后与 index.html 同级）。
+ *
+ * 它是唯一允许开成应用内新窗口的页面：HtmlEmbed 的图解 HTML 必须由独立文档
+ * 承载（srcdoc / blob: 会继承应用 CSP，内联脚本被拦），而该文档在 `docvi://`
+ * 下系统浏览器打不开。判定按**完整路径**而不是前缀，避免 `/embed-sandbox.html`
+ * 被拿来当通配前缀。
+ */
+const EMBED_SANDBOX_FILE = 'embed-sandbox.html'
+
+function isEmbedSandboxUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl)
+    if (!url.pathname.endsWith(`/${EMBED_SANDBOX_FILE}`)) return false
+    if (DEV_URL) {
+      const dev = new URL(DEV_URL)
+      return url.origin === dev.origin
+    }
+    return url.protocol === 'docvi:' && url.host === 'app'
+  } catch {
+    return false
+  }
+}
+
+/**
  * 身份必须在任何 getPath('userData') / 单实例锁之前确定。
  *
  * 不设的话 Electron 会用 package.json 的 name（`@docvi/desktop`）拼数据目录，
@@ -229,8 +253,35 @@ function createWindow(): void {
     rendererReady = false
   })
 
-  // 外链一律交给系统浏览器，且只放行 http(s)——防止文档里的自定义协议被利用
+  /*
+   * 新窗口：只放行应用自己的图解沙箱页，其余外链交给系统浏览器。
+   *
+   * 图解内容不能塞进 Blob / data:（CSP 会被子帧继承，内联脚本全被拦），
+   * 只能由一个独立文档承载；而那个文档在 `docvi://` 下，系统浏览器打不开。
+   * 唯一可行路径就是让它在应用内开成独立窗口——因此这里按**精确路径**白名单
+   * 放行，其余一律 deny：多认一个路径，就等于给文档内容留一个开窗入口。
+   *
+   * ⚠️ overrideBrowserWindowOptions 里**禁止**出现 `webPreferences`：
+   * 不写时子窗口是干净的（实测 `window.docvi` / `require` / `process` 全为
+   * undefined）；一旦写进去，Electron 会照它重建 webPreferences，把 preload
+   * 注入到承载文档内容的窗口上。这里只允许窗口外观字段。
+   */
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isEmbedSandboxUrl(url)) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 1280,
+          height: 900,
+          minWidth: 480,
+          minHeight: 360,
+          autoHideMenuBar: true,
+          // 子窗口只承载图解：不要继承应用的隐藏标题栏（否则没有关闭入口）
+          titleBarStyle: 'default',
+          backgroundColor: '#f2f3f5',
+        },
+      }
+    }
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })

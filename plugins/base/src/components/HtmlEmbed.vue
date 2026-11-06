@@ -26,13 +26,24 @@
  * 触发方式：进入视口自动加载，也可点击占位上的按钮立即加载（IntersectionObserver
  * 在部分嵌入/无合成环境下不回调，必须有手动入口，否则图解会一直停在占位）。
  *
- * 安全边界：iframe 带 sandbox="allow-scripts"（无 allow-same-origin）——
- * 图解可以带交互脚本，但读不到课程页 DOM/存储，也拿不到父源身份。
- * 「新窗口打开」三宿主三路径（见 openInNewWindow）：桌面端走 Rust 命令开系统浏览器
- * （webview 内 window.open 被 wry 静默取消）、Web 走 Blob URL 新窗口、被拦截时
- * 页内覆盖层兜底——三种路径都零外部请求。
+ * ══ 为什么图解要经「沙箱宿主页」中转，而不是直接 srcdoc / Blob ══
+ *
+ * 应用入口页带 `meta CSP`（`script-src 'self'`），而 **srcdoc / data: / blob:
+ * 子帧会继承创建者的策略**（Electron 实测：三者都会，只有独立文档不会）。
+ * 图解的内联 `<script>` 因此被整片拦掉，页面只剩静态骨架——图表全空。
+ *
+ * 修法不是放宽应用 CSP（那会把整个应用的内联脚本策略打开），而是把图解交给
+ * 一个**独立文档**承载：`embed-sandbox.html`（渲染层 public，自带
+ * `default-src 'none'; script-src 'unsafe-inline'`），它再把 HTML 塞进自己的
+ * 二级 `sandbox="allow-scripts"` iframe。图解脚本能跑，且读不到应用页的
+ * DOM / 存储 / 身份——安全边界与原先的 srcdoc 方案完全一致。
+ *
+ * 三种呈现共用一个投递协议：宿主按一次性 token 重试投递 `html`，沙箱页回执
+ * `mounted`。用「重试 + 回执」而不是「沙箱页宣告就绪」，是因为新窗口态下宿主
+ * 会立刻切断 `opener`（窗口互访本就是攻击面），沙箱页拿不到 opener 就发不出
+ * 就绪通知，而回执走 `event.source`，天然不依赖 opener。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 interface Props {
   /** 自包含 HTML 明文（小文件：`import html from './snippets/xx.html?raw'`） */
@@ -55,29 +66,151 @@ const props = withDefaults(defineProps<Props>(), {
   source: '',
 })
 
+/** 沙箱页与宿主之间的投递通道名（两端写死同一串，改一处必须改两处） */
+const CHANNEL = 'docvi-html-embed'
+/** 每次投递的重试窗口：超时说明沙箱页没起来（站点未部署该文件 / 被拦） */
+const DELIVERY_TIMEOUT = 8000
+/** 重试间隔：既要不漏掉沙箱页安装监听的时刻，也要避免把消息风暴打进队列 */
+const RETRY_INTERVAL = 150
+
 const fetchedHtml = ref('')
 const loading = ref(false)
 const loadError = ref('')
 const opened = ref(false)
 const hostRef = ref<HTMLElement | null>(null)
+/** 图解宿主页始终没回执（多半是站点没部署 embed-sandbox.html） */
+const sandboxError = ref('')
 
 /** 页内覆盖层兜底（宿主拦截新窗口时）：整体放大查看，Esc / 按钮关闭 */
 const overlay = ref(false)
 const overlayNote = ref('')
-const overlayUrl = ref('')
 
 /** 内联模式直接有内容；src 模式要等拉取完成 */
 const resolvedHtml = computed(() => props.html || fetchedHtml.value)
 
-/** 内联走 srcdoc（内容随页面到），src 模式拉取后转 Blob（不进模块图、不预取） */
-const frameSrcdoc = computed(() => (props.src ? undefined : props.html || undefined))
-const blobUrl = ref('')
-const frameSrc = computed(() => blobUrl.value || undefined)
-
 /** 是否需要（且尚未）拉取外部文件 */
 const needsFetch = computed(() => Boolean(props.src) && !fetchedHtml.value)
 
-async function ensureLoaded() {
+/** 不用 crypto.randomUUID：容器站点常以 http://<内网 IP> 提供，非安全上下文拿不到 */
+function randomToken(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+/** 沙箱页地址：站点根下的固定文件，带一次性 token 防止不同实例串话 */
+function sandboxUrl(token: string): string {
+  const base = new URL('/embed-sandbox.html', window.location.href)
+  base.searchParams.set('t', token)
+  return base.href
+}
+
+const inlineToken = ref(randomToken())
+const inlineFrame = ref<HTMLIFrameElement | null>(null)
+const overlayToken = ref('')
+const overlayFrame = ref<HTMLIFrameElement | null>(null)
+const overlaySrc = computed(() => (overlayToken.value ? sandboxUrl(overlayToken.value) : ''))
+
+/* ---------- 投递机制：重试发送 + 等回执 ---------- */
+
+type DeliveryKey = 'inline' | 'overlay' | 'popup'
+
+interface Delivery {
+  token: string
+  /** 每次尝试时重新取目标：窗口/iframe 可能在过程中被替换或关闭 */
+  target: () => Window | null
+  timer: number | null
+  /** 第一次成功投递的时间；内容还没到时不计时 */
+  startedAt: number
+  onTimeout: () => void
+}
+
+const deliveries = new Map<DeliveryKey, Delivery>()
+/** 已被回执确认的投递：重试停止，后续 iframe load 不再重复投递 */
+const settled = new Set<DeliveryKey>()
+
+function stopDelivery(key: DeliveryKey): void {
+  const entry = deliveries.get(key)
+  if (!entry) return
+  if (entry.timer !== null) window.clearTimeout(entry.timer)
+  deliveries.delete(key)
+}
+
+function stopAllDeliveries(): void {
+  for (const key of Array.from(deliveries.keys())) stopDelivery(key)
+}
+
+/**
+ * 开始向某个沙箱页投递图解内容（内容 / 目标谁先到都等），直到收到回执或超时。
+ *
+ * 一个循环包住三种等待，避免「内容未到先起循环、内容到了再重启循环」那种
+ * 需要额外同步的状态机：
+ * - 内容未就绪（src 模式还在 fetch）→ 静默等待，**不计时**，否则大文件会在
+ *   下载途中被判超时；
+ * - 目标窗口还没出现 → 同样静默等待；
+ * - 两者都在 → 每 RETRY_INTERVAL 重投一次 `html`，等沙箱页回执 `mounted`。
+ *   不用「就绪握手」是因为新窗口态下 opener 已被切断，沙箱页发不出通知。
+ */
+function startDelivery(
+  key: DeliveryKey,
+  token: string,
+  target: () => Window | null,
+  onTimeout: () => void,
+): void {
+  stopDelivery(key)
+  settled.delete(key)
+  const entry: Delivery = { token, target, timer: null, startedAt: 0, onTimeout }
+  deliveries.set(key, entry)
+
+  const tick = (): void => {
+    // 被替换 / 停止 / 已回执：静默退出循环
+    if (deliveries.get(key) !== entry) return
+    if (loadError.value) {
+      stopDelivery(key)
+      return
+    }
+    const html = resolvedHtml.value
+    const win = entry.target()
+    if (html && win) {
+      if (!entry.startedAt) entry.startedAt = Date.now()
+      win.postMessage(
+        {
+          channel: CHANNEL,
+          token,
+          type: 'html',
+          html,
+          title: props.title || 'HTML 图解',
+        },
+        '*',
+      )
+      if (Date.now() - entry.startedAt > DELIVERY_TIMEOUT) {
+        stopDelivery(key)
+        onTimeout()
+        return
+      }
+    }
+    entry.timer = window.setTimeout(tick, RETRY_INTERVAL)
+  }
+  tick()
+}
+
+function handleMessage(event: MessageEvent): void {
+  const data = event.data as { channel?: string; token?: string; type?: string } | null | undefined
+  if (!data || data.channel !== CHANNEL || data.type !== 'mounted') return
+
+  for (const [key, entry] of deliveries) {
+    if (data.token !== entry.token) continue
+    // 只认自己的目标窗口：token 已经够独特，多一道身份校验不吃亏
+    const win = entry.target()
+    if (event.source && win && event.source !== win) continue
+    stopDelivery(key)
+    settled.add(key)
+    if (key === 'popup') flashOpened()
+    if (key === 'inline') sandboxError.value = ''
+    if (key === 'overlay') overlayNote.value = ''
+    return
+  }
+}
+
+async function ensureLoaded(): Promise<void> {
   if (!props.src || fetchedHtml.value || loading.value) return
   loading.value = true
   try {
@@ -86,26 +219,60 @@ async function ensureLoaded() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     fetchedHtml.value = await response.text()
   } catch (error) {
-    loadError.value = error instanceof Error ? error.message : String(error)
+    const detail = error instanceof Error ? error.message : String(error)
+    /*
+     * 桌面端的 src 由渲染管线改写成 `docvi://asset/<工作区>/…`。仍报 Failed to
+     * fetch 时几乎总是同一类原因：该目录没在内容根的 `docs.config.yaml` 里被
+     * 服务端放行（容器端）或工作区没登记（桌面端）。把这条线索直接给出来，
+     * 比让作者面对一句 "Failed to fetch" 自己猜要省事。
+     */
+    loadError.value = detail.includes('Failed to fetch')
+      ? `无法读取 ${props.src}——请确认该文件在内容根内、且所在目录已声明进 docs.config.yaml 的 staticDirs`
+      : detail
   } finally {
     loading.value = false
   }
 }
 
-// 拉取成功后把内容交给 sandbox iframe（Blob 比 srcdoc 少一次 HTML 序列化）
-let stopWatch: (() => void) | null = null
+/**
+ * 内嵌 iframe 的 load 时机 —— 投递起点。
+ *
+ * 为什么不在组件挂载时就开始投递：iframe 带 `loading="lazy"`，正文下方的图解
+ * 在滚动到附近之前根本不会加载，提前计时必然误报「宿主页未就绪」。
+ * src 模式同理：内容可能还在下载，投递循环会先静默等内容再开始计时。
+ */
+function onInlineLoad(): void {
+  sandboxError.value = ''
+  if (settled.has('inline')) return
+  startDelivery(
+    'inline',
+    inlineToken.value,
+    () => inlineFrame.value?.contentWindow ?? null,
+    () => {
+      sandboxError.value = '图解宿主页未响应：请确认站点已部署 embed-sandbox.html'
+    },
+  )
+}
+
+function onOverlayLoad(): void {
+  if (settled.has('overlay')) return
+  startDelivery(
+    'overlay',
+    overlayToken.value,
+    () => overlayFrame.value?.contentWindow ?? null,
+    () => {
+      overlayNote.value = '图解宿主页未响应：请确认站点已部署 embed-sandbox.html'
+    },
+  )
+}
+
 let observer: IntersectionObserver | null = null
 
 onMounted(() => {
   window.addEventListener('keydown', onOverlayKeydown)
-  if (!props.src) return
-  // watch 而非直接 await：内容到达后才创建 Blob URL，避免空 iframe 先渲染一帧
-  stopWatch = watch(fetchedHtml, html => {
-    if (html && !blobUrl.value) {
-      blobUrl.value = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
-    }
-  })
+  window.addEventListener('message', handleMessage)
 
+  if (!props.src) return
   const host = hostRef.value
   if (!host || typeof IntersectionObserver === 'undefined') {
     void ensureLoaded()
@@ -126,25 +293,26 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onOverlayKeydown)
+  window.removeEventListener('message', handleMessage)
   observer?.disconnect()
-  stopWatch?.()
-  if (blobUrl.value) URL.revokeObjectURL(blobUrl.value)
-  if (overlayUrl.value) URL.revokeObjectURL(overlayUrl.value)
+  stopAllDeliveries()
 })
 
+/* ---------- 新窗口 ---------- */
+
+let popupTarget: Window | null = null
+let popupToken = ''
+
 /**
- * 新窗口打开 —— 三种宿主三种路径，全部零外部请求、必有可见反馈：
+ * 新窗口打开。
  *
- * 1. Tauri 桌面端：webview 内 window.open 由 wry 静默取消（未注册 on_new_window
- *    处理器时对 NewWindowRequested 一律 SetHandled(true)，见 wry webview2/mod.rs），
- *    唯一可靠路径是 Rust 命令 `open_diagram_in_browser`——写临时文件 + 系统浏览器打开；
- * 2. Web 宿主（HTTP/单文件 viewer）：Blob URL + window.open 开新窗口。注意两点：
- *    a. 不用 'noopener' 特性串（noopener 会让返回值恒为 null，无法区分「打开成功」
- *       与「被拦截」），改为打开后立即切断 opener（同步设 null，无窗口期）；
- *    b. window.open 必须在用户激活的程序化调用链里同步执行——内容尚未拉取时先开
- *       空白窗保住激活，加载完成后再把空白窗导航到 Blob URL；
- * 3. 被弹窗拦截器/嵌入宿主吞掉（返回 null / 空白窗被关）：页内覆盖层兜底，
- *    把图解放大到整个视口查看。
+ * 两条路径 + 一条兜底：
+ * 1. Electron：`window.open` 被 `setWindowOpenHandler` 接管，沙箱页按精确路径
+ *    白名单放行成应用内独立窗口（它跑在 `docvi://` 下，系统浏览器打不开）；
+ * 2. Web 宿主：`window.open` 直接浏览器新标签。不用 'noopener' 特性串——
+ *    noopener 让返回值恒为 null，无法区分「打开成功」与「被拦截」；
+ *    打开成功后同步切断 opener（子窗口回执走 `event.source`，不依赖它）；
+ * 3. 被弹窗拦截器 / 宿主吞掉（返回 null、窗口被关、迟迟不回执）：页内覆盖层兜底。
  */
 function flashOpened() {
   opened.value = true
@@ -153,104 +321,67 @@ function flashOpened() {
   }, 2500)
 }
 
-function makeBlobUrl(html: string): string {
-  return URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
-}
-
-function closeOverlay() {
-  overlay.value = false
-  if (overlayUrl.value) {
-    URL.revokeObjectURL(overlayUrl.value)
-    overlayUrl.value = ''
-  }
-}
-
-function openOverlay(note: string) {
-  if (overlayUrl.value) URL.revokeObjectURL(overlayUrl.value)
-  const html = resolvedHtml.value
-  overlayUrl.value = html ? makeBlobUrl(html) : ''
-  overlayNote.value = note
-  overlay.value = true
-}
-
-function onOverlayKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && overlay.value) closeOverlay()
-}
-
 async function openInNewWindow() {
   if (typeof window === 'undefined') return
 
-  // 路径 1：桌面 app（Electron）。window.open 会被 setWindowOpenHandler 拦成系统浏览器
-  // 打一个 about:blank，拿不到自包含 HTML，所以必须走宿主命令把页面落盘再交给系统浏览器。
-  // 类型在此就地断言：宿主桥的全局声明属于壳包，组件包不依赖壳的类型。
-  const bridge = (
-    window as unknown as {
-      docsStudioHost?: {
-        kind: string
-        invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>
-      }
-    }
-  ).docsStudioHost
-  if (bridge?.kind === 'electron') {
-    await ensureLoaded()
-    const html = resolvedHtml.value
-    if (!html) return
-    try {
-      await bridge.invoke('open_diagram_in_browser', { html, name: props.title || 'diagram' })
-      flashOpened()
-    } catch {
-      // 命令失败（宿主版本过旧等）→ 落到覆盖层
-      openOverlay('无法唤起系统浏览器，已改为页内放大查看')
-    }
-    return
-  }
-
-  // 路径 2：Web 宿主。window.open 同步执行保住用户激活（异步前置会丢激活导致被拦）
-  const readyHtml = resolvedHtml.value
-  const readyUrl = readyHtml ? makeBlobUrl(readyHtml) : ''
-  const win = window.open(readyUrl || '', '_blank')
+  popupToken = randomToken()
+  // window.open 必须同步执行保住用户激活（异步前置会丢激活导致被拦）
+  const win = window.open(sandboxUrl(popupToken), '_blank')
   if (!win) {
-    if (readyUrl) URL.revokeObjectURL(readyUrl)
     // 被拦：补加载后落到覆盖层兜底
     await ensureLoaded()
     if (resolvedHtml.value) openOverlay('当前环境拦截了新窗口，已改为页内放大查看')
     return
   }
+  popupTarget = win
   try {
+    // 与原先一致：不给子窗口留反向操作本页的入口。回执不依赖 opener。
     win.opener = null
   } catch {
     /* 个别宿主 opener 不可写，忽略 */
   }
 
-  if (readyUrl) {
-    // 新窗口已带着内容打开；延迟回收 Blob URL（立即回收会打断其异步加载）
-    window.setTimeout(() => URL.revokeObjectURL(readyUrl), 30_000)
-    flashOpened()
+  await ensureLoaded()
+  if (!resolvedHtml.value) {
+    // 内容拉取失败：占位已显示错误，关掉空白窗口
+    try {
+      win.close()
+    } catch {
+      /* 已关闭 */
+    }
+    popupTarget = null
     return
   }
 
-  // 空白窗填充：等图解内容拉取完成再导航（加载失败则关掉空白窗，页面占位已显示错误）
-  await ensureLoaded()
-  const html = resolvedHtml.value
-  if (!html) {
-    win.close()
-    return
-  }
-  if (win.closed) {
-    // 宿主假装返回了窗口、或用户抢先关掉：落到覆盖层
-    openOverlay('新窗口未能打开，已改为页内放大查看')
-    return
-  }
-  const url = makeBlobUrl(html)
-  try {
-    win.location.replace(url)
-  } catch {
-    URL.revokeObjectURL(url)
-    openOverlay('新窗口未能打开，已改为页内放大查看')
-    return
-  }
-  window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
-  flashOpened()
+  startDelivery(
+    'popup',
+    popupToken,
+    () => (popupTarget && !popupTarget.closed ? popupTarget : null),
+    () => {
+      // 宿主不认这个地址 / 窗口被吞：别留一块空白，改页内放大
+      popupTarget = null
+      openOverlay('新窗口未能打开，已改为页内放大查看')
+    },
+  )
+}
+
+/* ---------- 覆盖层 ---------- */
+
+function closeOverlay() {
+  overlay.value = false
+  overlayToken.value = ''
+  stopDelivery('overlay')
+  settled.delete('overlay')
+}
+
+function openOverlay(note: string) {
+  overlayNote.value = note
+  overlayToken.value = randomToken()
+  overlay.value = true
+}
+
+function onOverlayKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && overlay.value) closeOverlay()
 }
 </script>
 
@@ -288,6 +419,10 @@ async function openInNewWindow() {
       图解加载失败：{{ loadError }}
     </p>
 
+    <p v-else-if="sandboxError" class="at-htmlembed__state at-htmlembed__state--error">
+      {{ sandboxError }}
+    </p>
+
     <div v-else-if="needsFetch" class="at-htmlembed__state">
       <span>{{ loading ? '正在加载图解…' : '滚动到此处自动加载' }}</span>
       <button v-if="!loading" type="button" class="at-htmlembed__trigger" @click="ensureLoaded">
@@ -295,22 +430,35 @@ async function openInNewWindow() {
       </button>
     </div>
 
-    <iframe
-      v-else
-      class="at-htmlembed__frame"
-      :style="{ height }"
-      :srcdoc="frameSrcdoc"
-      :src="frameSrc"
-      sandbox="allow-scripts"
-      loading="lazy"
-      :title="title || 'HTML 图解'"
-    />
+    <template v-else>
+      <!--
+        沙箱页承载：应用 CSP 不会被继承，图解的内联脚本可执行。
+        sandbox="allow-scripts" 让沙箱页跑自己的投递脚本，同时碰不到应用页。
+      -->
+      <iframe
+        ref="inlineFrame"
+        class="at-htmlembed__frame"
+        :style="{ height }"
+        :src="inlineToken ? sandboxUrl(inlineToken) : undefined"
+        sandbox="allow-scripts"
+        loading="lazy"
+        :title="title || 'HTML 图解'"
+        @load="onInlineLoad"
+      />
+      <!--
+        导出用的内容副本：导出是把离屏 DOM 克隆成独立 HTML 文件，那份文件里
+        没有沙箱页可加载，导出流程会把这个副本（textContent 即原始 HTML）
+        回填成 srcdoc。用 div 而不是 script 标签：Vue 模板编译器会直接
+        忽略 `<script>`（"Tags with side effect are ignored"），拿不到副本。
+      -->
+      <div class="at-htmlembed__payload" aria-hidden="true">{{ resolvedHtml }}</div>
+    </template>
 
     <!-- 新窗口被宿主拦截时的页内兜底：铺满视口放大查看，Esc 或按钮关闭 -->
     <Teleport to="body">
       <div
         v-if="overlay"
-        class="at-htmlembed-overlay"
+        class="at-htmlembed-overlay doc-surface"
         role="dialog"
         :aria-label="title || 'HTML 图解'"
       >
@@ -327,11 +475,13 @@ async function openInNewWindow() {
           </button>
         </header>
         <iframe
-          v-if="overlayUrl"
+          v-if="overlaySrc"
+          ref="overlayFrame"
           class="at-htmlembed-overlay__frame"
-          :src="overlayUrl"
+          :src="overlaySrc"
           sandbox="allow-scripts"
           :title="(title || 'HTML 图解') + '（放大查看）'"
+          @load="onOverlayLoad"
         />
       </div>
     </Teleport>
@@ -398,6 +548,11 @@ async function openInNewWindow() {
   background: var(--at-code-bg);
 }
 
+/* 导出副本不参与布局；屏幕态由沙箱页 iframe 呈现 */
+.at-htmlembed__payload {
+  display: none;
+}
+
 /* 按需加载占位：给宿主一个最小高度，IntersectionObserver 才有可靠的可观察区域 */
 .at-htmlembed__state {
   margin: 0;
@@ -418,7 +573,10 @@ async function openInNewWindow() {
 
 /* 覆盖层（Teleport 到 body，不受组件裁剪；scoped 样式因 Teleport 仍跟随组件 hash）。
    顶边让到标题栏以下：窗口按钮画在那条带上（Windows 右上 / macOS 左上），
-   覆盖层自己的「关闭」按钮会与之重叠。 */
+   覆盖层自己的「关闭」按钮会与之重叠。
+   ⚠️ 元素上必须同时带 `doc-surface` 类：组件只消费 --at-* 角色 token，而它们由
+   `.doc-surface` 作用域提供；Teleport 到 body 后就脱离了这个作用域，漏掉这层
+   类名会让底色与所有控件样式一起掉成默认值（透明 + 无边框）。 */
 .at-htmlembed-overlay {
   position: fixed;
   inset: var(--at-overlay-top, 0px) 0 0 0;

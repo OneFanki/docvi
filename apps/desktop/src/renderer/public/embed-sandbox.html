@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      图解沙箱宿主页。
+
+      为什么需要这一层：应用入口页带 `meta CSP`（script-src 'self'），而
+      **srcdoc / data: / blob: 子帧会继承创建者的策略**——把图解 HTML 直接塞进
+      `srcdoc` 或 Blob URL，内联 <script> 一律被拦，图表只剩空骨架。
+      换成「独立文档 + 自己的 CSP」就绕开继承：本页由 URL 加载，策略取自这里，
+      图解再以 `srcdoc` 挂进本页的二级 iframe——它继承的是本页的宽松策略。
+
+      安全边界（与插件协议一致）：
+      - 本页只做投递，不含任何业务逻辑；只接受 URL 一次性 token 匹配的消息；
+      - 二级 iframe 固定 `sandbox="allow-scripts"`（无 allow-same-origin）：
+        图解能跑自己的脚本，但读不到本页与应用页的 DOM / 存储 / 身份；
+      - 本页 CSP 禁掉一切外部请求（default-src 'none'），与「自包含 HTML、
+        零外部请求」的内容契约同构——图解若引外链，失败是明确可见的。
+
+      投递协议：宿主反复发 `{ channel, token, type: 'html', html }`，本页收到后
+      回执 `{ channel, token, type: 'mounted' }` 给 `event.source`。
+      为什么是「宿主重试 + 本页回执」而不是「本页宣告就绪」：新窗口态下宿主
+      打开窗口后会立即切断 `opener`（防止窗口互访），本页拿不到 opener 就发不出
+      就绪通知；回执走 `event.source` 则天然不依赖 opener。
+
+      刷新恢复：内容只存在于一次投递里，而 Ctrl+R 会重载本页——重载后没有宿主
+      再投递，页面就只剩空白底色（2026-11-06 用户实测）。因此收到内容时按 token
+      写进本窗口的 `sessionStorage`，重载时先读它自恢复。
+      用 sessionStorage 而不是 opener 回问应用页：sessionStorage 随窗口存亡、
+      不跨窗口共享，内容不会漏回应用页；而 opener 已被切断（也不该为刷新而保留）。
+      内嵌态（iframe 挂进应用页）是不透明源，读写 storage 会抛错——那里本来
+      就由应用页重载后重建组件再投递，属正常路径，静默跳过即可。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; frame-src 'self' data: blob:; base-uri 'none'; form-action 'none'; object-src 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HTML 图解</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        /* 与组件外层占位同色，内容未到时不会闪一块刺眼的白 */
+        background: #f2f3f5;
+      }
+      iframe {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+      /* 既没有存量内容、也没等到投递时的兜底提示：白屏无法自解释 */
+      .docvi-note {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        padding: 24px;
+        box-sizing: border-box;
+        color: #6b7280;
+        font:
+          14px/1.7 -apple-system,
+          'Segoe UI',
+          'Microsoft YaHei',
+          sans-serif;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      ;(function () {
+        var CHANNEL = 'docvi-html-embed'
+        var token = new URLSearchParams(location.search).get('t') || ''
+        var STORE_KEY = CHANNEL + ':payload:' + token
+        var mounted = false
+        var noteTimer = null
+
+        function clearPlaceholder() {
+          if (noteTimer !== null) {
+            clearTimeout(noteTimer)
+            noteTimer = null
+          }
+          var note = document.querySelector('.docvi-note')
+          if (note) note.remove()
+        }
+
+        function mount(html, title) {
+          if (mounted) return
+          mounted = true
+          clearPlaceholder()
+          var frame = document.createElement('iframe')
+          frame.setAttribute('sandbox', 'allow-scripts')
+          frame.setAttribute('title', typeof title === 'string' ? title : 'HTML 图解')
+          frame.srcdoc = html
+          document.body.appendChild(frame)
+        }
+
+        /* ---- 刷新恢复：同一窗口重载后从 sessionStorage 取回上次内容 ---- */
+        try {
+          var saved = sessionStorage.getItem(STORE_KEY)
+          if (saved) {
+            var payload = JSON.parse(saved)
+            if (payload && typeof payload.html === 'string') mount(payload.html, payload.title)
+          }
+        } catch {
+          /* 内嵌态是不透明源（sandbox 无 allow-same-origin）：读写 storage 会抛错，
+             那里由应用页重载后重建组件并重新投递，不需要也不允许持久化 */
+        }
+
+        window.addEventListener('message', function (event) {
+          var data = event.data
+          if (!data || data.channel !== CHANNEL || data.token !== token) return
+          if (data.type !== 'html' || typeof data.html !== 'string') return
+
+          // 先回执再挂载：宿主收到回执即停止重试，慢一点的挂载不影响它等待
+          try {
+            event.source.postMessage({ channel: CHANNEL, token: token, type: 'mounted' }, '*')
+          } catch {
+            /* 宿主已关闭：挂载仍然照做，用户至少能看到内容 */
+          }
+          // 宿主重试期间会重复投递：只挂载一次，避免图解状态被重置
+          if (mounted) return
+
+          // 存一份给 Ctrl+R 用。体积超限（超大图解）时 setItem 会抛
+          // QuotaExceededError——那只是刷新后无法恢复，不影响本次显示
+          try {
+            sessionStorage.setItem(
+              STORE_KEY,
+              JSON.stringify({ html: data.html, title: data.title }),
+            )
+          } catch {
+            /* 忽略：存储不可用或超配额 */
+          }
+          mount(data.html, data.title)
+        })
+
+        /*
+         * 兜底提示：顶层窗口刷新后若既无存量也没等到投递（例如内容是在写入
+         * storage 之前被刷新的，或这个地址是用户手抄打开的），不要留白屏。
+         * 内嵌态（有 parent）由应用页负责重建，不在这里提示。
+         */
+        if (window.parent === window) {
+          noteTimer = setTimeout(function () {
+            noteTimer = null
+            if (mounted) return
+            var note = document.createElement('div')
+            note.className = 'docvi-note'
+            note.textContent =
+              '图解内容尚未就绪。刷新会丢失尚未保存的临时内容——请回到文档页重新点击「新窗口打开」。'
+            document.body.appendChild(note)
+          }, 6000)
+        }
+      })()
+    </script>
+  </body>
+</html>

@@ -214,17 +214,50 @@ export function toRootRelative(rawPath: string, baseDir: string): string {
 
 /**
  * 解析站内链接：`.md` 与无扩展名的相对/根路径统一归一为根相对（剥 .md、折叠 ../ ./）。
- * 原样保留：裸锚点、外链（含 //）、带扩展名的资产文件。
+ * `.html` / `.htm` 同样归一（保留扩展名）——它们要交给宿主按资产协议打开，
+ * 相对形态会让宿主拿不到内容根，归一到根相对后前缀才能拼得准。
+ * 原样保留：裸锚点、外链（含 //）、其余带扩展名的资产文件。
  */
 export function resolveLink(href: string, docPath: string): string {
   const [rawPath = '', anchorPart] = href.split('#', 2)
   if (!rawPath) return href
   if (/^[a-z][a-z0-9+.-]*:/i.test(rawPath) || rawPath.startsWith('//')) return href
   const lastSegment = rawPath.split('/').pop() ?? ''
-  if (lastSegment.includes('.') && !/\.md$/i.test(rawPath)) return href
+  if (lastSegment.includes('.') && !/\.(md|html?)$/i.test(rawPath)) return href
   const baseDir = docPath.includes('/') ? docPath.slice(0, docPath.lastIndexOf('/')) : ''
   const normalized = toRootRelative(rawPath.replace(/\.md$/i, ''), baseDir)
   return anchorPart !== undefined ? `${normalized}#${anchorPart}` : normalized
+}
+
+/**
+ * 把组件数据里的 `src` 归一到内容根的资产地址。
+ *
+ * 为什么必须在这里做：组件包只消费 props，不知道自己是哪个工作区、内容根在哪；
+ * 而宿主的前缀（桌面 `docvi://asset/<工作区>/`、容器 `/<仓库>/`）只有渲染管线
+ * 拿得到。此前没做这一步，`src` 被浏览器当成相对当前页解析——桌面端落到
+ * `docvi://app/assets/x.html`（渲染产物目录），必然 404，用户只能把整份 HTML
+ * 粘进 frontmatter。
+ *
+ * 规则（与正文图片同口径）：相对路径按文档所在目录解析，`/` 开头按内容根解析；
+ * 外链、`data:`、已带协议的一律不动。字段名固定为 `src`——组件的资源入口只有一个
+ * 约定，不做按 kind 的特判。
+ */
+function normalizeComponentSources(
+  components: Record<string, Record<string, unknown>> | undefined,
+  docPath: string,
+  assetPrefix: string,
+): void {
+  if (!components) return
+  const baseDir = docPath.includes('/') ? docPath.slice(0, docPath.lastIndexOf('/')) : ''
+  for (const entry of Object.values(components)) {
+    if (!entry || typeof entry !== 'object') continue
+    const src = entry.src
+    if (typeof src !== 'string' || !src) continue
+    if (/^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('//')) continue
+    // 幂等：容器前缀是普通路径（`/<仓库>`），不幂等会在二次渲染时叠成 `/<仓库>/<仓库>/…`
+    if (assetPrefix && src.startsWith(`${assetPrefix}/`)) continue
+    entry.src = assetPrefix + toRootRelative(src, baseDir)
+  }
 }
 
 const CONTAINERS = ['tip', 'note', 'info', 'warning', 'danger'] as const
@@ -604,6 +637,12 @@ export function renderMarkdown(
   })
   const html = md.render(content)
   const h1 = /^#\s+(.+)$/m.exec(content)?.[1]?.trim() ?? null
+  // 组件数据的资源入口统一归一到资产地址：让「引用文件」与「内联代码」共用同一条管线
+  normalizeComponentSources(
+    data.components,
+    docPath,
+    options.assetPrefix ?? options.urlPrefix ?? '',
+  )
   return { html, frontmatter: data, h1, outline, error }
 }
 

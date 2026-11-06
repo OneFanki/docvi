@@ -28,6 +28,40 @@
 
 ### English
 
+## [0.6.0] - 2026-11-06
+
+### 中文
+
+- **md 里可以直接引用 HTML 文件了，不用再把整份内容粘进来**：图解文件放在内容根里（比如 `assets/`），frontmatter 用 `src` 指过去即可，文档本身能小一个数量级。实测一篇 64KB 的方案文档缩到 8KB
+- **正文里的 `.html` 链接现在能直接打开**：写 `[看示意图](../assets/xx.html)`，点一下就在新窗口里看，交互脚本照常运行
+- **HTML 图解终于能正常显示了**：之前内嵌的图解只剩侧栏顶栏、图表全空，新窗口打开后底色透明、按钮没有边框——都没了。新窗口里按 `Ctrl+R` 刷新也不会再白屏
+
+#### 完整变更
+
+- **引用式图解**：`components` 段的 `src` 由渲染管线换算成内容根的资产地址再补宿主前缀，相对路径按文档所在目录解析、`/` 开头按内容根。此前这一步完全没有，`src` 被当成相对当前页，桌面端必然 404——所以这个能力在桌面端其实一直是坏的。阅读态、编辑态实时预览、导出三条链路共用同一份换算规则
+- **正文 `.html` / `.htm` 链接**：归一为根相对地址（保留扩展名），点击经沙箱页开新窗口。内容由文档页拉取后投递，沙箱页不许自己发请求——否则图解里的脚本能读到同一工作区内的其它文档。其余带扩展名的资产（图片、PDF）维持原样，不会被当成可打开页面
+- **内嵌空白**：应用入口页的 CSP（`script-src 'self'`）会被 `srcdoc` / `data:` / `blob:` 子帧继承，图解的内联脚本被整片拦掉。改为交给独立文档 `embed-sandbox.html` 承载，它自带严格策略、再把内容挂进二级沙箱帧；**没有为此外放宽应用自身的 CSP**
+- **新窗口无样式**：覆盖层此前 `Teleport` 到 body 后脱离了文档主题作用域，`--at-*` 角色 token 全部失效，于是底色透明、控件无边框
+- **新窗口刷新白屏**：内容只存在于一次投递里，而新窗口的 `opener` 已切断，重载后没人能再投递。沙箱页按 token 把内容存进本窗口的 `sessionStorage`，刷新自恢复；实在没有存量时给一句可读提示，而不是留一块白
+- **读不到图解文件时的提示**：从「Failed to fetch」改为提示确认该目录已声明进 `docs.config.yaml` 的 `staticDirs`
+- **导出**：图解在导出的 HTML 里回填为 `srcdoc`，照原样呈现（导出文件是独立文档，不受应用 CSP 约束）
+
+### English
+
+- **Markdown can now reference HTML files instead of inlining them**: drop a diagram under the content root (e.g. `assets/`) and point `src` at it — a document that was 64KB shrinks to 8KB
+- **`.html` links in the body open properly now**: write `[see diagram](../assets/x.html)` and it opens in a new window with its scripts running
+- **Embedded HTML diagrams finally render**: they used to show only the chrome with every chart empty, and the new-window view came up transparent with unstyled buttons. Both are fixed, and `Ctrl+R` in that new window no longer blanks it
+
+#### Full changes
+
+- **Referenced diagrams**: `src` in the `components` block is now resolved by the render pipeline into a content-root asset URL plus the host prefix (relative to the document, or from the content root when it starts with `/`). This step simply did not exist, so `src` was treated as relative to the current page and always 404'd on desktop — the capability had been broken there all along. Reading, live preview and export share one resolver
+- **`.html` / `.htm` links** are normalized to root-relative (extension kept) and open through the sandbox page on click. The document page fetches the content and delivers it, because letting the sandbox page fetch would let a diagram's scripts read every other document in the same workspace. Other extensions (images, PDFs) are untouched
+- **Blank embeds**: the app shell's CSP (`script-src 'self'`) is inherited by `srcdoc` / `data:` / `blob:` child frames, blocking every inline script in a diagram. Diagrams are now hosted by a separate document, `embed-sandbox.html`, which carries its own strict policy and nests the content in a second sandboxed frame — **without loosening the app's own CSP**
+- **Unstyled new window**: the overlay is teleported to `body`, outside the document theme scope, so every `--at-*` role token failed to resolve
+- **Refresh blanking the new window**: content exists only in a single delivery, and the new window's `opener` is already severed, so nothing can re-deliver after a reload. The sandbox page now keeps the payload in its own window's `sessionStorage` per token and restores it on load, with a readable message when nothing was saved
+- **Read failures** now suggest checking `staticDirs` in `docs.config.yaml` instead of just saying "Failed to fetch"
+- **Export**: diagrams are written back as `srcdoc` in exported HTML, where the app CSP does not apply
+
 ## [0.5.0] - 2026-11-03
 
 ### 中文

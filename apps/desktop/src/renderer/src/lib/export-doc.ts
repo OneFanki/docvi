@@ -102,6 +102,25 @@ function cleanClone(source: HTMLElement): HTMLElement {
 }
 
 /**
+ * 把 HtmlEmbed 的内容副本回填成 srcdoc。
+ *
+ * 屏幕态里 iframe 指向应用的沙箱宿主页（`embed-sandbox.html`）——那一层是为绕开
+ * 应用入口页的 CSP 继承（srcdoc / blob: 会继承 `script-src 'self'`，图解的内联
+ * 脚本会被整片拦掉）。导出文件是独立文档、没有那条 CSP，且沙箱页不在导出产物
+ * 里，因此这里直接写回 srcdoc，让图解在内联脚本可执行的前提下照原样呈现。
+ */
+function materializeEmbeds(root: HTMLElement): void {
+  for (const figure of Array.from(root.querySelectorAll('.at-htmlembed'))) {
+    const payload = figure.querySelector('.at-htmlembed__payload')
+    const frame = figure.querySelector('iframe')
+    if (!payload || !frame) continue
+    frame.setAttribute('srcdoc', payload.textContent ?? '')
+    frame.removeAttribute('src')
+    payload.remove()
+  }
+}
+
+/**
  * 把 `<img>` 转成 data URL，让导出的文件真正自包含。
  *
  * 只有已解码成功的图能转（canvas 读像素要求已加载）。失败的保持原样——
@@ -200,6 +219,7 @@ export async function buildExportHtml(options: ExportHtmlOptions): Promise<strin
   const { surface, dispose } = await renderOffscreen(options)
   try {
     const body = cleanClone(surface)
+    materializeEmbeds(body)
     await inlineImages(body)
     const styles = [themeCss, docCss, pluginStyleText(), EXPORT_CSS].filter(Boolean).join('\n\n')
     return `<!doctype html>

@@ -109,32 +109,32 @@ docs/architecture/     # 本文档 + 组件协议.md（完整 props）
 
 当前**通用**组件（24 个，不绑定业务域）：
 
-| 组件                | 用途                                                              | 关键 props                                                  |
-| ------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------- |
-| `<TutorialShell>`   | 页内壳：标题 + 第几步/共几步 + 学习目标                           | `courseTitle` `step` `stepTotal` `goals`                    |
-| `<FileTree>`        | 静态教学目录树 + 职责说明                                         | `data` `title`                                              |
-| `<CallTree>`        | 调用树：函数调函数的层层展开                                      | `data` `title`                                              |
-| `<CodeWalkthrough>` | 代码片段：行号 + 分步高亮 + 上一步/下一步                         | `code` `steps` `language` `title` `filename` `source`       |
-| `<FlowDiagram>`     | 有序业务流程（节点 + 带标注连线）                                 | `nodes` `edges` `title`                                     |
-| `<CodeBlock>`       | 代码块：文件名 + 出处徽标 + 复制                                  | `code` `filename` `source` `title` `language` `lineNumbers` |
-| `<DecisionCard>`    | 关键设计决策（决策 + 原因 + 证据）                                | `decisions` `title`                                         |
-| `<Checklist>`       | 验收 / 自检清单（可勾选、记忆进度）                               | `items` `title` `storageKey`                                |
-| `<NextUp>`          | 下一步阅读卡                                                      | `items` `title`                                             |
-| `<ApiContract>`     | 模块输入 / 输出契约与不变量                                       | `inputs` `outputs` `title`                                  |
-| `<EndpointList>`    | HTTP 接口清单：默认折叠 + 按需展开契约详情（方法筛选 / 退役标记） | `endpoints` `title`                                         |
-| `<TableGraph>`      | 表关系图：分层表卡 + 外键连线                                     | `tables` `relations` `title`                                |
-| `<TableTabs>`       | 表设计唯一组件：一表一页签（限高 + 全屏）+ 表间关系脚注           | `tables` `relations` `title`                                |
-| `<EvidenceNote>`    | 教学片段 ↔ 项目快照的证据关联卡                                   | `source` `snapshot` `teachingScope`                         |
-| `<DebugTable>`      | 按症状筛选的故障排查表                                            | `rows` `title`                                              |
-| `<DiffView>`        | 只保留讲清变化行的 diff                                           | `diff` `title` `filename` `source`                          |
-| `<HtmlEmbed>`       | 自包含单文件 HTML 图解（sandbox iframe）                          | `src`/`html` `title` `height`                               |
-| `<StateFlow>`       | 状态机视图（状态卡 + 出边）                                       | `states` `transitions` `current` `title`                    |
-| `<MessageFlow>`     | 可步进消息时序图                                                  | `participants` `messages` `title`                           |
-| `<MetricRow>`       | 指标卡组（数值 + 变化 + 语义色）                                  | `items` `title`                                             |
-| `<Timeline>`        | 竖向时间轴                                                        | `items` `title`                                             |
-| `<ChangeList>`      | 本次改动清单：编号 + 说明 + 涉及模块徽标（新增/变更/移除）        | `items` `title`                                             |
-| `<RiskList>`        | 已知风险：严重度 + 影响 + 处置（已处理 / 待独立处理）             | `items` `title`                                             |
-| `<MergedTable>`     | 合并单元格表格（`:merged` 容器内写 YAML，Markdown 仍是事实源）    | `columns` `rows` `title` `caption`                          |
+| 组件                | 用途                                                                 | 关键 props                                                  |
+| ------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `<TutorialShell>`   | 页内壳：标题 + 第几步/共几步 + 学习目标                              | `courseTitle` `step` `stepTotal` `goals`                    |
+| `<FileTree>`        | 静态教学目录树 + 职责说明                                            | `data` `title`                                              |
+| `<CallTree>`        | 调用树：函数调函数的层层展开                                         | `data` `title`                                              |
+| `<CodeWalkthrough>` | 代码片段：行号 + 分步高亮 + 上一步/下一步                            | `code` `steps` `language` `title` `filename` `source`       |
+| `<FlowDiagram>`     | 有序业务流程（节点 + 带标注连线）                                    | `nodes` `edges` `title`                                     |
+| `<CodeBlock>`       | 代码块：文件名 + 出处徽标 + 复制                                     | `code` `filename` `source` `title` `language` `lineNumbers` |
+| `<DecisionCard>`    | 关键设计决策（决策 + 原因 + 证据）                                   | `decisions` `title`                                         |
+| `<Checklist>`       | 验收 / 自检清单（可勾选、记忆进度）                                  | `items` `title` `storageKey`                                |
+| `<NextUp>`          | 下一步阅读卡                                                         | `items` `title`                                             |
+| `<ApiContract>`     | 模块输入 / 输出契约与不变量                                          | `inputs` `outputs` `title`                                  |
+| `<EndpointList>`    | HTTP 接口清单：默认折叠 + 按需展开契约详情（方法筛选 / 退役标记）    | `endpoints` `title`                                         |
+| `<TableGraph>`      | 表关系图：分层表卡 + 外键连线                                        | `tables` `relations` `title`                                |
+| `<TableTabs>`       | 表设计唯一组件：一表一页签（限高 + 全屏）+ 表间关系脚注              | `tables` `relations` `title`                                |
+| `<EvidenceNote>`    | 教学片段 ↔ 项目快照的证据关联卡                                      | `source` `snapshot` `teachingScope`                         |
+| `<DebugTable>`      | 按症状筛选的故障排查表                                               | `rows` `title`                                              |
+| `<DiffView>`        | 只保留讲清变化行的 diff                                              | `diff` `title` `filename` `source`                          |
+| `<HtmlEmbed>`       | 自包含单文件 HTML 图解（sandbox iframe；可内联或引用内容根里的文件） | `src`/`html` `title` `height`                               |
+| `<StateFlow>`       | 状态机视图（状态卡 + 出边）                                          | `states` `transitions` `current` `title`                    |
+| `<MessageFlow>`     | 可步进消息时序图                                                     | `participants` `messages` `title`                           |
+| `<MetricRow>`       | 指标卡组（数值 + 变化 + 语义色）                                     | `items` `title`                                             |
+| `<Timeline>`        | 竖向时间轴                                                           | `items` `title`                                             |
+| `<ChangeList>`      | 本次改动清单：编号 + 说明 + 涉及模块徽标（新增/变更/移除）           | `items` `title`                                             |
+| `<RiskList>`        | 已知风险：严重度 + 影响 + 处置（已处理 / 待独立处理）                | `items` `title`                                             |
+| `<MergedTable>`     | 合并单元格表格（`:merged` 容器内写 YAML，Markdown 仍是事实源）       | `columns` `rows` `title` `caption`                          |
 
 ## 写教程内容
 
