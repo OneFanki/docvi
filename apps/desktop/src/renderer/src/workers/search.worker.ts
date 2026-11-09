@@ -35,16 +35,44 @@ export interface SearchHit {
 }
 
 export type SearchRequest =
-  | { type: 'index'; docs: Array<{ workspaceId: string; path: string; text: string }> }
+  /**
+   * 用一批文档替换某个工作区的全部索引内容（新增 / 改动 / 删除一次说清）。
+   *
+   * 刻意不提供「整体重建」：以前每加入一个工作区就把所有工作区拼起来重建一次，
+   * 三个仓库启动要 30 秒单核；而且任何一次外部改动走的也是同一条路。
+   * 现在只动送来的这一个工作区，其余分片原样保留。
+   */
+  | { type: 'replace'; workspaceId: string; docs: Array<{ path: string; text: string }> }
+  /** 整库作废（clear 或工作区被移除） */
+  | { type: 'drop'; workspaceId: string }
   | { type: 'query'; id: number; text: string }
   | { type: 'clear' }
 
 export type SearchResponse =
   { type: 'indexed'; count: number } | { type: 'results'; id: number; hits: SearchHit[] }
 
-let mini: MiniSearch<IndexDoc> | null = null
+/**
+ * 一份索引装所有工作区（主键 `workspaceId:path`），但**按工作区记账**：
+ * `owned` 记录每个工作区贡献了哪些 id，替换时只 discard 这一片。
+ */
+let mini = new MiniSearch<IndexDoc>({
+  fields: ['title', 'text', 'path'],
+  storeFields: ['path', 'title', 'workspaceId'],
+  searchOptions: {
+    boost: { title: 3, path: 1.5 },
+    prefix: true,
+    fuzzy: 0.2,
+    combineWith: 'AND',
+  },
+})
+/** 各工作区已进索引的 doc id（替换时据此精确移除旧版本） */
+const owned = new Map<string, string[]>()
 /** 原文单独留在 worker 里：摘要需要它，但不进索引（避免同一份文本两份结构化副本） */
 let bodies = new Map<string, string>()
+
+function docId(workspaceId: string, path: string): string {
+  return `${workspaceId}:${path}`
+}
 
 /** 标题兜底：文件名去扩展名与目录前缀（README 之类用末段） */
 function titleOf(path: string): string {
@@ -52,29 +80,32 @@ function titleOf(path: string): string {
   return base.replace(/\.md$/i, '')
 }
 
-function build(
-  docs: Array<{ workspaceId: string; path: string; text: string }>,
-): MiniSearch<IndexDoc> {
-  const engine = new MiniSearch<IndexDoc>({
-    fields: ['title', 'text', 'path'],
-    storeFields: ['path', 'title', 'workspaceId'],
-    searchOptions: {
-      boost: { title: 3, path: 1.5 },
-      prefix: true,
-      fuzzy: 0.2,
-      combineWith: 'AND',
-    },
-  })
-  engine.addAll(
-    docs.map(doc => ({
-      id: `${doc.workspaceId}:${doc.path}`,
-      workspaceId: doc.workspaceId,
+/** 把某个工作区的旧分片摘掉（索引与正文两份都要摘，否则摘要会留着旧文本） */
+function dropWorkspace(workspaceId: string): void {
+  for (const id of owned.get(workspaceId) ?? []) {
+    mini.discard(id)
+    bodies.delete(id)
+  }
+  owned.delete(workspaceId)
+}
+
+/** 用一批文档替换某个工作区的分片：先摘旧片，再把新文档加进同一份索引 */
+function replaceWorkspace(workspaceId: string, docs: Array<{ path: string; text: string }>): void {
+  dropWorkspace(workspaceId)
+  const ids: string[] = []
+  for (const doc of docs) {
+    const id = docId(workspaceId, doc.path)
+    ids.push(id)
+    bodies.set(id, doc.text)
+    mini.add({
+      id,
+      workspaceId,
       path: doc.path,
       title: titleOf(doc.path),
       text: doc.text,
-    })),
-  )
-  return engine
+    })
+  }
+  owned.set(workspaceId, ids)
 }
 
 /**
@@ -96,22 +127,34 @@ function snippetOf(text: string, terms: string[]): string {
 
 self.onmessage = (event: MessageEvent<SearchRequest>) => {
   const request = event.data
-  if (request.type === 'index') {
-    mini = build(request.docs)
-    bodies = new Map(request.docs.map(doc => [`${doc.workspaceId}:${doc.path}`, doc.text]))
-    const response: SearchResponse = { type: 'indexed', count: request.docs.length }
+  if (request.type === 'replace') {
+    replaceWorkspace(request.workspaceId, request.docs)
+    const response: SearchResponse = { type: 'indexed', count: mini.documentCount }
+    self.postMessage(response)
+    return
+  }
+  if (request.type === 'drop') {
+    dropWorkspace(request.workspaceId)
+    // discard 只打删除标记，词表条目仍留着；攒够了一批再回收，避免每次改动都全量压缩
+    mini.vacuum()
+    const response: SearchResponse = { type: 'indexed', count: mini.documentCount }
     self.postMessage(response)
     return
   }
   if (request.type === 'clear') {
-    mini = null
+    mini = new MiniSearch<IndexDoc>({
+      fields: ['title', 'text', 'path'],
+      storeFields: ['path', 'title', 'workspaceId'],
+      searchOptions: {
+        boost: { title: 3, path: 1.5 },
+        prefix: true,
+        fuzzy: 0.2,
+        combineWith: 'AND',
+      },
+    })
+    owned.clear()
     bodies = new Map()
     const response: SearchResponse = { type: 'indexed', count: 0 }
-    self.postMessage(response)
-    return
-  }
-  if (!mini) {
-    const response: SearchResponse = { type: 'results', id: request.id, hits: [] }
     self.postMessage(response)
     return
   }

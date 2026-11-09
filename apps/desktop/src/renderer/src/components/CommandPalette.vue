@@ -160,6 +160,11 @@ function workspaceName(id: string | null): string {
   return props.workspaceNames.get(id) ?? t('palette.removedWorkspace')
 }
 
+/** 只索引了文件名的工作区显示名（用于面板底部的一行说明） */
+const filenameOnlyNames = computed(() =>
+  searchIndex.state.filenameOnly.map(id => props.workspaceNames.get(id)).filter(Boolean),
+)
+
 /**
  * 面板打开时的全局按键收口。
  *
@@ -333,6 +338,17 @@ const localLabel = computed(() => workspaceName(props.activeWorkspaceId))
         </span>
         <span v-else-if="searchIndex.state.count" class="palette__foot-item">
           {{ t('palette.indexed', { count: searchIndex.state.count }) }}
+        </span>
+        <!--
+          大仓只说一次「正文没进索引」：不说明的话，用户会以为正文搜索坏了，
+          而实际上他只会在意「按文件名还能不能找到」——答案是能。
+        -->
+        <span
+          v-if="filenameOnlyNames.length"
+          v-tooltip="{ text: t('palette.filenameOnlyHint') }"
+          class="palette__foot-item palette__foot-item--muted"
+        >
+          {{ t('palette.filenameOnly', { names: filenameOnlyNames.join('、') }) }}
         </span>
         <span class="palette__foot-hint"
           >↑↓ {{ t('palette.move') }} · ↵ {{ t('palette.open') }}</span
@@ -549,5 +565,10 @@ const localLabel = computed(() => workspaceName(props.activeWorkspaceId))
 
 .palette__foot-hint {
   margin-left: auto;
+}
+
+/* 仅文件名索引的仓库名：要能看到，但不能抢「N 篇已索引」的注意力 */
+.palette__foot-item--muted {
+  opacity: 0.7;
 }
 </style>

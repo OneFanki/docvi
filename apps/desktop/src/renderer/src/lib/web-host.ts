@@ -12,6 +12,7 @@ import type {
   UpdateCheckResult,
   RecentEntry,
   Result,
+  SearchCorpus,
   TreeNode,
   WorkspaceEntry,
 } from '@docvi/shared'
@@ -706,8 +707,8 @@ export function createWebHost(options: WebHostOptions = {}): DocviApi {
      * 形状不同）。这里逐篇拉原文会打满请求，所以直接返回空 —— 搜索面板
      * 走下面的 searchQuery（服务端索引），不会再走这条路。
      */
-    async searchCorpus(): Promise<Result<never[]>> {
-      return ok([])
+    async searchCorpus(): Promise<Result<SearchCorpus>> {
+      return ok({ docs: [], fullText: true })
     },
 
     /**

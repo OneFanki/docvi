@@ -73,6 +73,8 @@ const zh: Dict = {
   'palette.placeholder': '搜索全部工作区，或输入命令…',
   'palette.results': '结果',
   'palette.indexed': '{count} 篇已索引',
+  'palette.filenameOnly': '{names} 仅索引文件名',
+  'palette.filenameOnlyHint': '仓库文档过多，正文不建索引以控制开销；按文件名或路径仍可搜到。',
   'palette.localScope': '当前工作区 · {name}',
   'palette.otherScopes': '其他工作区',
   'palette.singleFile': '单文件',
@@ -510,6 +512,9 @@ const en: Dict = {
   'palette.placeholder': 'Search all workspaces, or type a command…',
   'palette.results': 'Results',
   'palette.indexed': '{count} indexed',
+  'palette.filenameOnly': '{names}: filenames only',
+  'palette.filenameOnlyHint':
+    'This workspace has too many documents to index full text; searching by filename or path still works.',
   'palette.localScope': 'Current workspace · {name}',
   'palette.otherScopes': 'Other workspaces',
   'palette.singleFile': 'Single file',
