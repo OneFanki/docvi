@@ -33,6 +33,8 @@ export interface SearchState {
   error: string | null
   /** 索引由宿主提供（容器）：面板据此换掉「打开工作区才能搜」的引导文案 */
   external: boolean
+  /** 超过全文预算、只索引了文件名与路径的工作区 id */
+  filenameOnly: string[]
 }
 
 interface CorpusDoc {
@@ -55,6 +57,7 @@ export function useSearchIndex() {
     hits: [],
     error: null,
     external: usesHostIndex,
+    filenameOnly: [],
   })
 
   let worker: Worker | null = null
@@ -63,8 +66,6 @@ export function useSearchIndex() {
   let awaited = 0
   /** 已进索引的工作区 */
   const indexed = new Set<string>()
-  /** 语料按工作区累积；每次追加后整体重建（理由见 rebuild） */
-  const corpus = new Map<string, CorpusDoc[]>()
   /** 建索引串行执行：并发读多个大目录只会互相抢 IO，进度也会乱跳 */
   let queue: string[] = []
   let running: Promise<void> | null = null
@@ -109,15 +110,14 @@ export function useSearchIndex() {
   }
 
   /**
-   * 整体重建索引。
+   * 用某工作区的最新语料替换它的索引分片。
    *
-   * 不做增量删除：工作区里的文档会增删改名，增量维护要跟踪每个 path 的归属，
-   * 一旦漏删就是「搜得到但打不开」的脏命中。几百篇规模整体重建只要几十毫秒。
+   * 只换这一片，其余工作区的索引原样保留。以前是「读到新语料就把所有工作区
+   * 拼起来整体重建」：启动三个仓库累计 30 秒单核，之后每次外部改动还要再烧
+   * 一次全量。实测 2500 篇 / 14M 字符的全量重建要 10 秒，而单仓替换是增量的。
    */
-  function rebuild(): void {
-    const docs: CorpusDoc[] = []
-    for (const list of corpus.values()) docs.push(...list)
-    ensureWorker().postMessage({ type: 'index', docs })
+  function replaceCorpus(workspaceId: string, docs: CorpusDoc[]): void {
+    ensureWorker().postMessage({ type: 'replace', workspaceId, docs })
   }
 
   async function indexOne(workspaceId: string, task: TaskHandle | null): Promise<void> {
@@ -135,12 +135,18 @@ export function useSearchIndex() {
       return
     }
     indexed.add(workspaceId)
-    corpus.set(
-      workspaceId,
-      result.data.map(doc => ({ workspaceId, path: doc.path, text: doc.text })),
-    )
     state.indexedWorkspaces = indexed.size
-    rebuild()
+    setFilenameOnly(workspaceId, !result.data.fullText)
+    replaceCorpus(
+      workspaceId,
+      result.data.docs.map(doc => ({ workspaceId, path: doc.path, text: doc.text })),
+    )
+  }
+
+  /** 记录 / 清除「该仓库仅索引文件名」，供面板说明搜索范围变窄了 */
+  function setFilenameOnly(workspaceId: string, only: boolean): void {
+    const rest = state.filenameOnly.filter(id => id !== workspaceId)
+    state.filenameOnly = only ? [...rest, workspaceId] : rest
   }
 
   /**
@@ -263,27 +269,31 @@ export function useSearchIndex() {
     for (const timer of reindexTimers.values()) clearTimeout(timer)
     reindexTimers.clear()
     indexed.clear()
-    corpus.clear()
     queue = []
     state.ready = false
     state.count = 0
     state.indexedWorkspaces = 0
     state.totalWorkspaces = 0
     state.hits = []
+    state.filenameOnly = []
     worker?.postMessage({ type: 'clear' })
   }
 
   /**
-   * 作废某个工作区的索引（拉取更新 / 切分支 / 外部改动之后）。
+   * 作废某个工作区的索引（拉取更新 / 切分支之后）。
    *
    * 索引是按工作区缓存的，工作区内容在磁盘上变了而 id 没变时，`index()` 会因为
    * 「已索引」直接返回——搜索面板就会一直拿旧语料回答。作废后下次 `index()` 重读。
+   *
+   * 同时把这一片从 worker 里摘掉：不摘的话旧内容会一直能搜到，而 `index()`
+   * 只会用新语料**再替换一次**（replace 本身是幂等的），倒也不出错——
+   * 但摘掉才是「作废」的语义，也顺手释放正文。
    */
   function invalidate(workspaceId: string): void {
-    if (!indexed.delete(workspaceId) && !corpus.has(workspaceId)) return
-    corpus.delete(workspaceId)
+    if (!indexed.delete(workspaceId)) return
     state.indexedWorkspaces = indexed.size
-    rebuild()
+    setFilenameOnly(workspaceId, false)
+    ensureWorker().postMessage({ type: 'drop', workspaceId })
   }
 
   /**
@@ -312,7 +322,13 @@ export function useSearchIndex() {
     )
   }
 
-  /** 重读某个工作区的语料并整体替换（成功后一次性重建，不留空窗） */
+  /**
+   * 重读某个工作区的语料并替换它的分片。
+   *
+   * 只发这一个工作区的语料（不是全库），且只替换它原来那一片——外部改动
+   * 因此从「全库重建」降到「单仓重建」。旧内容在替换完成前仍留在索引里，
+   * 所以不会出现「结果区空一下再回来」。
+   */
   async function refresh(workspaceId: string): Promise<void> {
     refreshSeq.set(workspaceId, (refreshSeq.get(workspaceId) ?? 0) + 1)
     const seq = refreshSeq.get(workspaceId) ?? 0
@@ -326,12 +342,12 @@ export function useSearchIndex() {
       return
     }
     indexed.add(workspaceId)
-    corpus.set(
-      workspaceId,
-      result.data.map(doc => ({ workspaceId, path: doc.path, text: doc.text })),
-    )
     state.indexedWorkspaces = indexed.size
-    rebuild()
+    setFilenameOnly(workspaceId, !result.data.fullText)
+    replaceCorpus(
+      workspaceId,
+      result.data.docs.map(doc => ({ workspaceId, path: doc.path, text: doc.text })),
+    )
   }
 
   function dispose(): void {

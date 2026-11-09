@@ -7,6 +7,9 @@ packages/*/dist-*/
 .temp/
 temp/
 
+# AI 工具的会话状态（本机私有，不入仓）
+.zcode/
+
 # Electron 打包产物
 release/
 # 向独立目录出包（运行中的实例会锁住 release/win-unpacked，改用 release-<tag>/ 避开）

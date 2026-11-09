@@ -1,6 +1,6 @@
 {
-  "version": "0.6.0",
+  "version": "0.6.1",
   "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
-  "notes": "md 里现在可以直接引用 HTML 文件，不用再把整份内容粘进来（一篇 64KB 的方案文档能缩到 8KB）；正文里的 .html 链接点一下就在新窗口打开。顺带修好了 HTML 图解只剩骨架、图表全空的问题，新窗口按 Ctrl+R 刷新也不会再白屏。",
+  "notes": "后台不再偷偷吃 CPU 了——以前开着一个大仓库，只要有程序往里写文件就会把所有工作区的搜索索引整个重建，一次十几秒占满一个核；现在只重建变化的那一个。点「下载更新」能看到进度了，点「取消」也真的会停。",
   "homepage": "https://github.com/OneFanki/docvi"
 }

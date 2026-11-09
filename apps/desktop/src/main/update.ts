@@ -203,6 +203,19 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
     }
     const assets = await fetchReleaseAssets(latest)
     const asset = pickAsset(assets, process.platform, process.arch)
+    /*
+     * 清单说新版本、但抓不到本平台资产时，必须把原因说出来。
+     *
+     * 实测踩过：清单先于 CI 三平台构建完成推送，这段时间里 API 能查到 Release，
+     * 但本平台的资产还没上传完。此前只返回 status=outdated 且不带 asset，界面
+     * 只能笼统说「该版本未提供校验值」，用户看到的就是「点更新没反应」——
+     * 因为根本没有下载按钮，而那句提示指向的是手动下载，看起来像是让我们自己
+     * 去猜为什么。
+     */
+    const assetMissingReason =
+      assets.length === 0
+        ? '已发布新版本，但取不到发布资产（Release 可能还在构建，或 API 暂时不可达）'
+        : `该版本没有适用于 ${process.platform}-${process.arch} 的安装包`
     return {
       status: 'outdated',
       current,
@@ -212,7 +225,7 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
         ? { downloadUrl: trustedHttpsUrl(field(manifest.downloadUrl)) as string }
         : {}),
       ...(field(manifest.notes) ? { notes: field(manifest.notes) as string } : {}),
-      ...(asset ? { asset } : {}),
+      ...(asset ? { asset } : { assetMissingReason }),
     }
   } catch (error) {
     const reason = (error as Error).name === 'AbortError' ? '检查超时' : (error as Error).message
@@ -264,6 +277,17 @@ interface DownloadResponse extends Readable {
 }
 
 /**
+ * 中止错误：`name` 必须是 `AbortError`。
+ *
+ * 只写 `new Error('AbortError')` 是不够的——它的 `name` 仍是 `Error`，
+ * 调用方所有 `error.name === 'AbortError'` 的判断都会落空，于是「用户主动取消」
+ * 会被当成「未知失败」，消息变成一串无意义文本。（实测踩过。）
+ */
+function abortError(): Error {
+  return Object.assign(new Error('下载已取消'), { name: 'AbortError' })
+}
+
+/**
  * 发起下载请求，逐跳校验重定向目标，返回可读的响应流。
  *
  * 为什么不用 `net.fetch`：它跟随重定向后 `response.url` 为空串（实测），
@@ -272,6 +296,17 @@ interface DownloadResponse extends Readable {
  *
  * 每一跳都要求落在可信域内——GitHub 的 release 下载会 302 到带签名的 CDN
  * （`release-assets.githubusercontent.com`），那一跳同样要过这道检查。
+ *
+ * ## 取消为什么必须挂到「响应流」上，而不只是请求对象
+ *
+ * `request.abort()` 只在**响应头到达之前**有效。一旦 `response` 事件触发，请求
+ * 对象就认为自己的活干完了，此时再 abort 是个空操作——body 继续流出去。
+ * 实测：调用取消后下载仍把 99MB 全部下完，然后 `resolved` 成功返回，
+ * 用户看到的就是「点了取消没反应」。
+ *
+ * 所以 cancel 有两段：请求未响应时 abort 请求，响应到达后 destroy 流。
+ * 用 `AbortError` 让 `pipeline` 以可辨识的原因失败，调用方据此显示「已取消」
+ * 而不是「未知错误」。
  */
 function requestStream(
   url: string,
@@ -282,9 +317,15 @@ function requestStream(
     const request = net.request({ url, redirect: 'manual' })
     let hops = 0
     let settled = false
+    /** 已拿到响应头之后的流：此时 abort 请求无效，只能 destroy 它 */
+    let streaming: DownloadResponse | null = null
 
     const fail = (error: Error): void => {
-      if (settled) return
+      if (settled) {
+        // 响应已交出去：中止只能落到流上，否则 body 会一直流到结束
+        streaming?.destroy(error)
+        return
+      }
       settled = true
       try {
         request.abort()
@@ -294,7 +335,7 @@ function requestStream(
       reject(error)
     }
 
-    signal.addEventListener('abort', () => fail(new Error('AbortError')), { once: true })
+    signal.addEventListener('abort', () => fail(abortError()), { once: true })
 
     request.on('redirect', (_status, _method, redirectUrl) => {
       hops += 1
@@ -325,6 +366,12 @@ function requestStream(
         return
       }
       settled = true
+      streaming = stream
+      // 响应头已到、但信号可能在这之前就 abort 了：补一次检查，别让 body 白流
+      if (signal.aborted) {
+        stream.destroy(abortError())
+        return
+      }
       resolve(stream)
     })
 

@@ -9,7 +9,7 @@ import {
 } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
-import type { DocPayload, SearchDoc, TreeNode, TreeSortMode } from '@docvi/shared'
+import type { DocPayload, SearchCorpus, SearchDoc, TreeNode, TreeSortMode } from '@docvi/shared'
 
 import { readConfig, CONFIG_FILENAME } from './config.ts'
 
@@ -388,11 +388,31 @@ export function readStandaloneDoc(absolutePath: string): DocPayload {
  * 一次 IPC 传完比「每敲一个字符来回读文件」少几百倍系统调用；
  * 单篇超过 SEARCH_DOC_LIMIT 的部分截断——搜索命中位置不会落在尾部，
  * 但把 20MB 文档整段塞进索引会把内存吃满。
+ *
+ * ## 为什么要按仓库规模降级
+ *
+ * 建索引的成本由**正文字数**决定：实测 2500 篇 / 14M 字符要 10 秒单核，
+ * 索引常驻内存 350MB。开发仓库（两千多篇构建产物里的 README）天天被工具
+ * 改写，每次都整库重读 + 重建，在后台看就是「没在用却一直烧 CPU」。
+ *
+ * 超过 `MAX_FULLTEXT_DOCS` 的仓库只索引**文件名与路径**：正文不读盘、不进索引，
+ * 按文件名搜依然命中——这也正是大仓里最常用的检索方式。返回 `fullText: false`，
+ * 由界面说明「该仓库仅索引文件名」，而不是静默少搜一部分。
  */
 const SEARCH_DOC_LIMIT = 512 * 1024
 
-export function collectSearchCorpus(root: string): SearchDoc[] {
-  const out: SearchDoc[] = []
+/**
+ * 全文索引的仓库规模上限（按文档篇数，不读盘就能判定）。
+ *
+ * 为什么用篇数而不是字符数：篇数在 walk 阶段就能拿到，判定不需要先读一遍文件；
+ * 而单篇已有 512KB 上限，篇数足以控制总量级。800 的依据是实测：400 余篇的
+ * 文档库约 2 秒建成，可接受；两千余篇的开发仓库要 10 秒、索引常驻 350MB，
+ * 超出「打开应用顺手就能搜」的预算。
+ */
+export const MAX_FULLTEXT_DOCS = 800
+
+export function collectSearchCorpus(root: string): SearchCorpus {
+  const paths: string[] = []
   const walk = (absDir: string, relDir: string, depth: number): void => {
     if (depth > MAX_DEPTH) return
     let entries
@@ -408,17 +428,27 @@ export function collectSearchCorpus(root: string): SearchDoc[] {
         if (isDirExcluded(name)) continue
         walk(join(absDir, name), rel, depth + 1)
       } else if (entry.isFile() && name.toLowerCase().endsWith('.md')) {
-        try {
-          const text = readFileSync(join(absDir, name), 'utf8')
-          out.push({ path: rel, text: text.slice(0, SEARCH_DOC_LIMIT) })
-        } catch {
-          // 单篇读失败不影响整库索引
-        }
+        paths.push(rel)
       }
     }
   }
   walk(root, '', 0)
-  return out
+
+  // 大仓只回路径：读 18MB 正文再丢给索引建 10 秒，纯粹是为搜不到的正文付钱
+  if (paths.length > MAX_FULLTEXT_DOCS) {
+    return { docs: paths.map(path => ({ path, text: '' })), fullText: false }
+  }
+
+  const docs: SearchDoc[] = []
+  for (const path of paths) {
+    try {
+      const text = readFileSync(join(root, path), 'utf8')
+      docs.push({ path, text: text.slice(0, SEARCH_DOC_LIMIT) })
+    } catch {
+      // 单篇读失败不影响整库索引
+    }
+  }
+  return { docs, fullText: true }
 }
 
 /* ---------- 添加目录时的内容根探测 ---------- */

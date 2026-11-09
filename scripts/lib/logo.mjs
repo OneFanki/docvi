@@ -24,9 +24,12 @@
  * 没有字母、没有折角、没有「角落贴片」——这三种最容易撞车。
  *
  * 调用方（改这里必须同步，`node scripts/build-icons.mjs` 会重生成后两者）：
- *  - `scripts/build-icons.mjs`（应用图标 + docs/assets/logo.svg + renderer/public/favicon.svg）
+ *  - `scripts/build-icons.mjs`（应用图标 + 托盘图标 + docs/assets/logo.svg + renderer/public/favicon.svg）
  *  - `apps/desktop/src/renderer/src/components/TitleBar.vue`（无底板的标记，手写）
  *  - `deployer/src/portal.mjs` 的 `BRANDMARK`（运维页）
+ *
+ * 导出两个版本：`LOGO_SVG`（完整，≥32px）与 `LOGO_SVG_COMPACT`（简化，≤24px）。
+ * 两者几何相同，只差小尺寸下画不出来的细节——理由见 COMPACT 的定义处。
  */
 
 /** 画布与背景 */
@@ -113,6 +116,31 @@ export const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32
  * 不必从 SVG 字符串里反读色值。
  */
 export const LOGO_COLORS = { page: '#eeb254', band: '#1b1d22', plate: '#23262c' }
+
+/**
+ * 小尺寸版（≤24px）：与 LOGO_SVG 同一组几何，只去掉小尺寸下不可分辨的细节——
+ * 正文短线、纸张渐变、底板内描边。
+ *
+ * 为什么必须单独做一版：32px 画布缩到 16px 时，1.5 单位的正文线只剩 0.75 像素，
+ * 四条线连同纸张 6% 渐变一起被抗锯齿抹成一片灰纹——远看就是「糊」。实测同一张
+ * 16px PNG：完整版 717B（几乎全是中间色），这一版 463B。32px 及以上正文线仍
+ * 读得出来，继续用完整版；托盘也吃这一版（Windows 实际按 16/24px 显示）。
+ *
+ * 几何一个数都不改：三张纸的错位、斜带的角度与粗细都与完整版相同，变的只是
+ * 「画多少细节」。这样 16px 和 256px 是同一枚标，不会出现两个版本各说各话。
+ */
+export const LOGO_SVG_COMPACT = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="100%" height="100%" role="img" aria-label="docvi">
+  <rect width="32" height="32" rx="${LOGO_BG_RADIUS}" fill="${LOGO_COLORS.plate}"/>
+  <rect x="${BACK1.x}" y="${BACK1.y}" width="${PAGE.w}" height="${PAGE.h}" rx="${PAGE.r}" fill="#e8b055" fill-opacity="0.34"/>
+  <rect x="${BACK2.x}" y="${BACK2.y}" width="${PAGE.w}" height="${PAGE.h}" rx="${PAGE.r}" fill="#e8b055" fill-opacity="0.62"/>
+  <g clip-path="url(#dv-cp-clip)">
+    <rect x="${FRONT.x}" y="${FRONT.y}" width="${PAGE.w}" height="${PAGE.h}" fill="${LOGO_COLORS.page}"/>
+    <g transform="rotate(${BAND.angle} ${FRONT_CENTER.x} ${FRONT_CENTER.y})">
+      <rect x="${bandLeft}" y="${bandTop}" width="${bandWidth}" height="${BAND.h}" rx="${BAND.h / 2}" fill="${LOGO_COLORS.band}"/>
+    </g>
+  </g>
+  <clipPath id="dv-cp-clip"><rect x="${FRONT.x}" y="${FRONT.y}" width="${PAGE.w}" height="${PAGE.h}" rx="${PAGE.r}"/></clipPath>
+</svg>`
 
 /**
  * 界面内标记（标题栏 / 运维页顶栏）：**不带底板**，只留三张琥珀纸与深色斜带。

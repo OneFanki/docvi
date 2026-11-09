@@ -17,6 +17,7 @@ import { createPluginStore, resolvePluginAsset, type PluginStore } from './plugi
 import { createServiceManager, serviceEntryPath } from './service.ts'
 import { createServiceBridge } from './service-bridge.ts'
 import { createSettingsStore, sessionFilePath, settingsFilePath } from './settings-store.ts'
+import { DEV_APP_NAME, devDataDir } from './dev-data.ts'
 import { createTray, focusWindow, markQuitting, shouldHideOnClose } from './tray.ts'
 import { dataDir } from './paths.ts'
 
@@ -60,6 +61,21 @@ function isEmbedSandboxUrl(rawUrl: string): boolean {
 }
 
 /**
+ * 开发版独立数据目录：必须在任何 getPath('userData') / 单实例锁之前定稿。
+ *
+ * 规则与理由见 `dev-data.ts`。这里的顺序不能动：先算隔离目录，再定应用名，
+ * 最后才可能 setPath——单实例锁就建在 userData 里，晚一步就会与安装版撞上。
+ */
+const isolatedDevDir = devDataDir({
+  packaged: app.isPackaged,
+  appDataDir: app.getPath('appData'),
+  argv: process.argv,
+  envOverride: process.env.DOCVI_DATA_DIR,
+})
+/** 这次运行是否是「开发版独立身份」（标题栏、托盘、日志据此区分） */
+const isolatedDev = isolatedDevDir !== undefined
+
+/**
  * 身份必须在任何 getPath('userData') / 单实例锁之前确定。
  *
  * 不设的话 Electron 会用 package.json 的 name（`@docvi/desktop`）拼数据目录，
@@ -68,8 +84,9 @@ function isEmbedSandboxUrl(rawUrl: string): boolean {
  *
  * `DOCVI_INSTANCE` 覆盖：单实例锁按应用名全局生效，自动化验收要与用户实例
  * 并存就必须换名字（配合 `DOCVI_DATA_DIR` 隔离数据）。
+ * 开发版换成 `docvi dev`：不改名的话它的单实例锁会与安装版互顶（见 dev-data.ts）。
  */
-app.setName(process.env.DOCVI_INSTANCE?.trim() || 'docvi')
+app.setName(process.env.DOCVI_INSTANCE?.trim() || (isolatedDev ? DEV_APP_NAME : 'docvi'))
 
 /*
  * `DOCVI_DATA_DIR` 生效时，把 Electron 自己的 userData 也指过去。
@@ -80,9 +97,14 @@ app.setName(process.env.DOCVI_INSTANCE?.trim() || 'docvi')
  *
  * 必须在 app ready **之前**调用：session 与 partition 的存储位置都从它派生，
  * 晚了会分裂成两处。
+ *
+ * 开发版走 else 分支落到 `appData/docvi-dev`：与安装版的 `appData/docvi` 分开，
+ * 工作区列表、设置、会话、（将来若有）profile 都不会互相踩。
  */
 if (process.env.DOCVI_DATA_DIR?.trim()) {
   app.setPath('userData', process.env.DOCVI_DATA_DIR.trim())
+} else if (isolatedDevDir) {
+  app.setPath('userData', isolatedDevDir)
 }
 
 /**
@@ -216,7 +238,7 @@ function createWindow(): void {
     minWidth: 880,
     minHeight: 560,
     show: false,
-    title: 'docvi',
+    title: isolatedDev ? DEV_APP_NAME : 'docvi',
     backgroundColor: chrome.color,
     titleBarStyle: 'hidden',
     ...(process.platform === 'win32' ? { titleBarOverlay: { ...chrome, height: 44 } } : {}),

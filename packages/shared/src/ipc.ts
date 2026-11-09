@@ -258,6 +258,14 @@ export interface UpdateCheckResult {
   checkedAt: number
   /** 与本机平台 + 架构匹配的资产；缺失 = 只能去下载页 */
   asset?: UpdateAsset
+  /**
+   * 没有资产时的具体原因（只在该字段缺失时出现）。
+   *
+   * 与 `message` 分开：`message` 是「整次检查失败」，这里是「版本查到了但没有
+   * 本平台的包」——界面要把这两种情况说清楚，否则用户只看到一句
+   * 「未提供校验值」，无处可查。
+   */
+  assetMissingReason?: string
 }
 
 /** 更新镜像的阶段：UI 按阶段换文案，不必猜 */
@@ -471,7 +479,24 @@ export function isStandaloneDoc(doc: Pick<DocPayload, 'path' | 'absolutePath'>):
 export interface SearchDoc {
   /** 工作区内相对路径 */
   path: string
+  /**
+   * 正文；空串表示这篇只索引文件名与路径（仓库超过全文索引预算）。
+   *
+   * 空串不是「空文档」——两者在索引里等价（都没有正文可搜），不必区分。
+   */
   text: string
+}
+
+/** 一个工作区的搜索语料。 */
+export interface SearchCorpus {
+  docs: SearchDoc[]
+  /**
+   * false = 仓库超过全文索引预算，正文没读入，只能按文件名 / 路径命中。
+   *
+   * 单独一个标记而不是让调用方猜「text 全为空」：真正全是空文档的仓库也存在，
+   * 猜错就会把「已全文索引」说成「仅文件名」。
+   */
+  fullText: boolean
 }
 
 /** 宿主侧搜索的一条命中（容器里索引在服务端，覆盖全部仓库）。 */
@@ -767,7 +792,7 @@ export interface DocviApi {
     kind: 'files' | 'dir',
   ): Promise<Result<WorkspaceEntry | null>>
 
-  searchCorpus(workspaceId: string): Promise<Result<SearchDoc[]>>
+  searchCorpus(workspaceId: string): Promise<Result<SearchCorpus>>
 
   /**
    * 宿主侧全文搜索（可选）：索引已在服务端构建好时，渲染进程不该再拉整库

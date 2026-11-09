@@ -10,11 +10,15 @@
  * 与 GPU/网络服务初始化有关），而 CDP 驱动的 headless Chromium 稳定且零依赖。
  *
  * 输出（apps/desktop/build 是 electron-builder 的 buildResources 目录）：
- *   icon.png   1024×1024（electron-builder 按需下采样）
- *   icon.ico   16/24/32/48/64/128/256（Windows）
- *   icon.icns  16…1024（macOS）
+ *   icon.png    1024×1024（electron-builder 按需下采样）
+ *   icon.ico    16/20/24/32/40/48/64/96/128/256（Windows，覆盖 100%–300% DPI）
+ *   icon.icns   16…1024（macOS）
+ *   tray.png    32×32 简化版，托盘专用（主进程直接加载，不再 resize）
  *   docs/assets/logo.svg（文档与外部引用）
  *   apps/desktop/src/renderer/public/favicon.svg（浏览器标签页图标）
+ *
+ * 小尺寸（≤24px）渲染的是 LOGO_SVG_COMPACT：与大图同一组几何，只是去掉
+ * 小尺寸下画不出来的正文短线、渐变与内描边。细节取舍理由见 logo.mjs。
  *
  * 用法：node scripts/build-icons.mjs
  */
@@ -23,9 +27,14 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { LOGO_SVG } from './lib/logo.mjs'
+import { LOGO_SVG, LOGO_SVG_COMPACT } from './lib/logo.mjs'
 
-const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
+/**
+ * ICO 档位要覆盖 Windows 的每一个 DPI 缩放档，缺一档系统就会拿邻近尺寸拉伸：
+ * 100%→16、125%→20、150%→24、200%→32/40、250%→48/64、300%→96。
+ * 早期只有 16/24/32/48/64/128/256，125% 与 200% 两档一直在吃拉伸。
+ */
+const ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
 const ICNS_ENTRIES = [
   { type: 'icp4', size: 16 },
   { type: 'icp5', size: 32 },
@@ -38,6 +47,18 @@ const ICNS_ENTRIES = [
 const RENDER_SIZES = [...new Set([...ICO_SIZES, ...ICNS_ENTRIES.map(e => e.size), 1024])].sort(
   (a, b) => a - b,
 )
+
+/**
+ * 24px 及以下用简化版（无正文短线/渐变/内描边），以上用完整版。
+ *
+ * 分界取 24 是实测的：32px 下正文线仍是 1.5 像素、读得出来；24px 下就只剩
+ * 1.1 像素，和渐变一起糊成灰纹。
+ */
+const COMPACT_MAX_SIZE = 24
+
+/** 托盘图标：32px 的简化版。Windows 在 150% DPI 下按 24px 显示，
+ *  从 32 单次降采样比「16px 再被系统放大」干净得多（后者是双重重采样）。 */
+const TRAY_SIZE = 32
 
 /** 系统 Chromium 候选（本机只需要命中一个） */
 function findChromium() {
@@ -72,16 +93,17 @@ async function findPage(port) {
   throw new Error('CDP 端点未就绪')
 }
 
-/** 用 CDP 把 LOGO_SVG 渲染成各尺寸 PNG（透明底） */
-async function renderAll(sizes, chromium, workDir) {
-  const htmlPath = join(workDir, 'logo.html')
-  writeFileSync(
-    htmlPath,
+/** 用 CDP 把 SVG 渲染成各尺寸 PNG（透明底）。jobs = [{ size, compact }] */
+async function renderAll(jobs, chromium, workDir) {
+  const page = svg =>
     `<!doctype html><html><head><meta charset="utf-8"><style>
       html,body{margin:0;padding:0;background:transparent;overflow:hidden}
       svg{display:block}
-    </style></head><body>${LOGO_SVG}</body></html>`,
-  )
+    </style></head><body>${svg}</body></html>`
+  const fullPath = join(workDir, 'logo.html')
+  const compactPath = join(workDir, 'logo-compact.html')
+  writeFileSync(fullPath, page(LOGO_SVG))
+  writeFileSync(compactPath, page(LOGO_SVG_COMPACT))
 
   const port = 9600 + Math.floor(Math.random() * 300)
   const profile = join(workDir, 'profile')
@@ -129,19 +151,22 @@ async function renderAll(sizes, chromium, workDir) {
     })
 
     const out = new Map()
-    for (const size of sizes) {
+    for (const job of jobs) {
+      const key = `${job.size}${job.compact ? '-c' : ''}`
       await send('Emulation.setDeviceMetricsOverride', {
-        width: size,
-        height: size,
+        width: job.size,
+        height: job.size,
         deviceScaleFactor: 1,
         mobile: false,
       })
-      await send('Page.navigate', { url: `file:///${htmlPath.replace(/\\/g, '/')}` })
+      await send('Page.navigate', {
+        url: `file:///${(job.compact ? compactPath : fullPath).replace(/\\/g, '/')}`,
+      })
       await wait(600)
       const shot = await send('Page.captureScreenshot', { format: 'png', fromSurface: true })
       const data = shot.result?.data
-      if (!data) throw new Error(`渲染 ${size}px 失败`)
-      out.set(size, Buffer.from(data, 'base64'))
+      if (!data) throw new Error(`渲染 ${key} 失败`)
+      out.set(key, Buffer.from(data, 'base64'))
     }
     ws.close()
     return out
@@ -240,18 +265,28 @@ if (!chromium) {
 
 const workDir = mkdtempSync(join(tmpdir(), 'ds-icons-'))
 try {
-  const png = await renderAll(RENDER_SIZES, chromium, workDir)
+  // 24px 及以下各渲一份简化版，其余用完整版
+  const jobs = RENDER_SIZES.map(size => ({ size, compact: size <= COMPACT_MAX_SIZE }))
+  jobs.push({ size: TRAY_SIZE, compact: true, tray: true })
+  const png = await renderAll(jobs, chromium, workDir)
+  const at = size => png.get(`${size}${size <= COMPACT_MAX_SIZE ? '-c' : ''}`)
+  const trayPng = png.get(`${TRAY_SIZE}-c`)
+
   mkdirSync(outDir, { recursive: true })
-  writeFileSync(join(outDir, 'icon.png'), png.get(1024))
+  writeFileSync(join(outDir, 'icon.png'), at(1024))
   writeFileSync(
     join(outDir, 'icon.ico'),
-    buildIco(ICO_SIZES.map(size => ({ size, png: png.get(size) }))),
+    buildIco(ICO_SIZES.map(size => ({ size, png: at(size) }))),
   )
   writeFileSync(
     join(outDir, 'icon.icns'),
-    buildIcns(ICNS_ENTRIES.map(entry => ({ type: entry.type, png: png.get(entry.size) }))),
+    buildIcns(ICNS_ENTRIES.map(entry => ({ type: entry.type, png: at(entry.size) }))),
   )
-  console.log(`[icons] 已生成 icon.png / icon.ico / icon.icns（${RENDER_SIZES.length} 档尺寸）`)
+  // 托盘专用：预生成 32px 简化版，主进程直接加载、不再 resize（见 tray.ts）
+  writeFileSync(join(outDir, 'tray.png'), trayPng)
+  console.log(
+    `[icons] 已生成 icon.png / icon.ico / icon.icns / tray.png（${RENDER_SIZES.length} 档尺寸）`,
+  )
 
   // 同源的矢量副本：文档引用与浏览器标签页图标都用它，避免 PNG 走样
   writeFileSync(join(root, 'docs', 'assets', 'logo.svg'), `${LOGO_SVG}\n`)

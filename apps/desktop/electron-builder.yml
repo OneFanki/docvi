@@ -55,9 +55,10 @@ extraResources:
   # 内置插件包：<包名>/<版本>/ 视图，由 assemble-plugins.mjs 生成
   - from: build/plugins
     to: plugins
-  # 托盘与关于面板共用的一张图（托盘在代码里缩到 16px）
-  - from: build/icon.png
-    to: icon.png
+  # 托盘专用 32px 简化版：预生成好直接加载，主进程不再 resize
+  # （见 tray.ts「不要 resize 到 16」的说明）
+  - from: build/tray.png
+    to: tray.png
 
 npmRebuild: false
 

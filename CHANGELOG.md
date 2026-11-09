@@ -28,6 +28,46 @@
 
 ### English
 
+## [0.6.1] - 2026-11-09
+
+### 中文
+
+- **后台不再偷偷吃 CPU 了**：以前开着一个大仓库（两千多篇文档），只要有程序往里写文件，docvi 就会把**所有**工作区的搜索索引整个重建一遍——一次十几秒、占满一个核。现在只重建变化的那一个仓库，索引开销降到原来的约七分之一，内存从 350MB 降到 96MB
+- **超大仓库自动降级为「按文件名搜索」**：超过 800 篇的文档库不再读全文建索引，按文件名或路径照样能搜到，命令面板底部会说明清楚。搜索还是能用，只是不再为搜不到的正文付十几秒的代价
+- **点「下载更新」能看到进度了，点「取消」也真的会停**：以前取消是个空操作——进度条会继续爬到 100%，然后提示成功。现在取消立刻停下，并且不会再偷偷下完
+- **开发版与安装版不再互相干扰**：`pnpm docvi:dev` 用独立的数据目录（窗口标题带 `dev` 角标），不会再和已安装的版本抢单实例锁，也不会污染你的工作区列表
+
+#### 完整变更
+
+- **搜索索引改增量（按工作区分片）**：worker 由「只有整库重建」改为 `replace` / `drop` 两个按工作区操作的指令，用 `owned` 记账精确移除旧分片。启动期从 32s 降到 3.1s，单次外部改动从 8.5s 降到 1.2s，索引常驻堆从 354MB 降到 96MB（2506 篇 / 14M 字符实测）
+- **语料规模降级**：`collectSearchCorpus` 超过 `MAX_FULLTEXT_DOCS`（800 篇）时只回路径、不读正文，返回 `fullText: false`；控制台面板据此显示「X 仅索引文件名」。阈值判定只看篇数，不额外读盘
+- **更新下载的取消真正生效**：`net.request` 的 `abort()` 只在响应头到达前有效，响应一到再 abort 是空操作——body 会继续把 99MB 下完并「成功」返回。现在 abort 同时转发到响应流（`destroy(error)`），实测取消后泄漏 0KB
+- **`AbortError` 的 name 修正**：`new Error('AbortError')` 的 `name` 是 `Error`，所有按 name 判断取消的地方都落空，「用户取消」被当成「未知失败」。改用 `Object.assign(new Error(...), { name: 'AbortError' })`
+- **渲染层异步出口补齐**：`appUpdateDownload` / `appUpdateInstall` 的 await 补 `try/catch`。此前 IPC 本身 reject 时 `phase` 会永远停在 downloading——界面表现为「0%、点了没反应、取消也没用」
+- **资产缺失的原因说清楚**：清单说有新版本但抓不到本平台资产（Release 还在构建）时，原先只回 `status: outdated` 且没有 `asset`，界面只能笼统说「未提供校验值」。新增 `assetMissingReason` 区分「API 取不到资产」与「该平台没有包」
+- **开发版数据隔离**：新增 `main/dev-data.ts`，非打包运行落到 `%APPDATA%/docvi-dev`，应用名改为 `docvi dev`（单实例锁不再互顶、标题栏有 `dev` 角标）。判据顺序 `DOCVI_DATA_DIR` > `--user-data-dir` > 开发版隔离 > Electron 默认——前两条必须优先，否则会把测试写进开发者的真实数据目录
+- **应用图标小尺寸清晰化**：`logo.mjs` 新增 `LOGO_SVG_COMPACT`（几何不变，只去掉小尺寸画不出来的正文线/渐变/内描边），`build-icons.mjs` 按 `size <= 24` 自动选版本；ICO 补 20/40/96 三档覆盖 Windows 全部 DPI；托盘改用预生成的 32px `tray.png`，去掉 `resize(16)` 的双重重采样
+- 新增测试：搜索 worker 分片替换 6 例、语料降级 5 例、开发版数据目录判据 8 例；`scripts/dev/probe-update-download.mjs` 增加「进度可见 + 取消有效」两段真实网络断言
+
+### English
+
+- **docvi no longer burns CPU in the background**: with a large workspace open (a couple thousand documents), any file written by another tool made it rebuild the search index for **every** workspace — ten-plus seconds of a pinned core. Only the changed workspace is rebuilt now: index cost drops to roughly a seventh, memory from 350MB to 96MB
+- **Very large workspaces fall back to filename search**: above 800 documents, full text is no longer indexed. Filename and path search still work, and the command palette says so
+- **"Download update" shows progress, and "Cancel" actually cancels**: cancelling used to be a no-op — the bar kept climbing to 100% and then reported success. It now stops immediately and no longer keeps downloading behind your back
+- **Dev builds no longer collide with the installed app**: `pnpm docvi:dev` uses its own data directory (window title carries a `dev` badge), so it neither competes for the single-instance lock nor pollutes your workspace list
+
+#### Full changes
+
+- **Incremental search index (per-workspace shards)**: the worker went from "rebuild everything" to `replace` / `drop` scoped to one workspace, with an `owned` ledger to discard exactly the old shard. Startup 32s → 3.1s, single external change 8.5s → 1.2s, resident heap 354MB → 96MB (measured on 2506 docs / 14M chars)
+- **Corpus size fallback**: `collectSearchCorpus` returns paths only (no bodies, `fullText: false`) above `MAX_FULLTEXT_DOCS` (800). The palette shows "X: filenames only". The threshold is decided from the file count alone, with no extra disk reads
+- **Update download cancellation actually works**: `net.request`'s `abort()` only works before response headers arrive; afterwards it is a no-op and the body keeps downloading all 99MB before "succeeding". The abort is now forwarded to the response stream (`destroy(error)`); measured leakage after cancel: 0 bytes
+- **`AbortError` name fixed**: `new Error('AbortError')` still has `name === 'Error'`, so every `error.name === 'AbortError'` check missed and a user cancel was reported as an unknown failure
+- **Renderer async exits**: `try/catch` added around `appUpdateDownload` / `appUpdateInstall`. When the IPC call itself rejected, `phase` stayed at downloading forever — "0%, nothing happens, cancel does nothing"
+- **Missing-asset reason surfaced**: when the manifest announces a version whose per-platform asset is not there yet, `assetMissingReason` now distinguishes "API returned no assets" from "no package for this platform"
+- **Dev data isolation**: new `main/dev-data.ts` sends unpackaged runs to `%APPDATA%/docvi-dev` and renames the app to `docvi dev`. Precedence: `DOCVI_DATA_DIR` > `--user-data-dir` > dev isolation > Electron default — the first two must win, or tests would write into the developer's real data directory
+- **Sharper icons at small sizes**: `LOGO_SVG_COMPACT` (same geometry, minus detail that cannot resolve below 32px), chosen automatically for `size <= 24`; ICO gained 20/40/96 to cover every Windows DPI step; the tray now loads a pre-rendered 32px `tray.png` instead of `resize(16)` double-resampling
+- New tests: 6 search-worker shard cases, 5 corpus-fallback cases, 8 dev-data-dir cases; `scripts/dev/probe-update-download.mjs` gained real-network assertions for visible progress and working cancellation
+
 ## [0.6.0] - 2026-11-06
 
 ### 中文
