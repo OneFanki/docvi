@@ -162,30 +162,46 @@ async function downloadUpdate(): Promise<void> {
   if (!update?.asset || !update.latest) return
   updateError.value = null
   updateFlow.value = { ...updateFlow.value, phase: 'downloading', received: 0 }
-  const result = await window.docvi.appUpdateDownload({
-    asset: update.asset,
-    version: update.latest,
-  })
-  if (result.ok) {
-    updateFlow.value = {
-      phase: 'ready',
-      received: updateFlow.value.received,
-      total: updateFlow.value.total,
-      readyVersion: result.data.version,
-      fileName: result.data.fileName,
+  try {
+    const result = await window.docvi.appUpdateDownload({
+      asset: update.asset,
+      version: update.latest,
+    })
+    if (result.ok) {
+      updateFlow.value = {
+        phase: 'ready',
+        received: updateFlow.value.received,
+        total: updateFlow.value.total,
+        readyVersion: result.data.version,
+        fileName: result.data.fileName,
+      }
+      return
     }
-    return
+    /*
+     * 错误就地显示在更新区，不丢进全局 toast：
+     * 关于页可能开着很久，用户回头看不到已经消失的提示；而下载失败的原因
+     * （校验不通过 / 网络 / 磁盘）恰恰需要停在那儿让他读完。
+     */
+    updateError.value = result.error.message
+    updateFlow.value = { ...updateFlow.value, phase: 'idle' }
+  } catch (error) {
+    /*
+     * IPC 本身失败（主进程崩溃、通道缺失）时 invoke 会 reject 而不是回 Result。
+     * 不接住的话 `phase` 永远停在 downloading——界面就是「0%、点了没反应、
+     * 取消也没用」，用户没有任何可操作的路。任何退出路径都必须把状态放回去。
+     */
+    updateError.value = error instanceof Error ? error.message : String(error)
+    updateFlow.value = { ...updateFlow.value, phase: 'idle' }
   }
-  /*
-   * 错误就地显示在更新区，不丢进全局 toast：
-   * 关于页可能开着很久，用户回头看不到已经消失的提示；而下载失败的原因
-   * （校验不通过 / 网络 / 磁盘）恰恰需要停在那儿让他读完。
-   */
-  updateError.value = result.error.message
-  updateFlow.value = { ...updateFlow.value, phase: 'idle' }
 }
 
 function cancelDownload(): void {
+  /*
+   * 取消是「尽力而为」：主进程可能在取消请求到达前就已经下完（本地代理下
+   * 100MB 只要 5 秒）。真正决定界面还能不能退出 downloading 的是
+   * `appUpdateDownload` 的返回值——取消成功时主进程会回 E_INTERNAL「已取消」，
+   * 那条路径会把 phase 放回 idle。这里不自己改状态，否则会与真实结果打架。
+   */
   void window.docvi.appUpdateCancel()
 }
 
@@ -195,9 +211,15 @@ async function installUpdate(): Promise<void> {
   if (!version) return
   updateError.value = null
   updateFlow.value = { ...updateFlow.value, phase: 'installing' }
-  const result = await window.docvi.appUpdateInstall()
-  if (!result.ok) {
-    updateError.value = result.error.message
+  try {
+    const result = await window.docvi.appUpdateInstall()
+    if (!result.ok) {
+      updateError.value = result.error.message
+      updateFlow.value = { ...updateFlow.value, phase: 'ready' }
+    }
+  } catch (error) {
+    // 同 downloadUpdate：invoke 失败也要有出口，否则界面永远停在「正在安装」
+    updateError.value = error instanceof Error ? error.message : String(error)
     updateFlow.value = { ...updateFlow.value, phase: 'ready' }
   }
 }
@@ -254,6 +276,15 @@ onMounted(() => {
   // 下载进度由主进程按 ~200ms 节流推送；渲染层只负责把它落进状态
   unsubscribeProgress = window.docvi.onUpdateProgress(progress => {
     const flow = updateFlow.value
+    /*
+     * 事件可能与「下载已结束」交叉到达：主进程先推 `ready`，紧接着
+     * `appUpdateDownload` 的返回值才落到 `downloadUpdate()` 里。若这里无条件
+     * 覆盖 phase，用户会看到状态在 ready / downloading 之间闪一下。
+     *
+     * 只有「还在流程里」时才接受推送；idle 表示这一轮已经收尾，迟到的进度
+     * 不该把它重新拉回进行中。
+     */
+    if (flow.phase === 'idle') return
     updateFlow.value = {
       phase: progress.phase,
       received: progress.received ?? flow.received,
@@ -990,9 +1021,13 @@ async function openLogs(): Promise<void> {
               >
                 {{ t('about.openDownload') }}
               </button>
-              <!-- 没有校验值 / 容器版：说明为什么只能手动下 -->
+              <!-- 没有可用资产时说明具体原因，别让用户对着「未提供校验值」猜 -->
               <span v-if="!canAutoUpdate" class="hint hint--inline">
-                {{ props.readonly ? t('about.webCannotUpdate') : t('about.noChecksum') }}
+                {{
+                  props.readonly
+                    ? t('about.webCannotUpdate')
+                    : (about.update.assetMissingReason ?? t('about.noChecksum'))
+                }}
               </span>
             </template>
           </div>
