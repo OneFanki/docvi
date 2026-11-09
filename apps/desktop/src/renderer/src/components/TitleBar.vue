@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Blocks, PanelLeft, PanelRight, Search, Server, Settings } from 'lucide-vue-next'
+import { onMounted, ref } from 'vue'
 
 import { useI18n } from '../lib/i18n'
 import { isWebHost } from '../lib/host'
@@ -40,6 +41,20 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+/**
+ * 是否为开发版（未打包）。
+ *
+ * 开发版与安装版的数据目录、单实例锁都已分开（见 main/dev-data.ts），两个窗口
+ * 可以同时开着；名字上也必须能区分，否则任务栏里是两个一模一样的「docvi」。
+ * 用 `packaged` 而不是去读环境变量：判据只有一个，就是 Electron 自己的结论。
+ */
+const devBuild = ref(false)
+onMounted(async () => {
+  if (isWebHost) return
+  const info = await window.docvi.appRuntimeInfo()
+  if (info.ok) devBuild.value = !info.data.packaged
+})
 </script>
 
 <template>
@@ -93,6 +108,7 @@ const { t } = useI18n()
         </clipPath>
       </svg>
       <span class="titlebar__name">{{ t('app.name') }}</span>
+      <span v-if="devBuild" class="titlebar__dev">dev</span>
     </div>
 
     <div class="titlebar__spacer" />
@@ -244,6 +260,22 @@ const { t } = useI18n()
   font-weight: 600;
   letter-spacing: 0.2px;
   color: var(--dv-ui-text);
+}
+
+/*
+ * 开发版徽标：与安装版并排时唯一的名称差异。
+ *
+ * 刻意做小、做灰——它是给开发者认窗口用的，不是产品的一部分。
+ * 不放进 i18n：这是构建形态标记，不是需要翻译的界面文案。
+ */
+.titlebar__dev {
+  padding: 1px 5px;
+  border: 1px solid var(--dv-c-border);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--dv-ui-text-muted);
 }
 
 /*
