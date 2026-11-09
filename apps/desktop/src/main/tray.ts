@@ -28,10 +28,10 @@ export function markQuitting(): void {
 }
 
 function iconPath(): string {
-  // 打包后 build/icon.png 经 electron-builder 落到 resources 根
+  // 打包后 build/tray.png 经 electron-builder 落到 resources 根
   return app.isPackaged
-    ? join(process.resourcesPath, 'icon.png')
-    : join(app.getAppPath(), 'build/icon.png')
+    ? join(process.resourcesPath, 'tray.png')
+    : join(app.getAppPath(), 'build/tray.png')
 }
 
 export interface TrayOptions {
@@ -50,16 +50,25 @@ export interface TrayHandle {
 }
 
 export function createTray(options: TrayOptions): TrayHandle {
+  // 图标直接就用预生成的 32px 简化版，**不要再 resize 到 16**。
+  //
+  // Windows 托盘按 DPI 缩放给出实际槽位（100%→16px、150%→24px、200%→32px）。
+  // 以前从 1024 缩到 16 再交给系统放大到 24，是两次重采样：先丢掉一半信息，
+  // 再让系统用双线性插值猜回来——100% 缩放时看着还行，150% 屏幕上就明显发糊。
+  // 给 32px 让系统单次降采样，任何 DPI 档都只经历一次滤波。
+  // （32px 也是简化版：托盘最小档 16px 下正文短线只剩 0.75 像素，会糊成灰纹。）
   const image = nativeImage.createFromPath(iconPath())
-  // 空图标也能创建 Tray，但会显示成透明方块；宁可缩一个默认尺寸的占位
-  tray = new Tray(
-    image.isEmpty() ? nativeImage.createEmpty() : image.resize({ width: 16, height: 16 }),
-  )
-  tray.setToolTip('docvi')
+  tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image)
+  /*
+   * 用 `app.getName()` 而不是字面量 'docvi'：开发版叫 `docvi dev`，
+   * 与安装版并排显示时用户能一眼看出哪个是哪个（两者数据目录已隔离）。
+   */
+  const appLabel = app.getName()
+  tray.setToolTip(appLabel)
 
   const build = (): Menu =>
     Menu.buildFromTemplate([
-      { label: 'docvi', enabled: false },
+      { label: appLabel, enabled: false },
       { label: options.statusLabel(), enabled: false },
       { type: 'separator' },
       { label: '打开主窗口', click: options.show },
