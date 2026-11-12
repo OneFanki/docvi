@@ -34,7 +34,7 @@ const emit = defineEmits<{ close: [] }>()
 
 const viewportRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
-const closeRef = ref<HTMLButtonElement | null>(null)
+const rootRef = ref<HTMLElement | null>(null)
 const {
   percent,
   dragging,
@@ -42,6 +42,7 @@ const {
   fit: fitZoom,
   zoomBy,
   reset,
+  takeBackgroundClick,
 } = useZoomPan(viewportRef, contentRef, {
   min: 0.1,
   max: 8,
@@ -113,6 +114,20 @@ function close(): void {
   emit('close')
 }
 
+/**
+ * 点背景关闭的判定。
+ *
+ * 为什么不能用 `@click.self="close"`：`useZoomPan` 在 pointerdown 时会
+ * `setPointerCapture(viewport)`，捕获之后**所有** click 的 target 都变成 viewport
+ * ——哪怕手指按在 SVG 正中央。于是「双击图表」的第二下会命中 `.self`，
+ * 看图看一半图就关了（用户报的「拖拽两次比较快就被当成双击关掉」正是这条）。
+ *
+ * 真正的判据是手势起点：起点在内容上 = 不是点背景，一律不关。
+ */
+function onViewportClick(): void {
+  if (takeBackgroundClick()) close()
+}
+
 function onKeydown(event: KeyboardEvent): void {
   if (!props.open) return
   if (event.key === 'Escape') {
@@ -159,7 +174,17 @@ watch(
       pinSvgSize()
       await nextTick()
       fitZoom()
-      closeRef.value?.focus()
+      /*
+       * ⚠️ 焦点必须落在**容器**（tabindex="-1"）上，不能落在关闭按钮上。
+       *
+       * 落在按钮上时，空格与回车都会触发浏览器默认的按钮激活——用户在图上
+       * 按空格想拖动、或用键盘导航时，灯箱会「莫名其妙自己关掉」。这个现象
+       * 曾被误报成「文件变更导致全屏被关」，实测（probe-mermaid-lightbox-survive）
+       * 证明外部改盘 / 切主题 / resize / 点空白都不会关它，只有这一条会。
+       *
+       * 焦点仍在灯箱内：Esc 监听是 document 级的，Tab 也能走到各个按钮。
+       */
+      rootRef.value?.focus()
       return
     }
     document.removeEventListener('keydown', onKeydown)
@@ -178,10 +203,12 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   -->
   <div
     v-if="open && src"
+    ref="rootRef"
     class="lightbox doc-surface"
     role="dialog"
     aria-modal="true"
     :aria-label="title || '查看大图'"
+    tabindex="-1"
   >
     <header class="lightbox__head">
       <span class="lightbox__title">{{ title || '查看大图' }}</span>
@@ -196,7 +223,6 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
         下载 SVG
       </button>
       <button
-        ref="closeRef"
         type="button"
         class="lightbox__btn lightbox__btn--close"
         aria-label="关闭大图"
@@ -221,7 +247,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
       ref="viewportRef"
       class="lightbox__viewport"
       :class="{ 'is-dragging': dragging }"
-      @click.self="close"
+      @click="onViewportClick"
     >
       <!--
         SVG 的变换挂在 svg 自身（见 pinSvgSize 与 useZoomPan 顶部注释），

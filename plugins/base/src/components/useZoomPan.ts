@@ -59,6 +59,15 @@ export function useZoomPan(
   let originTy = 0
   let moved = false
   let suppressClick = false
+  /**
+   * 本次手势是否**起于空白处**（不是图表内容上）。
+   *
+   * 必须在这里记，不能在 click 里看 `event.target`：`onPointerDown` 会
+   * `setPointerCapture(viewport)`，一旦捕获，后续 click 的 target 恒为 viewport
+   * ——哪怕手指按在 SVG 正中央。只看 target 会把「双击图表」误判成「点空白」，
+   * 于是双击就把灯箱关掉了。
+   */
+  let startedOnBackground = false
   /** 用户是否手动调整过（手动调整后窗口 resize 不再自动回中） */
   let touched = false
 
@@ -212,6 +221,11 @@ export function useZoomPan(
     if (target?.closest('button, a, input, select, textarea, [role="tab"]')) return
     const viewport = viewportRef.value
     if (!viewport) return
+    /*
+     * 记下起手位置是否落在图表内容上——必须在 setPointerCapture 之前取，
+     * 抓到 viewport 之后 target 就永远是 viewport 了（见 startedOnBackground 注释）。
+     */
+    startedOnBackground = !target?.closest('.lightbox__content')
     lockSelection(true)
     pointerId = event.pointerId
     startX = event.clientX
@@ -255,6 +269,22 @@ export function useZoomPan(
     suppressClick = false
     event.stopPropagation()
     event.preventDefault()
+  }
+
+  /**
+   * 这次 click 是否算「点了背景空白」——灯箱据此决定要不要关闭。
+   *
+   * 为什么不能直接用 `@click.self`：指针捕获把 click 的 target 变成了 viewport，
+   * 双击图表时的第二次 click 会命中 `.self`，表现为「双击看图就关了」。
+   * 真正的判据是**手势起点**落在哪（startedOnBackground），以及有没有拖动过。
+   *
+   * 消费即清除：一次手势只回答一次。
+   */
+  function takeBackgroundClick(): boolean {
+    const isBackground = startedOnBackground && !moved
+    startedOnBackground = false
+    moved = false
+    return isBackground
   }
 
   let resizeObserver: ResizeObserver | null = null
@@ -336,5 +366,17 @@ export function useZoomPan(
 
   onBeforeUnmount(unbind)
 
-  return { scale, percent, dragging, style, reset, fit, zoomBy, zoomAt, panTo }
+  return {
+    scale,
+    percent,
+    dragging,
+    style,
+    reset,
+    fit,
+    zoomBy,
+    zoomAt,
+    panTo,
+    /** 灯箱用：这次 click 是否该被当成「点了背景」而关闭 */
+    takeBackgroundClick,
+  }
 }
