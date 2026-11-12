@@ -526,6 +526,61 @@ test('instructions：默认工作区被描述成兜底，优先级在明确指�
   )
 })
 
+test('instructions：标准 Markdown 排在最前，自定义组件带可移植性限制', async () => {
+  /*
+   * 防「AI 写任何文档都先套组件」（ADR-0006）。
+   * 这里钉住的是**顺序**与**限制声明**两件事，不是具体措辞：
+   *  - 标准 Markdown 必须出现在组件之前——第一条指令决定行为惯性；
+   *  - 提组件时必须同时说明「只有本平台能渲染」，否则 AI 会把它当成 GFM 同级别能力。
+   */
+  const { deps } = makeDeps()
+  const init = await call(deps, { jsonrpc: '2.0', id: 40, method: 'initialize' })
+  const text = init.body.result.instructions
+
+  assert.match(text, /标准 Markdown/, '必须明确把标准 Markdown 作为默认写法')
+  assert.match(text, /mermaid/, '必须指出 mermaid 是推荐通道')
+
+  const markdownAt = text.indexOf('标准 Markdown')
+  const componentsAt = text.indexOf('list_components')
+  assert.ok(componentsAt > 0, '组件能力仍须暴露，不能藏起来')
+  assert.ok(markdownAt < componentsAt, '标准 Markdown 必须排在组件之前（措辞顺序即优先级）')
+
+  assert.match(text, /只有 docvi/, '必须说明组件只在 docvi/本平台渲染')
+  assert.match(text, /裸标签|语义丢失/, '必须说明离开平台后的退化形态')
+  assert.match(text, /默认不要用/, '必须给出默认取舍，而不是让 AI 自己猜')
+})
+
+test('list_components：返回文本自带可移植性限制，不只列清单', async () => {
+  /*
+   * AI 可能跳过 instructions 直接调工具，所以清单本身也必须带限制声明。
+   * 断言「限制声明」而非「与 instructions 用同一串字」——两处文案可以各自演化。
+   */
+  const { deps } = makeDeps()
+  const { body } = await call(deps, {
+    jsonrpc: '2.0',
+    id: 41,
+    method: 'tools/call',
+    params: { name: 'list_components', arguments: {} },
+  })
+  const text = body.result.content[0].text
+  assert.match(text, /不是通用 Markdown|不属于通用 Markdown/)
+  assert.match(text, /只有.*docvi|只有.*本平台/)
+  assert.ok(text.includes('flow-diagram'), '清单内容本身不能被限制声明挤掉')
+})
+
+test('get_component_docs：用法文档头部也带可移植性限制', async () => {
+  const { deps } = makeDeps()
+  const { body } = await call(deps, {
+    jsonrpc: '2.0',
+    id: 42,
+    method: 'tools/call',
+    params: { name: 'get_component_docs', arguments: { kind: 'flow-diagram' } },
+  })
+  const text = body.result.content[0].text
+  assert.match(text, /不是通用 Markdown|不属于通用 Markdown/)
+  assert.ok(text.includes('# 用法'), '原始用法文档必须原样保留')
+})
+
 test('list_workspaces：标出默认落笔处，并复述优先级', async () => {
   const { deps } = makeDeps()
   const res = await call(deps, {

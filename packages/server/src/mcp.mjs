@@ -90,6 +90,19 @@ function toolListPlugins(_args, deps) {
   return `已启用插件包 ${plugins.length} 个：\n\n${lines.join('\n')}`
 }
 
+/**
+ * 组件清单的可移植性声明。
+ *
+ * 只列清单而不说明限制，AI 会把它当成和 GFM 表格同一级别的能力——实际上
+ * 标签离开本平台就是裸文本。这句必须出现在**每一处**组件清单的返回里，
+ * 因为 AI 可能跳过 instructions 直接调工具。
+ */
+const COMPONENT_PORTABILITY_NOTE =
+  '⚠️ 这些是 docvi 专有的自定义渲染组件（<at-kind data-key="键"> + frontmatter components 段），' +
+  '不属于通用 Markdown：只有在 docvi / 本平台内才能渲染，文档离开后（GitHub、飞书、其它编辑器）' +
+  '只剩裸标签、语义丢失。默认优先用标准 Markdown（GFM 表格 / ```mermaid 围栏 / ::: 容器）；' +
+  '仅当用户明确需要交互式视图，或续写已在用该写法的文档时才使用。'
+
 /** list_components：活跃组件清单（本地化字段按 zh → en → 首值解析；kind 永不翻译） */
 function toolListComponents(_args, deps) {
   const components = deps.listComponents() ?? []
@@ -98,7 +111,10 @@ function toolListComponents(_args, deps) {
     item =>
       `- ${item.kind} ｜ ${lz(item.title) || item.kind} ｜ ${lz(item.description)} ｜ 插件：${item.plugin}`,
   )
-  return `活跃组件 ${components.length} 个（每个 kind 至多一条活跃实现；用法经 get_component_docs(kind) 获取）：\n\n${lines.join('\n')}`
+  return (
+    `${COMPONENT_PORTABILITY_NOTE}\n\n` +
+    `活跃组件 ${components.length} 个（每个 kind 至多一条活跃实现；用法经 get_component_docs(kind) 获取）：\n\n${lines.join('\n')}`
+  )
 }
 
 /** get_component_docs：头部一行（kind/title/plugin）+ 所属插件 docs/SKILL.md 全文 */
@@ -112,7 +128,10 @@ function toolGetComponentDocs(args, deps) {
   if (typeof docs !== 'string' || !docs) {
     return `组件 ${kind}（插件 ${active.plugin}）的用法文档缺失：包内 docs/SKILL.md 不存在或不可读。`
   }
-  return `kind: ${kind} ｜ title: ${lz(active.title) || kind} ｜ plugin: ${active.plugin}\n\n${docs}`
+  return (
+    `kind: ${kind} ｜ title: ${lz(active.title) || kind} ｜ plugin: ${active.plugin}\n\n` +
+    `${COMPONENT_PORTABILITY_NOTE}\n\n${docs}`
+  )
 }
 
 /** get_plugin_docs：插件 docs/SKILL.md 全文（仅已启用插件——与活查询口径一致） */
@@ -216,14 +235,14 @@ const TOOLS = [
   {
     name: 'list_components',
     description:
-      '列出全部活跃组件（kind / title / description / 所属插件；停用插件与同名冲突落选者不出现）。何时用：写文档前先看有哪些组件、各做什么。',
+      '列出全部活跃组件（kind / title / description / 所属插件；停用插件与同名冲突落选者不出现）。这些是 docvi 专有的自定义渲染组件，不是通用 Markdown——离开本平台只剩裸标签。何时用：用户明确要求交互式视图、或续写已在用该写法的文档时，先看有哪些组件可选。写普通文档不需要调用。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     handler: toolListComponents,
   },
   {
     name: 'get_component_docs',
     description:
-      '获取某个组件的用法文档（所属插件 docs/SKILL.md 全文 + kind/title/plugin 头部）。何时用：选定 kind 后、写 <at-kind> 标签前获取数据格式。',
+      '获取某个组件的用法文档（所属插件 docs/SKILL.md 全文 + kind/title/plugin 头部）。何时用：确定要用某个自定义组件后、写 <at-kind> 标签前获取数据格式。写标准 Markdown 时不需要。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -341,13 +360,17 @@ function publicSpec(tool) {
 }
 
 /**
- * initialize 的 instructions：连接即获知工作流（看组件 → 看写法 → 查存量 → 写）。
+ * initialize 的 instructions：连接即获知工作流（写标准 Markdown → 查存量 → 写）。
  *
- * 写入这一句刻意把「默认工作区」定位成**兜底**而不是首选：用户或项目规范
- * 已经指明位置时必须遵循——兜底只解决「完全没线索」的情形，不能覆盖明确指令。
- * 这段文本会被 AI 直接读进上下文，措辞的顺序即优先级。
+ * 这段文本会被 AI 直接读进上下文，**措辞的顺序即优先级**，所以两条顺序都是刻意的：
+ *
+ *  - 表达方式：默认用原生 Markdown / mermaid / 容器；自定义组件排在后面，并当场
+ *    说明「只有 docvi 能渲染」。组件本身不删也不藏，但绝不能排在第一位——AI 读到的
+ *    第一条指令会变成行为惯性，排在最前的「先看组件」会让它给一篇周报也套组件。
+ *  - 落笔位置：默认工作区是**兜底**而不是首选，用户或项目规范已指明位置时必须遵循。
  */
 function instructionsOf(deps) {
+  const canComponents = typeof deps.listComponents === 'function'
   const canRead =
     typeof deps.searchDocs === 'function' && typeof deps.readDoc === 'function'
       ? '写文档前用 search_docs 检索既有内容，用 read_doc 读全文（path 用检索结果里的路径）。'
@@ -360,11 +383,19 @@ function instructionsOf(deps) {
         '后者是兜底——只在完全没有线索时用，不要因为它方便就绕过用户说过的位置。' +
         '不确定有哪些工作区时先调 list_workspaces。不提供删除。'
       : ''
+  const optionalComponents = canComponents
+    ? '此外平台还提供一套自定义渲染组件（list_components 可见、get_component_docs(kind) 取写法）：' +
+      '它们不是通用 Markdown，而是 docvi 专有的 <at-kind data-key="键"> 标签 + frontmatter 数据段，' +
+      '**只有 docvi / 本平台能渲染**——文档离开后（GitHub、飞书、其它编辑器）只剩裸标签，语义丢失。' +
+      '默认不要用；仅当用户明确要求交互式视图（可点选、步进高亮、字段级连线等），或已在用该写法的文档需要续写时才用，' +
+      '并主动告知这个可移植性限制。'
+    : ''
   return (
-    '先 list_components 查看可用组件（kind 即文档标签名 at-<kind>），再 get_component_docs(kind) 获取写法。' +
+    '写文档默认使用标准 Markdown：GFM 表格与任务清单、```mermaid 围栏（流程 / 时序 / 状态 / 表关系）、::: tip 类容器、frontmatter。' +
+    '这类写法在任何渲染器里都能读，最坏情况只是退化而不是失去语义。' +
+    optionalComponents +
     canRead +
-    canWrite +
-    '文档写法：frontmatter 的 components 段放数据，正文用 <at-kind data-key="键"> 引用。'
+    canWrite
   )
 }
 
