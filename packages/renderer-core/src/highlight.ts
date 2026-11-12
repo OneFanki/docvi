@@ -167,6 +167,14 @@ export async function highlightPass(root: HTMLElement): Promise<void> {
   for (const codeEl of Array.from(placeholders)) {
     const wrapper = codeEl.closest<HTMLElement>('div[class*="language-"]')
     if (!wrapper || wrapper.dataset.highlighted) continue
+    /*
+     * ASCII 图必须跳过：它们的 `<code>` 里已经是渲染管线生成的定宽 span
+     * （见 ascii-align.ts），而高亮是「读 textContent → 重建 HTML」，
+     * 跑一遍会把那些 span 全部丢掉，对齐随之失效。
+     *
+     * 判据用 `data-ascii` 而不是语言名——将来若对别的语言也开对齐，这里不用改。
+     */
+    if (wrapper.dataset.ascii) continue
     const lang = (/language-([\w-]+)/.exec(wrapper.className)?.[1] ?? 'text').toLowerCase()
     const code = codeEl.textContent ?? ''
     wrapper.dataset.highlighted = '1'

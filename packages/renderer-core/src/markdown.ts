@@ -15,6 +15,7 @@ import container from 'markdown-it-container'
 import { parse as parseYaml } from 'yaml'
 
 import { colorLiteral } from './color-literal.ts'
+import { alignAsciiBlock, needsAsciiAlignment } from './ascii-align.ts'
 import { findPluginBlocks, type PluginSyntaxDeclaration } from './plugin-blocks.ts'
 
 export interface Frontmatter {
@@ -596,15 +597,33 @@ function createMarkdownIt(ctx: BuildContext): MarkdownItInstance {
   md.renderer.rules.fence = (tokens, idx) => {
     const token = tokens[idx]
     if (!token) return ''
-    const lang = (token.info.trim().split(/\s+/)[0] || 'text').toLowerCase()
+    const info = token.info.trim().split(/\s+/)[0] ?? ''
+    const lang = (info || 'text').toLowerCase()
     const code = token.content
     if (lang === 'mermaid') {
       return `<pre class="at-mermaid-src" data-mermaid${lineAttr(token)}>${escapeHtml(code)}</pre>\n`
     }
+    /*
+     * 语言标签只在真的说明了什么时才显示。
+     *
+     * `text` 是「未标注语言」的落地值，被它标出来等于把实现细节写进正文；
+     * 全库 42 处 `text` 围栏全是终端输出 / 目录树 / 协议报文，那些内容也不需要
+     * 语言徽标。纯未标注围栏（``` 后面什么都不写）同样不显示。
+     */
+    const showLang = Boolean(info) && lang !== 'text'
+    /*
+     * ASCII 图：含制表符 + 中英混排时，把宽字符锁成 2ch。
+     *
+     * 不做这层的后果是框线必然错位——等宽字体里汉字只有 1.707 个 ASCII 宽度
+     * （实测），每行几十个汉字就累积成十几个格的偏移。详见 ascii-align.ts。
+     */
+    const aligned = needsAsciiAlignment(code)
+    const body = aligned ? alignAsciiBlock(code) : escapeHtml(code)
     return (
-      `<div class="language-${escapeHtml(lang)}"${lineAttr(token)}><button class="at-copy" aria-label="复制代码"></button>` +
-      `<span class="lang">${escapeHtml(lang)}</span>` +
-      `<pre v-pre><code>${escapeHtml(code)}</code></pre></div>\n`
+      `<div class="language-${escapeHtml(lang)}"${lineAttr(token)}` +
+      `${aligned ? ' data-ascii="1"' : ''}><button class="at-copy" aria-label="复制代码"></button>` +
+      (showLang ? `<span class="lang">${escapeHtml(lang)}</span>` : '') +
+      `<pre v-pre><code>${body}</code></pre></div>\n`
     )
   }
 

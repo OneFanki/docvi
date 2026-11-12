@@ -426,6 +426,10 @@
 .at-doc [class*='language-'] .at-copy {
   position: absolute;
   top: 4px;
+  /*
+   * 默认右移 42px，给右上角的语言标签让位。
+   * 没有标签的块（`text` / 未标注语言）由下面那条 :has() 收回到贴右。
+   */
   right: 42px;
   width: 28px;
   height: 28px;
@@ -444,6 +448,15 @@
 
 .at-doc [class*='language-']:hover .at-copy {
   opacity: 1;
+}
+
+/*
+ * 没有语言标签的代码块（`text` 与未标注围栏）：复制按钮直接贴右。
+ *
+ * 不收回的话按钮会停在离右边 42px 的位置，右侧留一块空白，看起来像少了个元素。
+ */
+.at-doc [class*='language-']:not(:has(.lang)) .at-copy {
+  right: 12px;
 }
 
 .at-doc [class*='language-'] .at-copy:hover {
@@ -484,6 +497,33 @@
   display: block;
   width: max-content;
   min-width: 100%;
+}
+
+/*
+ * ASCII 图（框线与中英混排）的对齐锁定。
+ *
+ * 渲染管线判断「含制表符且含宽字符」后给容器打 `data-ascii`，并把每个宽字符包进
+ * `.at-ascii-w2`（见 ascii-align.ts）。宽度由 CSS 定死 2ch，与用户装没装等宽 CJK
+ * 字体无关——实测没有常见字体能同时满足「汉字 = 2ch」与「制表符 = 1ch」：微软雅黑
+ * 的汉字只有 1.707ch，而 Sarasa Mono 让制表符变成 2ch、框线反而断成两倍宽。
+ */
+.at-doc [data-ascii] pre code {
+  /* 图不能被折断：折行会毁掉框线结构，宁可横向滚动 */
+  white-space: pre;
+  /* 关掉连字：JetBrains Mono 之类的 == / -> 连字会把两格并成一格，破坏列对齐 */
+  font-variant-ligatures: none;
+  font-feature-settings:
+    'liga' 0,
+    'calt' 0;
+}
+
+.at-doc .at-ascii-w2 {
+  display: inline-block;
+  width: 2ch;
+  text-align: center;
+  /* 个别 Emoji 比 2ch 还宽，压缩而不是撑破整行 */
+  overflow: hidden;
+  vertical-align: top;
 }
 
 .at-doc .shiki .line {
