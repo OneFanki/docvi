@@ -471,9 +471,20 @@ function registerProtocol(
 }
 
 app.on('second-instance', (_event, argv) => {
-  if (!mainWindow) return
-  if (mainWindow.isMinimized()) mainWindow.restore()
-  mainWindow.focus()
+  /*
+   * ⚠️ 不能 `if (!mainWindow) return`。
+   *
+   * 第二次启动可能在主进程还没走到 `createWindow()` 时到达（启动早期，窗口尚在
+   * 初始化）。早先这里直接 return，那次「双击文件打开」就被静默吞掉——用户看到
+   * 应用起来了，但打开的不是他点的那个文件。
+   *
+   * 正确做法：路径先进队列（`openPath` 内部先 push 再尝试 flush），窗口此刻不存在
+   * 也没关系——渲染进程挂载后会主动拉 `appPendingPaths` 取走。
+   */
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+  }
   for (const path of markdownArgs(argv)) openPath(path)
 })
 
@@ -505,6 +516,31 @@ app.whenReady().then(() => {
   const localAssets = createLocalAssetRegistry()
 
   registerProtocol(plugins, workspaces, localAssets)
+
+  /*
+   * 命令行带文件启动（双击 .md / 从终端打开）必须在建窗**之前**入队：
+   * `openPath` 会尝试 flush，但那一刻窗口还没有、渲染进程也没就绪，flush 会
+   * 直接返回；靠的就是渲染进程挂载后主动拉取这份队列（`appPendingPaths`）。
+   */
+  const initialPaths = markdownArgs(process.argv)
+  if (initialPaths.length) pendingPaths.push(...initialPaths)
+
+  /*
+   * 窗口在这里就创建，而不是等下面全部初始化完。
+   *
+   * 为什么能提前：窗口本身只依赖 `windowAppearance`（从 settings 同步读的一次）
+   * 与已注册的 `docvi://` 协议；而下面那些步骤（文件监视器、设置存储、默认工作区
+   * 播种、服务桥、IPC 注册）彼此独立，且全是**同步磁盘 IO**（插件目录扫描、
+   * 工作区表与设置文件的 readFileSync）。原先它们在 `createWindow()` 之前串行
+   * 跑完，期间窗口还不存在——用户看到的是「点了文件，应用半天没反应」。
+   *
+   * 提前之后，渲染进程的加载与这些初始化并行，窗口能更早出现。协议必须已经注册
+   * （上面那行），否则页面首次请求 `docvi://app/index.html` 会 404 白屏。
+   *
+   * IPC handler 晚于窗口创建注册是安全的：渲染进程要等 preload 与页面脚本就绪
+   * 才会发消息，而它拉取的第一个东西（`appPendingPaths`）在下面同步注册完毕。
+   */
+  createWindow()
 
   const watcher = createFileWatcher(
     path => {
@@ -687,10 +723,6 @@ app.whenReady().then(() => {
 
   // 「待打开队列」只在主进程有状态，直接在这里挂 handler，避免 ipc.ts 反向依赖入口
   ipcMain.handle(IPC.appPendingPaths, () => ({ ok: true, data: takePendingPaths() }))
-
-  const initialPaths = markdownArgs(process.argv)
-  if (initialPaths.length) pendingPaths.push(...initialPaths)
-  createWindow()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
