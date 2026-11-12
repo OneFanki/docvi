@@ -7,6 +7,7 @@ description: 改 at-* 声明式协议、frontmatter components 段、组件运�
 
 ## 结论
 
+- **默认写通用 Markdown**（ADR-0006）：GFM 表格 / 任务清单、```mermaid 围栏、`::: tip` 容器。自定义组件是「只有 docvi 能渲染」的可选项，不是首选。
 - **业务零 JS**：作者只在 frontmatter 写 `components` 段 + 正文写 `<at-组件名 data-key="键">`，数据经 `data-key` 关联。禁止要求文档作者写脚本。
 - **运行时分层**：`packages/renderer-core` 负责扫描结构化块与挂载点（`plugin-blocks.ts` / `components.ts`）；`apps/desktop/src/renderer/src/lib/component-registry.ts` 按 kind 建注册表；插件包只导出组件定义（`plugins/*/src/index.ts`）。
 - **协议 v1 向后兼容**：字段只增不删；v1.1 新增的本地化字段（`LocalizedText`）与 `example` 均为可选。
@@ -32,17 +33,25 @@ description: 改 at-* 声明式协议、frontmatter components 段、组件运�
 5. `courses/component-showcase`（活样例，必须能打开）
 6. 插件包 `docs/SKILL.md`（MCP `get_plugin_docs` 的数据源）
 
-## 图表达选型（mermaid vs 声明式组件）
+## 表达方式选型（mermaid / 原生语法 vs 自定义组件）
 
-两者互补而非竞争，按内容形态分流（AI 生成文档时同规则）：
+**默认用通用写法，组件是带代价的可选项**（ADR-0006）。判据只有一条：这段内容离开 docvi 之后还要不要能读。
 
-| 内容形态                                          | 用什么                              |
-| ------------------------------------------------- | ----------------------------------- |
-| 任意拓扑 / subgraph / 大节点数 / 一次性说明       | mermaid fence（表达广度通道）       |
-| 时序需要**步进叙事**（上一步/下一步、当前步高亮） | `at-message-flow`                   |
-| 表关系的正式表达（连线锚定到字段行、悬停联动）    | `at-table-graph`                    |
-| 流程 / 状态需要 `current` 高亮、点击下钻说明      | `at-flow-diagram` / `at-state-flow` |
-| 快速小规模表关系（草稿级、无需字段级锚定）        | mermaid `erDiagram` 亦可            |
+| 内容形态                                   | 用什么                                    | 理由                                     |
+| ------------------------------------------ | ----------------------------------------- | ---------------------------------------- |
+| 流程 / 时序 / 状态机 / 表关系 / 任意拓扑   | ```mermaid 围栏                           | 外部标准语法，GitHub、飞书、VS Code 都认 |
+| 表格、清单、步骤、术语                     | GFM 表格 / 任务清单 / 加粗段首            | 原生语法，退化后仍完整                   |
+| 提示、警告、折叠                           | `::: tip` 等容器 / `details`              | 退化后是普通引用块，语义仍在             |
+| 需要交互（点选、步进高亮、字段级连线锚定） | 自定义组件                                | 原生语法给不了，**但只有 docvi 能渲染**  |
+| 需要任意的图形 / 动效（画板级）            | HTML 岛（独立 `.html` 文件 + `src` 引用） | 独立文件本身可移植，双击就能看           |
+
+**自定义组件的可移植性代价（选它之前必须知道）**：数据放 frontmatter `components` 段、正文写 `<at-kind data-key="键">`。
+标签离开 docvi / 本平台后是裸文本——GitHub、飞书、语雀、VS Code 预览全部无法渲染，语义直接丢失。
+因此：
+
+- 写普通文档**不用**组件，用户的诉求通常是「写清楚」，不是「要交互」；
+- 用户明确要求交互式视图、或续写已经在用该写法的存量文档时才用；
+- 用了就主动告知这个限制，不要默默把文档锁进单一工具。
 
 mermaid 的观感与交互由宿主统一负责：配色走 `--dv-mermaid-*` 派生变量（跟随文档主题，插件主题包可覆盖），hover 联动由 `packages/renderer-core/src/mermaid-hover.ts` 注入——作者写裸 mermaid fence 即可，不需要装饰。
 

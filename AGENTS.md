@@ -102,26 +102,27 @@ docvi 把任意 Markdown 目录变成**可浏览 / 可搜索 / 可交互**的文
 
 ## 按任务读取
 
-| 任务                                       | 必读                                                                                                   |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| 了解项目全貌 / 新人上手                    | `docs/project/OVERVIEW.md`；`README.md`                                                                |
-| 改目录结构、加包、跨包引用                 | `docs/engineering/目录结构.md`；`docs/architecture/adr/`                                               |
-| 改内容根配置 / 索引生成                    | skill `content-model`；`scripts/lib/docs-core.mjs`                                                     |
-| 改容器宿主适配 / SPA 路由                  | `apps/desktop/src/renderer/src/lib/web-host.ts`、`web-router.ts`                                       |
-| 改 Markdown 渲染、代码高亮、图示           | skill `markdown-rendering`                                                                             |
-| 改组件声明式协议 / `<at-*>` 标签           | skill `component-protocol`；`docs/architecture/组件协议.md`                                            |
-| 新增或改插件包                             | skill `plugin-development`；`docs/design/平台插件化与 AI 分发.md`                                      |
-| 改容器部署器 / 运维 API                    | skill `deployer-ops`                                                                                   |
-| 改 Electron 宿主 / 桌面能力                | `apps/desktop/src/main/`；`docs/design/docvi目标架构与实施总案.md`                                     |
-| 改主题令牌 / 新增内置主题                  | `packages/renderer-core/src/styles/theme.css`；`apps/desktop/src/renderer/src/lib/theme-options.ts`    |
-| 改插件市场清单 / 安装来源                  | `plugins/market.json`；`apps/desktop/src/main/plugin-market.ts`                                        |
-| 改容器读者面能力（分支/运维/MCP/本地预览） | `apps/desktop/src/renderer/src/lib/web-host.ts`、`components/BranchPicker.vue`、`lib/local-preview.ts` |
-| 改关于面板 / 检查更新                      | `apps/desktop/src/main/update.ts`、`version.ts`；`components/SettingsView.vue`                         |
-| 写功能设计（PRD / 方案）                   | `docs/engineering/文档模板.md`                                                                         |
-| 新建或重建 feature 文档                    | `docs/engineering/文档模板.md`、`docs/engineering/文档规范.md`                                         |
-| 写契约测试 / 门禁脚本                      | `docs/engineering/契约测试规范.md`                                                                     |
-| 遇到报错、现象诡异                         | `docs/engineering/踩坑库.md`                                                                           |
-| 新建 / 修改项目 skill                      | `.agents/skills/skill-governance/SKILL.md`                                                             |
+| 任务                                          | 必读                                                                                                   |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 了解项目全貌 / 新人上手                       | `docs/project/OVERVIEW.md`；`README.md`                                                                |
+| 改目录结构、加包、跨包引用                    | `docs/engineering/目录结构.md`；`docs/architecture/adr/`                                               |
+| 改内容根配置 / 索引生成                       | skill `content-model`；`scripts/lib/docs-core.mjs`                                                     |
+| 改容器宿主适配 / SPA 路由                     | `apps/desktop/src/renderer/src/lib/web-host.ts`、`web-router.ts`                                       |
+| 改 Markdown 渲染、代码高亮、图示              | skill `markdown-rendering`                                                                             |
+| 决定文档该用什么表达（原生 / mermaid / 组件） | `docs/architecture/adr/0006-native-markdown-first.md`；skill `component-protocol`                      |
+| 改组件声明式协议 / `<at-*>` 标签              | skill `component-protocol`；`docs/architecture/组件协议.md`                                            |
+| 新增或改插件包                                | skill `plugin-development`；`docs/design/平台插件化与 AI 分发.md`                                      |
+| 改容器部署器 / 运维 API                       | skill `deployer-ops`                                                                                   |
+| 改 Electron 宿主 / 桌面能力                   | `apps/desktop/src/main/`；`docs/design/docvi目标架构与实施总案.md`                                     |
+| 改主题令牌 / 新增内置主题                     | `packages/renderer-core/src/styles/theme.css`；`apps/desktop/src/renderer/src/lib/theme-options.ts`    |
+| 改插件市场清单 / 安装来源                     | `plugins/market.json`；`apps/desktop/src/main/plugin-market.ts`                                        |
+| 改容器读者面能力（分支/运维/MCP/本地预览）    | `apps/desktop/src/renderer/src/lib/web-host.ts`、`components/BranchPicker.vue`、`lib/local-preview.ts` |
+| 改关于面板 / 检查更新                         | `apps/desktop/src/main/update.ts`、`version.ts`；`components/SettingsView.vue`                         |
+| 写功能设计（PRD / 方案）                      | `docs/engineering/文档模板.md`                                                                         |
+| 新建或重建 feature 文档                       | `docs/engineering/文档模板.md`、`docs/engineering/文档规范.md`                                         |
+| 写契约测试 / 门禁脚本                         | `docs/engineering/契约测试规范.md`                                                                     |
+| 遇到报错、现象诡异                            | `docs/engineering/踩坑库.md`                                                                           |
+| 新建 / 修改项目 skill                         | `.agents/skills/skill-governance/SKILL.md`                                                             |
 
 ## 技能沉淀规范
 

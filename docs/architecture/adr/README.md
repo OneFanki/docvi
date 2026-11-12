@@ -59,3 +59,4 @@
 | [0003](0003-single-server-implementation.md)    | 服务层单一实现（MCP / 分享 / 插件注册） | 已采纳 |
 | [0004](0004-docvi-architecture-rewrite.md)      | docvi 架构重构                          | 已采纳 |
 | [0005](0005-mcp-write-and-default-workspace.md) | MCP 写入能力与内建默认工作区            | 已采纳 |
+| [0006](0006-native-markdown-first.md)           | 原生 Markdown 优先，组件降级为可选表达  | 已采纳 |
