@@ -235,6 +235,8 @@ export interface CreateEditorOptions {
   onEditTable?: (payload: { from: number; to: number; source: string }) => void
   /** 点击图片块：宿主打开图片编辑弹窗 */
   onEditImage?: (payload: { from: number; to: number; source: string }) => void
+  /** 双击 mermaid 块：宿主打开源码弹窗（该块在预览里不随光标展开） */
+  onEditFence?: (payload: { from: number; to: number; source: string }) => void
   /**
    * 粘贴 / 拖入图片文件：宿主负责把文件落到磁盘并插入 Markdown。
    *
@@ -425,6 +427,7 @@ export function createEditor(options: CreateEditorOptions): EditorHandle {
       ...(options.assetPrefix ? { assetPrefix: options.assetPrefix } : {}),
       ...(options.onEditTable ? { onEditTable: options.onEditTable } : {}),
       ...(options.onEditImage ? { onEditImage: options.onEditImage } : {}),
+      ...(options.onEditFence ? { onEditFence: options.onEditFence } : {}),
     }),
     /*
      * 标题悬浮徽标只在实时预览出现：源码模式的承诺是「所见即文件」，

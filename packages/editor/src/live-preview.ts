@@ -60,6 +60,14 @@ export interface LivePreviewOptions {
   onEditTable?: (payload: { from: number; to: number; source: string }) => void
   /** 点击图片块：把源码区间交给宿主打开图片编辑弹窗 */
   onEditImage?: (payload: { from: number; to: number; source: string }) => void
+  /**
+   * 双击 mermaid 块：把源码区间交给宿主打开源码弹窗。
+   *
+   * mermaid 块在实时预览里**不随光标展开**（见 `staysRendered`），因为它的源码
+   * 与渲染结果高度差极大，展开会让整页跳一下。代价是块内无法直接编辑，
+   * 所以必须给出这条显式入口，否则就成了「只能看不能改」。
+   */
+  onEditFence?: (payload: { from: number; to: number; source: string }) => void
 }
 
 /* ---------- 块级 Widget：复用同一条渲染管线 ---------- */
@@ -514,47 +522,68 @@ function buildDecorations(
   }
 
   /*
-   * 块级替换：**保留光标守卫**。
+   * 块级替换：**保留光标守卫**，但对少数块豁免。
    *
    * 代码块 / 表格 / 组件卡片 / 插件容器一旦被块 Widget 覆盖，选区就没有可落脚的
    * 源码位置——光标进不来也就改不了。所以光标（或选区）与块区间相交时必须退回
    * 源码文本，这是能力边界。
    *
-   * 与行内标记的区别：`#`、`**` 这类标记只是**视觉噪音**，藏掉之后光标仍能落在
-   * 行内、Backspace 仍能改写原文；块级结构不是噪音，藏掉就没了编辑入口。
-   * 两者用同一个 hide() 处理会造成「块内不可编辑」，用同一个 block() 处理会留下
-   * 「光标行冒出 `#`」，所以这里的分工必须继续存在。
+   * ⚠️ 例外：**表格与 mermaid 图不退回源码**（`staysRendered`）。
+   *
+   * 这两种块的源码形态与渲染形态**高度差极大**——一张 6 列表格的源码是几十行
+   * 对齐的竖线，渲染后是几行高；mermaid 围栏的源码是代码，渲染后是 SVG。光标
+   * 一旦落进去（上下方向键划过、点块边缘），整页会突然长出一大截再缩回去，
+   * 阅读位置被打断——而这类块本来也不适合逐字符改。
+   *
+   * 它们的编辑入口是另一条独立通道：
+   *  - 表格：点表格本体 → 打开表格编辑弹窗（`tableBlockClickHandler`）；
+   *  - mermaid：双击块 → 打开源码弹窗（`fenceBlockClickHandler`）。
+   * 所以撤掉「光标进入即展开」不会让它们变成不可编辑。
+   *
+   * 代价：光标进不去块内，用键盘在该块**内部**定位到某一行做不到——但这两类块
+   * 的「改某一行」本来就要走各自的弹窗，键盘停在块前面是合理语义。
    */
+  const staysRendered = (kind: string): boolean =>
+    kind === 'table' || kind === 'mermaid' || kind.toLowerCase() === 'mermaid'
+
   const block = (from: number, to: number, kind: string, source: string, extra?: string): void => {
-    if (rangeHasCursor(from, to)) return
+    const sticky = staysRendered(kind)
+    if (!sticky && rangeHasCursor(from, to)) return
     const startLine = doc.lineAt(from)
     const endLine = doc.lineAt(Math.max(from, to - 1))
     // 文档主题进指纹：主题切换会让块内配色变，指纹不变的话 CM6 会复用旧 DOM
     const theme = document.documentElement.dataset.theme ?? 'slate'
-    builder.push({
-      from: startLine.from,
-      to: endLine.to,
-      decoration: Decoration.replace({
-        block: true,
-        widget: new RenderedBlockWidget(
-          source,
-          kind,
-          fingerprint(kind, source, `${extra ?? ''}\u0001${theme}`),
-          frontmatterInfo?.data ?? null,
-          options.registry,
-          // 表格块的「编辑表格」按钮要能定位原文区间，位置在建立装饰时才知道
-          kind === 'table' && options.onEditTable
-            ? { from: startLine.from, to: endLine.to, onEdit: options.onEditTable }
-            : null,
-          options.containerSyntax ?? [],
-          options.docPath ?? 'live-preview.md',
-          options.assetPrefix,
-          kind === 'image' && options.onEditImage
-            ? { from: startLine.from, to: endLine.to, onEdit: options.onEditImage }
-            : null,
-        ),
-      }),
+    const decoration = Decoration.replace({
+      block: true,
+      widget: new RenderedBlockWidget(
+        source,
+        kind,
+        fingerprint(kind, source, `${extra ?? ''}\u0001${theme}`),
+        frontmatterInfo?.data ?? null,
+        options.registry,
+        // 表格块的「编辑表格」按钮要能定位原文区间，位置在建立装饰时才知道
+        kind === 'table' && options.onEditTable
+          ? { from: startLine.from, to: endLine.to, onEdit: options.onEditTable }
+          : null,
+        options.containerSyntax ?? [],
+        options.docPath ?? 'live-preview.md',
+        options.assetPrefix,
+        kind === 'image' && options.onEditImage
+          ? { from: startLine.from, to: endLine.to, onEdit: options.onEditImage }
+          : null,
+      ),
     })
+    const range = { from: startLine.from, to: endLine.to, decoration }
+    builder.push(range)
+    /*
+     * 不随光标展开的块必须同时登记为原子区间。
+     *
+     * `Decoration.replace` 只换显示，**光标仍然能落进被替换的区间**——那样虽然
+     * 块看起来还是渲染结果，但光标进去了、上下键会在块内部的源码行之间走，
+     * 用户无法通过视觉判断自己在哪。登记成 atomicRange 后光标从块两端跳过整块，
+     * 语义与「它是一张图/一张表」一致。
+     */
+    if (sticky) atoms.push(range)
   }
 
   /**
@@ -1060,7 +1089,57 @@ export function createLivePreview(options: LivePreviewOptions): Extension {
     frontmatterClickHandler(),
     taskBoxClickHandler(),
     tableBlockClickHandler(options),
+    fenceBlockClickHandler(options),
   ]
+}
+
+/**
+ * 双击 mermaid 块 = 打开源码弹窗。
+ *
+ * 为什么需要：mermaid 块在实时预览里不随光标展开源码（`staysRendered`），
+ * 否则源码与 SVG 的高度差会把整页顶一下。撤掉那条展开路径之后，块内就再也
+ * 落不到光标——没有显式入口的话它就成了只读的。
+ *
+ * 为什么是双击：单击是「把光标放到这一块附近继续写」，双击才是「我要改这张图」。
+ * 单击就让弹窗跳出来会打断正常写作（用户点空白想接着写，结果弹出编辑器）。
+ *
+ * 位置判定用 `posAtDOM` 反查块区间：mermaid 的 DOM 里没有可写 dataset 的位置
+ * （它由 renderer-core 生成，改不了模板），而围栏块本身是连续区间，反查足够准。
+ */
+function fenceBlockClickHandler(options: LivePreviewOptions): Extension {
+  return EditorView.domEventHandlers({
+    dblclick(event, view) {
+      const onEdit = options.onEditFence
+      if (!onEdit) return false
+      const target = event.target as HTMLElement | null
+      const wrapper = target?.closest<HTMLElement>('.cm-lp-block--mermaid')
+      if (!wrapper) return false
+      const pos = view.posAtDOM(wrapper, 0)
+      if (pos < 0) return false
+      const first = view.state.doc.lineAt(pos)
+      /*
+       * 从块起始行往下扫到配对的收尾围栏：围栏块一定以 ``` 开头、以 ``` 结束。
+       * 用「行文本以 ``` 开头」而不是「找下一个 nodeRange」，是因为 nodeRange
+       * 在这里拿到的可能是内层的代码文本节点，区间会短一截（少掉收尾围栏）。
+       */
+      let last = first.number
+      for (let n = first.number + 1; n <= view.state.doc.lines; n += 1) {
+        const text = view.state.doc.line(n).text
+        if (/^\s*```/.test(text)) {
+          last = n
+          break
+        }
+        last = n
+      }
+      const from = first.from
+      const to = view.state.doc.line(last).to
+      const source = view.state.doc.sliceString(from, to)
+      if (!source.includes('mermaid')) return false
+      event.preventDefault()
+      onEdit({ from, to, source })
+      return true
+    },
+  })
 }
 
 /**

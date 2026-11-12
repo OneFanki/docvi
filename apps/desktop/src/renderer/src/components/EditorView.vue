@@ -26,6 +26,7 @@ import SlashMenu from './SlashMenu.vue'
 import SelectionToolbar from './SelectionToolbar.vue'
 import TableEditorDialog from './TableEditorDialog.vue'
 import ImageEditorDialog from './ImageEditorDialog.vue'
+import SourceEditorDialog from './SourceEditorDialog.vue'
 
 /**
  * 编辑视图：CodeMirror 6 + Live Preview。
@@ -133,8 +134,21 @@ const imageEditor = ref<{
   preview: string | null
 }>({ open: false, source: '', from: 0, to: 0, preview: null })
 
+/**
+ * 源码弹窗：给实时预览里**不随光标展开**的块（目前是 mermaid）一个编辑入口。
+ * `from/to` 是块在文档里的区间，保存时整段替换。
+ */
+const sourceEditor = ref<{ open: boolean; source: string; from: number; to: number }>({
+  open: false,
+  source: '',
+  from: 0,
+  to: 0,
+})
+
 /** 任一模态弹窗打开时，斜杠菜单与气泡都要收起（否则会浮在弹窗下面） */
-const anyDialogOpen = computed(() => tableEditor.value.open || imageEditor.value.open)
+const anyDialogOpen = computed(
+  () => tableEditor.value.open || imageEditor.value.open || sourceEditor.value.open,
+)
 
 const slash = ref<SlashState | null>(null)
 /** Esc 关掉菜单后，直到斜杠被删掉之前不再弹；按 `/` 起点记，重新输入会重开 */
@@ -248,6 +262,23 @@ function openImageEditor(payload: { from: number; to: number; source: string }):
     to: payload.to,
     preview: resolvePreview(model.src),
   }
+}
+
+/**
+ * 双击 mermaid 块 = 打开源码弹窗。
+ *
+ * 这类块在实时预览里不随光标展开（源码与 SVG 高度差太大，展开会把整页顶一下），
+ * 所以块内没有可落脚的源码位置——没有这个入口就成了「只能看不能改」。
+ */
+function openSourceEditor(payload: { from: number; to: number; source: string }): void {
+  sourceEditor.value = { open: true, source: payload.source, from: payload.from, to: payload.to }
+}
+
+/** 整段替换围栏块；`replaceRange` 走事务，撤销栈与脏标记都由既有机制负责 */
+function saveSource(next: string): void {
+  const { from, to } = sourceEditor.value
+  sourceEditor.value.open = false
+  editor?.replaceRange(from, to, next)
 }
 
 /**
@@ -457,6 +488,7 @@ function mountEditor(): void {
     context: { onSlash: onSlash, onSelection: onSelection },
     onEditTable: openTableEditor,
     onEditImage: openImageEditor,
+    onEditFence: openSourceEditor,
     onImageFiles: (files, pos) => void importImages(files, pos),
     onChange: text => {
       documents.setText(props.absolutePath, text)
@@ -667,6 +699,14 @@ defineExpose({
       :doc-rel-path="props.docPath ?? record?.relPath ?? ''"
       @save="saveImage"
       @close="imageEditor.open = false"
+    />
+
+    <SourceEditorDialog
+      :open="sourceEditor.open"
+      :source="sourceEditor.source"
+      title="编辑 Mermaid 图"
+      @save="saveSource"
+      @close="sourceEditor.open = false"
     />
 
     <div v-if="conflictOpen" class="conflict">

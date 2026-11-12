@@ -51,7 +51,7 @@ test('样式始终生效（光标行不再跳过）', () => {
   assert.ok(!styleBody[1].includes('lineHasCursor'), 'style() 不得按光标行跳过样式')
 })
 
-test('块级替换仍保留光标守卫（否则块内无法编辑）', () => {
+test('块级替换仍保留光标守卫，豁免名单必须显式且最小', () => {
   const blockBody =
     /const block = \(from: number, to: number, kind: string, source: string, extra\?: string\): void => \{([\s\S]*?)\n {2}\}/.exec(
       source,
@@ -60,6 +60,40 @@ test('块级替换仍保留光标守卫（否则块内无法编辑）', () => {
   assert.ok(
     blockBody[1].includes('rangeHasCursor(from, to)'),
     '块级替换必须保留光标守卫——块被完全替换后没有可落脚的可编辑位置',
+  )
+
+  /*
+   * 表格与 mermaid 是**有意的例外**：它们的源码与渲染形态高度差极大，随光标展开
+   * 会让整页跳一下（ADR 之外的实践结论，见踩坑库）。豁免的前提是它们另有编辑
+   * 入口——表格点本体开网格编辑器，mermaid 双击开源码弹窗。
+   *
+   * 这里钉住两件事：① 豁免名单只有这两个；② 豁免的块必须同时登记 atoms。
+   * 只做 ① 不判 ②，会出现「块看着是渲染结果、光标却能在看不见的源码行里游走」。
+   */
+  const staysBody = /const staysRendered = \(kind: string\): boolean =>([\s\S]{0,300}?)\n\n/.exec(
+    source,
+  )
+  assert.ok(staysBody, '找不到 staysRendered 实现')
+  const allowed = ['table', 'mermaid']
+  for (const kind of allowed) {
+    assert.ok(staysBody[1].includes(kind), `${kind} 应在豁免名单内`)
+  }
+  // 除了 table / mermaid，不能再出现别的字面量（防止后人随手加第三个）
+  const literals = [...staysBody[1].matchAll(/'([a-z-]+)'/g)].map(m => m[1])
+  const extra = literals.filter(item => !allowed.includes(item))
+  assert.deepEqual(extra, [], `豁免名单只允许 table / mermaid，多出了：${extra.join(', ')}`)
+
+  assert.ok(blockBody[1].includes('atoms.push'), '不随光标展开的块必须登记原子区间')
+})
+
+test('mermaid 有显式编辑入口（双击开源码弹窗）', () => {
+  // 撤掉了随光标展开，就必须另给入口，否则块变成只读
+  assert.match(source, /onEditFence/, 'live-preview 必须提供 onEditFence 回调')
+  assert.match(source, /dblclick/, 'mermaid 块的编辑入口是双击')
+  assert.match(
+    source,
+    /cm-lp-block--mermaid/,
+    '双击处理器必须只认 mermaid 块，不能把普通代码块也接管',
   )
 })
 
