@@ -739,6 +739,17 @@ async function applyExternalChange(absolutePath: string): Promise<ExternalVerdic
 async function onExternalChange(absolutePath: string): Promise<void> {
   const active = activeRef.value
   const isVisible = active ? sameDocumentPath(active.absolutePath, absolutePath) : false
+  /*
+   * 与工作区级路径同一口径：重渲染前先记源行锚点，否则阅读态会被打回顶部
+   * （`ref.scrollY` 在外部改盘这条路径上没有更新过）。编辑态不记，理由同那里。
+   */
+  if (isVisible && !editing.value) {
+    leaveView(handoff, {
+      topLine: readerRef.value?.getTopLine() ?? 0,
+      scrollTop: readerRef.value?.getScroll() ?? 0,
+    })
+    touched()
+  }
   const verdict = await applyExternalChange(absolutePath)
   if (!isVisible) return
   if (verdict === 'adopted') showNotice(t('doc.externalAdopted', { name: active?.title ?? '' }))
@@ -798,12 +809,33 @@ async function onWorkspaceFilesChanged(change: WorkspaceFilesChange): Promise<vo
         missing.push(ref.title)
         continue
       }
+      const isVisible = activePath ? sameDocumentPath(activePath, record.absolutePath) : false
+      /*
+       * 可见文档即将重渲染：先把「正在看哪一行」记成锚点。
+       *
+       * 必须在 applyExternal **之前**取——那一步会替换正文并触发重渲染，之后再读
+       * DOM 拿到的已经是新排版后的滚动位置。
+       *
+       * 不记锚点的话，`onRendered` 只能退回 `ref.scrollY`；而那个值只在切标签时
+       * 写入，外部改盘这条路径上还是旧值（首次打开甚至为 0），于是每次文件变更
+       * 都表现为「文档跳回顶部」。源行是内容坐标，正文变了仍指向同一段内容，
+       * 是这里唯一正确的恢复依据。
+       *
+       * 编辑态不在此列：缓冲区有改动时 applyExternal 会判成 conflict 而不替换正文，
+       * 编辑器自己维持光标与滚动，抢着记锚点反而会在下次渲染时把它拽走。
+       */
+      if (isVisible && !editing.value) {
+        leaveView(handoff, {
+          topLine: readerRef.value?.getTopLine() ?? 0,
+          scrollTop: readerRef.value?.getScroll() ?? 0,
+        })
+        touched()
+      }
       const verdict = documents.applyExternal(record.absolutePath, {
         text: payload.text,
         mtime: payload.mtime,
         size: payload.size,
       })
-      const isVisible = activePath ? sameDocumentPath(activePath, record.absolutePath) : false
       if (!isVisible) continue
       /*
        * 只有可见文档才提示：
