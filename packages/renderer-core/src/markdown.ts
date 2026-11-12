@@ -263,6 +263,41 @@ function normalizeComponentSources(
 const CONTAINERS = ['tip', 'note', 'info', 'warning', 'danger'] as const
 
 /**
+ * 触发「表头吸顶 + 首列冻结」的列数门槛。
+ *
+ * 为什么是 7：真实内容里 7 列以上的表格有 610 行（占全部表格行 13%），而 6 列
+ * 及以下在 800px 阅读列里基本能装下、不需要横滑。开了 sticky 会额外占合成层，
+ * 窄表格没必要付这个成本。
+ */
+const WIDE_TABLE_COLUMNS = 7
+
+/**
+ * 数一张表有几列。
+ *
+ * 从 `table_open` 往后找第一个 `thead_open`，它紧接着的 `tr_open` 里 `th_open`
+ * 的个数就是列数。不用 `tr_open` 的 attr 或用分隔行数竖线——前者拿不到宽度信息，
+ * 后者要回读源码原文，而 token 流里已经有准确结构。
+ */
+function tableColumnCount(tokens: Token[], openIndex: number): number {
+  for (let i = openIndex + 1; i < tokens.length; i += 1) {
+    const token = tokens[i]
+    if (!token) break
+    if (token.type === 'table_close') break
+    if (token.type === 'th_open') {
+      // 走到表头第一个单元格：往回数这一行有多少个 th_open
+      let count = 0
+      for (let k = i; k < tokens.length; k += 1) {
+        const cell = tokens[k]
+        if (!cell || cell.type === 'tr_close' || cell.type === 'table_close') break
+        if (cell.type === 'th_open') count += 1
+      }
+      return count
+    }
+  }
+  return 0
+}
+
+/**
  * 把「段首加粗」升格为可扫读的标题块。
  *
  * 文档体系里有大量统一写法：`**术语**：定义…`、`**短语**。正文…`、
@@ -588,12 +623,23 @@ function createMarkdownIt(ctx: BuildContext): MarkdownItInstance {
     )
   }
 
-  // 表格：包一层滚动容器（5 列表格在窄阅读列里会把中文压成逐字竖排）
+  /*
+   * 表格：包一层滚动容器（5 列表格在窄阅读列里会把中文压成逐字竖排）。
+   *
+   * 列数 ≥ WIDE_TABLE_COLUMNS 时给 <table> 打 `data-wide`：doc.css 据此开启
+   * 「表头吸顶 + 首列冻结」。判据来自真实内容——全库 610 行表格在 7 列以上，
+   * 横向滚动是常态；列少时开了反而白占 z-index 与合成层，所以按列数分流。
+   */
   const defaultTableOpen =
     md.renderer.rules.table_open ??
     ((tokens, idx, options_, _env, self) => self.renderToken(tokens, idx, options_))
-  md.renderer.rules.table_open = (tokens, idx, options_, env, self) =>
-    `<div class="at-table-wrap">${defaultTableOpen(tokens, idx, options_, env, self)}`
+  md.renderer.rules.table_open = (tokens, idx, options_, env, self) => {
+    const token = tokens[idx]
+    if (token && tableColumnCount(tokens, idx) >= WIDE_TABLE_COLUMNS) {
+      token.attrJoin('data-wide', '')
+    }
+    return `<div class="at-table-wrap">${defaultTableOpen(tokens, idx, options_, env, self)}`
+  }
   const defaultTableClose =
     md.renderer.rules.table_close ??
     ((tokens, idx, options_, _env, self) => self.renderToken(tokens, idx, options_))

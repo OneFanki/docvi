@@ -279,8 +279,18 @@
 .at-table-wrap {
   max-width: 100%;
   margin: 16px 0;
+  /*
+   * ⚠️ 只能横向滚动，纵向必须是 visible —— 这是首列冻结能成立的前提。
+   *
+   * `position: sticky` 的滚动祖先 = 最近的、overflow 非 visible 的祖先。wrap 若
+   * 纵向也 auto，首列只会在 wrap 内部「粘」，而 wrap 本身不滚动 → 完全失效。
+   * 实测（scripts/dev/probe-wide-table.mjs）确认：纵向 auto 时首列随内容滚走。
+   */
   overflow-x: auto;
+  overflow-y: visible;
   scrollbar-width: thin;
+  /* 表格横滑到底时不要顺带把整页带着滚 */
+  overscroll-behavior-x: contain;
 }
 
 .at-doc table {
@@ -290,12 +300,21 @@
   font-size: 14.5px;
 }
 
+/*
+ * 列宽按内容分配，不再一刀切 min-width: 7rem。
+ *
+ * 原先每列都硬塞 7rem：5 列表格在 800px 阅读列里被撑到 560px 以上，短列
+ * （状态 / 类型 / 主键标记）白占半屏，长列（说明）反被挤成逐字竖排。
+ * 现在只给一个较小的下限，让浏览器按内容分配；总宽仍受阅读列限制，超了才横滑。
+ */
 .at-doc th,
 .at-doc td {
-  min-width: 7rem;
+  min-width: 4.5rem;
   border: 1px solid var(--dv-doc-border);
   padding: 8px 14px;
   text-align: left;
+  /* 长英文串（URL、类型签名）要能断行，否则把列撑爆 */
+  overflow-wrap: anywhere;
 }
 
 .at-doc th {
@@ -304,8 +323,71 @@
   white-space: nowrap;
 }
 
+/*
+ * 宽表格：首列冻结。
+ *
+ * 判据来自真实内容——全库 610 行表格在 7 列以上，横向滚动是常态；滚到右侧后
+ * 如果不知道自己在看哪一行，这张表就没法读了。`data-wide` 由渲染管线按列数
+ * 打上（见 markdown.ts 的 WIDE_TABLE_COLUMNS）。
+ *
+ * ⚠️ 表头吸顶在本结构下**做不到**，不要再试：
+ * 表头 sticky 要吸到阅读视图上沿，它的滚动祖先必须是 `.reader`；但首列冻结需要
+ * `.at-table-wrap` 横向 auto，而 `overflow-x: auto` 会把 `overflow-y` 一并算成
+ * auto（CSS 规范强制），wrap 就成了表头的滚动祖先——wrap 自身不滚动，表头跟着
+ * 正文一起滚走。两个 sticky 在同一 overflow 上下文里只能选一个，实测见
+ * `scripts/dev/probe-wide-table.mjs`。选首列，因为宽表格的核心痛点是「不知道
+ * 这是哪一行」，而不是「不知道这是哪一列」（列可数，行不可数）。
+ *
+ * ⚠️ 必须 `border-collapse: separate`：`collapse` 下 sticky 单元格的边框会跟着
+ * 滚走（Chrome 已知行为），表现为首列周围缺一条线。改用 separate +
+ * `border-spacing: 0`，再用「只画右下两条边」把重叠边框补回视觉上的单线。
+ */
+.at-doc table[data-wide] {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.at-doc table[data-wide] th,
+.at-doc table[data-wide] td {
+  border-width: 0 1px 1px 0;
+}
+
+/* 表格最左一列与最上一行要补回被裁掉的那两条边 */
+.at-doc table[data-wide] tr > :first-child {
+  border-left-width: 1px;
+}
+
+.at-doc table[data-wide] thead tr:first-child > th {
+  border-top-width: 1px;
+}
+
+/* 首列冻结；实底背景是必需的，否则横滑时后面的内容会从首列透出来 */
+.at-doc table[data-wide] tr > :first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--dv-doc-surface);
+  border-right: 1px solid var(--dv-doc-border);
+}
+
+/*
+ * 表头的首列既要是 sticky（跟着横向钉住）、又要盖住下面各行的冻结列。
+ * 两条规则都只针对 `th:first-child`，不会把其余表头一起变成 sticky。
+ */
+.at-doc table[data-wide] thead th:first-child {
+  z-index: 3;
+}
+
 .at-doc tbody tr:nth-child(2n) {
   background-color: color-mix(in srgb, var(--dv-doc-surface) 45%, transparent);
+}
+
+/*
+ * 斑马纹行的首列要跟着行底色走：冻结列若是统一实色，横滑后看不出自己在哪一行。
+ * 用同一个 color-mix 表达式重算，保证与上一行斑马纹结果一致。
+ */
+.at-doc table[data-wide] tbody tr:nth-child(2n) > :first-child {
+  background-color: color-mix(in srgb, var(--dv-doc-surface) 45%, var(--dv-doc-bg));
 }
 
 /* ---------- 行内代码 ---------- */
