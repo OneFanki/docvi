@@ -633,6 +633,17 @@ export function createWebHost(options: WebHostOptions = {}): DocviApi {
     async fsTrash() {
       return deny('容器版文档是只读的')
     },
+    /*
+     * 「在资源管理器打开」与「写系统文件剪贴板」都是纯本机桌面能力：
+     * 容器版没有磁盘、也没有系统剪贴板。契约上必须存在（渲染层只按 hostKind
+     * 决定入口显隐，不做方法存在性探测），所以实现为明确拒绝。
+     */
+    async fsRevealInFolder() {
+      return deny('容器版没有本地文件管理器')
+    },
+    async fsCopyToClipboard() {
+      return deny('容器版没有系统剪贴板')
+    },
 
     /*
      * 图片入库是写操作，容器读者面没有磁盘。契约上必须存在（渲染层只按

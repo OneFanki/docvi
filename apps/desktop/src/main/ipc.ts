@@ -30,8 +30,10 @@ import {
   probeWorkspace,
   readDoc,
   readStandaloneDoc,
+  resolveInside,
   scanTree,
 } from './content.ts'
+import { copyFilesToClipboard } from './fs-clipboard.ts'
 import { createGitService } from './git.mjs'
 import { exportDocument } from './export-doc.ts'
 import { clearDraft, readDraft, writeDoc, writeDraft } from './fs-write.ts'
@@ -516,6 +518,70 @@ export function registerIpc(
       return withWorkspace(workspaceId, (root: string) => copyEntry({ root }, relPath, targetDir))
     },
   )
+
+  /**
+   * 在系统文件管理器里定位条目（右键「在资源管理器中打开」）。
+   *
+   * 安全口径与其他 fs 操作一致：id + 相对路径，经 `resolveInside` 做 realpath
+   * containment。**不接受渲染层传绝对路径**——那等于给它一个任意路径的文件
+   * 管理器唤起能力，而它只需要操作已登记工作区里的内容。
+   *
+   * 目录：打开目录本身；文件：在父目录里选中它（Windows `showItemInFolder`，
+   * macOS 是 Finder 里选中，Linux 多数文件管理器表现为打开父目录）。
+   */
+  ipcMain.handle(IPC.fsRevealInFolder, (_event, workspaceId: unknown, relPath: unknown) => {
+    try {
+      if (typeof workspaceId !== 'string') return fail('E_INVALID', 'workspaceId 必须是字符串')
+      if (typeof relPath !== 'string' || !relPath) {
+        return fail('E_INVALID', 'relPath 必须是非空字符串')
+      }
+      const entry = store.find(workspaceId)
+      if (!entry) return fail('E_NOT_FOUND', '工作区不存在')
+      const target = resolveInside(entry.root, relPath)
+      if (statSync(target).isDirectory()) shell.openPath(target)
+      else shell.showItemInFolder(target)
+      return ok(null)
+    } catch (error) {
+      return toFailure(error)
+    }
+  })
+
+  /**
+   * 把工作区内的条目写进**系统剪贴板**（可粘贴到微信 / 资源管理器）。
+   *
+   * 为什么走主进程而不是渲染层：见 `fs-clipboard.ts` 头部——浏览器剪贴板承载
+   * 不了「文件引用」，只有 `text/uri-list` 才会被映射成平台原生的文件格式。
+   *
+   * 多选里某项被外部删掉时静默跳过（`copyFilesToClipboard` 只收存在的），
+   * 全都不存在才报错；这样「复制 3 个、其中一个刚被删」不会整次失败。
+   *
+   * 关于「剪切」：`text/uri-list` 不携带 copy/cut 语义（原生格式里有
+   * `Preferred DropEffect` 可以标，但那需要写自定义格式，新版 API 已不提供）。
+   * 因此这里只负责「把文件放进剪贴板」；应用内的剪切状态由渲染层自己维护，
+   * 真正的删除发生在树内粘贴时。向用户说明的是「已复制」而不是「已剪切」。
+   */
+  ipcMain.handle(IPC.fsCopyToClipboard, async (_event, workspaceId: unknown, relPaths: unknown) => {
+    try {
+      if (typeof workspaceId !== 'string') return fail('E_INVALID', 'workspaceId 必须是字符串')
+      if (!Array.isArray(relPaths) || !relPaths.length) {
+        return fail('E_INVALID', 'relPaths 必须是非空数组')
+      }
+      const entry = store.find(workspaceId)
+      if (!entry) return fail('E_NOT_FOUND', '工作区不存在')
+
+      const absolutePaths: string[] = []
+      for (const relPath of relPaths) {
+        if (typeof relPath !== 'string' || !relPath) continue
+        // 每个路径都过同一套 containment，不因为「反正要进剪贴板」就跳过
+        absolutePaths.push(resolveInside(entry.root, relPath))
+      }
+      const count = await copyFilesToClipboard(absolutePaths)
+      if (!count) return fail('E_NOT_FOUND', '所选条目都不存在')
+      return ok(null)
+    } catch (error) {
+      return toFailure(error)
+    }
+  })
 
   /**
    * 删除：优先送系统回收站。

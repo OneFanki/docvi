@@ -105,6 +105,10 @@ const menuItems = computed<MenuItem[]>(() => {
       separatorBefore: true,
     },
     { id: 'tab.copyPath', label: t('tabmenu.copyPath'), disabled: !hasDoc },
+    { id: 'tab.copyAbsolutePath', label: t('tabmenu.copyAbsolutePath'), disabled: !hasDoc },
+    { id: 'tab.revealInFolder', label: t('tabmenu.revealInFolder'), disabled: !hasDoc },
+    { id: 'tab.copyFile', label: t('tabmenu.copyFile'), disabled: !hasDoc },
+    { id: 'tab.cutFile', label: t('tabmenu.cutFile'), disabled: !hasDoc },
     { id: 'tab.settings', label: t('tabmenu.settings'), separatorBefore: true },
   ]
 })

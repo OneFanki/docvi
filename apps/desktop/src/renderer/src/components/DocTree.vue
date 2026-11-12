@@ -59,8 +59,28 @@ const emit = defineEmits<{
   fsAction: [action: TreeFsAction, paths: string[], dir: string]
 }>()
 
-/** 右键菜单里的文件操作；与 App 的 tree.* 命令一一对应 */
-export type TreeFsAction = 'newFile' | 'newDir' | 'rename' | 'cut' | 'copy' | 'paste' | 'trash'
+/**
+ * 右键菜单里的文件操作；与 App 的 tree.* 命令一一对应。
+ *
+ * `copyFile` / `cutFile` 与 `copy` / `cut` 不是一回事：
+ *  - `copy` / `cut` 是**应用内部**的剪贴板（Vue 内存里的路径列表），用于在树里粘贴；
+ *  - `copyFile` / `cutFile` 写的是**系统剪贴板**（Windows `CF_HDROP`），
+ *    目标是让用户能粘贴到微信 / 资源管理器 / 其它应用。
+ * 两者必须分开：内部剪贴板能表达「跨工作区 + 相对路径」，系统剪贴板只能携带
+ * 真实的绝对路径，语义不同，不能合流。
+ */
+export type TreeFsAction =
+  | 'newFile'
+  | 'newDir'
+  | 'rename'
+  | 'cut'
+  | 'copy'
+  | 'paste'
+  | 'trash'
+  | 'copyFile'
+  | 'cutFile'
+  | 'copyAbsolutePath'
+  | 'revealInFolder'
 
 const { t } = useI18n()
 
@@ -386,13 +406,26 @@ const menuItems = computed<MenuItem[]>(() => {
   const isDir = menu.value.isDir
   const single = menu.value.paths.length === 1
   const openItem = single && !isDir ? [{ id: 'tree.openNewTab', label: t('tree.openNewTab') }] : []
-  const copyPath = { id: 'tree.copyPath', label: t('tree.copyPath'), separatorBefore: true }
-  if (props.readonly) return [...openItem, copyPath]
+  /*
+   * 路径类动作（复制相对 / 绝对路径、在资源管理器打开）对**只读宿主也放行**：
+   * 它们不写磁盘，容器版留着「复制相对路径」正是它最需要的（拿去贴到别处）。
+   * 「在资源管理器打开」只对桌面宿主有意义，App 侧按 hostKind 决定是否执行。
+   */
+  const pathActions: MenuItem[] = [
+    { id: 'tree.copyPath', label: t('tree.copyPath'), separatorBefore: true },
+    { id: 'tree.copyAbsolutePath', label: t('tree.copyAbsolutePath') },
+    { id: 'tree.revealInFolder', label: t('tree.revealInFolder') },
+  ]
+  if (props.readonly) return [...openItem, ...pathActions]
   return [
     ...openItem,
     { id: 'tree.newFile', label: t('tree.newFile'), separatorBefore: !isDir },
     { id: 'tree.newDir', label: t('tree.newDir') },
     { id: 'tree.rename', label: t('tree.rename'), separatorBefore: true, hint: 'F2' },
+    /*
+     * 两组「复制/剪切」相邻但语义不同，用分隔线隔开并各自带「文件」后缀说明：
+     * 不带「文件」的是应用内粘贴用，带的是给外部应用用的系统剪贴板。
+     */
     { id: 'tree.cut', label: t('tree.cut'), hint: 'Ctrl+X' },
     { id: 'tree.copy', label: t('tree.copy'), hint: 'Ctrl+C' },
     {
@@ -401,7 +434,9 @@ const menuItems = computed<MenuItem[]>(() => {
       hint: 'Ctrl+V',
       disabled: !props.canPaste,
     },
-    { id: 'tree.copyPath', label: t('tree.copyPath'), separatorBefore: true },
+    { id: 'tree.cutFile', label: t('tree.cutFile'), separatorBefore: true },
+    { id: 'tree.copyFile', label: t('tree.copyFile') },
+    ...pathActions.map((item, index) => (index === 0 ? { ...item, separatorBefore: true } : item)),
     {
       id: 'tree.trash',
       label: single ? t('tree.trash') : t('tree.trashMany', { count: menu.value.paths.length }),
@@ -424,6 +459,11 @@ function onMenuSelect(id: string): void {
   else if (id === 'tree.copy') emit('fsAction', 'copy', paths, target)
   else if (id === 'tree.paste') emit('fsAction', 'paste', paths, target)
   else if (id === 'tree.trash') emit('fsAction', 'trash', paths, target)
+  // 以下三个由 App 处理（需要工作区 id / 绝对路径 / 系统剪贴板）
+  else if (id === 'tree.copyAbsolutePath') emit('fsAction', 'copyAbsolutePath', paths, target)
+  else if (id === 'tree.revealInFolder') emit('fsAction', 'revealInFolder', paths, target)
+  else if (id === 'tree.copyFile') emit('fsAction', 'copyFile', paths, target)
+  else if (id === 'tree.cutFile') emit('fsAction', 'cutFile', paths, target)
 }
 </script>
 

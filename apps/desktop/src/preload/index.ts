@@ -170,6 +170,11 @@ const api: DocviApi = {
   serviceSetPort: port => ipcRenderer.invoke(IPC.serviceSetPort, port),
   serviceOpenLog: () => ipcRenderer.invoke(IPC.serviceOpenLog),
 
+  fsRevealInFolder: (workspaceId, relPath) =>
+    ipcRenderer.invoke(IPC.fsRevealInFolder, workspaceId, relPath),
+  fsCopyToClipboard: (workspaceId, relPaths) =>
+    ipcRenderer.invoke(IPC.fsCopyToClipboard, workspaceId, relPaths),
+
   desktopPrefs: () => ipcRenderer.invoke(IPC.desktopPrefs),
   desktopSetAutostart: enabled => ipcRenderer.invoke(IPC.desktopSetAutostart, enabled),
   desktopSetCloseToTray: enabled => ipcRenderer.invoke(IPC.desktopSetCloseToTray, enabled),

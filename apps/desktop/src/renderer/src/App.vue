@@ -2201,6 +2201,86 @@ function onTreeFsAction(action: TreeFsAction, paths: string[], dir: string): voi
   else if (action === 'copy') clipEntry('copy', paths)
   else if (action === 'paste') void pasteInto(dir)
   else if (action === 'trash') void trashEntries(paths)
+  else if (action === 'copyAbsolutePath') void copyAbsolutePaths(paths)
+  else if (action === 'revealInFolder') void revealInFolder(paths[0] ?? '')
+  else if (action === 'copyFile') void copyFilesToSystemClipboard('copy', paths)
+  else if (action === 'cutFile') void copyFilesToSystemClipboard('cut', paths)
+}
+
+/**
+ * 复制绝对路径。
+ *
+ * 与菜单里「复制相对路径」的分工：相对路径用来写进 md（站内链接），绝对路径
+ * 用来贴给别的程序 / 同事（能直接在资源管理器或终端里用）。多条时按行拼接，
+ * 与「复制相对路径」保持同一形态。
+ */
+async function copyAbsolutePaths(paths: string[]): Promise<void> {
+  const workspaceId = treeWorkspaceId()
+  if (!workspaceId || !paths.length) return
+  const root = store.workspaces.find(item => item.id === workspaceId)?.root
+  if (!root) return
+  /*
+   * 拼绝对路径时只做字符串归一（去掉 root 末尾分隔符 + 统一分隔符），
+   * 不引入 node 的 path 模块——渲染层不允许依赖 `node:*`，边界脚本会拦。
+   * root 由主进程保证是平台原生形态，relPath 统一正斜杠。
+   */
+  const base = root.replace(/[\\/]+$/, '')
+  const absolute = paths.map(path => `${base}/${path.replaceAll('\\', '/')}`)
+  try {
+    await navigator.clipboard.writeText(absolute.join('\n'))
+    notice.value = t('tree.copyHint')
+    window.setTimeout(() => (notice.value = null), 2200)
+  } catch {
+    store.setError(t('error.clipboard'))
+  }
+}
+
+/** 在系统文件管理器里定位一项（目录打开它，文件选中它） */
+async function revealInFolderFor(workspaceId: string, relPath: string): Promise<void> {
+  if (!workspaceId || !relPath) return
+  const result = await window.docvi.fsRevealInFolder(workspaceId, relPath)
+  if (!result.ok) store.setError(result.error.message)
+}
+
+/** 树菜单入口：目标工作区取当前树所属 */
+function revealInFolder(relPath: string): Promise<void> {
+  const workspaceId = treeWorkspaceId()
+  if (!workspaceId) return Promise.resolve()
+  return revealInFolderFor(workspaceId, relPath)
+}
+
+/**
+ * 把条目写进**系统剪贴板**，供粘贴到微信 / 资源管理器等外部应用。
+ *
+ * 同时写一份到应用内剪贴板：用户复制后在树里按 Ctrl+V 也应能粘贴——两条路径
+ * 都成立才符合直觉。
+ *
+ * 系统剪贴板那一侧不区分 copy / cut（`text/uri-list` 不带该语义），所以外部应用
+ * 粘贴永远是「复制一份」；应用内的剪切状态只影响树内粘贴。这是实现约束下的
+ * 诚实行为——菜单上「剪切文件」给的是同样的文件引用，粘贴到外部不会移动源文件。
+ */
+async function copyFilesToSystemClipboardFor(
+  workspaceId: string,
+  paths: string[],
+  mode: 'copy' | 'cut',
+): Promise<void> {
+  if (!workspaceId || !paths.length) return
+  const result = await window.docvi.fsCopyToClipboard(workspaceId, paths)
+  if (!result.ok) {
+    store.setError(result.error.message)
+    return
+  }
+  // 应用内也记上，Ctrl+V 在树里仍然可用（这里保留 cut 语义）
+  clipboard.value = { workspaceId, paths: [...paths], mode }
+  notice.value = mode === 'cut' ? t('tree.cutHint') : t('tree.copyHint')
+  window.setTimeout(() => (notice.value = null), 2200)
+}
+
+/** 树菜单入口：目标工作区取当前树所属 */
+function copyFilesToSystemClipboard(mode: 'copy' | 'cut', paths: string[]): Promise<void> {
+  const workspaceId = treeWorkspaceId()
+  if (!workspaceId) return Promise.resolve()
+  return copyFilesToSystemClipboardFor(workspaceId, paths, mode)
 }
 
 /* ---------- 树：批量选中与拖拽移动 ---------- */
@@ -2964,11 +3044,34 @@ function onTabCommand(id: string, tabId: string): void {
   else if (id === 'tab.settings') {
     openSettings('tabs')
   } else if (id === 'tab.copyPath') {
+    /*
+     * 标签页菜单的两种路径口径：
+     *  - 相对路径（本项）：写进 md 做站内链接时用；
+     *  - 绝对路径（下一项）：贴给别的程序 / 同事时用。
+     * 原先这里只剩一个「复制路径」且实际给的是绝对路径，语义含糊。
+     */
     const ref = tabs.currentDocOf(tabId)
-    if (ref) {
-      void navigator.clipboard.writeText(ref.absolutePath).catch(() => {
-        store.setError(t('error.clipboard'))
-      })
+    if (!ref) return
+    void navigator.clipboard.writeText(ref.relPath).catch(() => {
+      store.setError(t('error.clipboard'))
+    })
+  } else if (id === 'tab.copyAbsolutePath') {
+    const ref = tabs.currentDocOf(tabId)
+    if (!ref) return
+    void navigator.clipboard.writeText(ref.absolutePath).catch(() => {
+      store.setError(t('error.clipboard'))
+    })
+  } else if (id === 'tab.revealInFolder') {
+    const ref = tabs.currentDocOf(tabId)
+    if (ref?.workspaceId && ref.relPath) void revealInFolderFor(ref.workspaceId, ref.relPath)
+  } else if (id === 'tab.copyFile' || id === 'tab.cutFile') {
+    const ref = tabs.currentDocOf(tabId)
+    if (ref?.workspaceId && ref.relPath) {
+      void copyFilesToSystemClipboardFor(
+        ref.workspaceId,
+        [ref.relPath],
+        id === 'tab.cutFile' ? 'cut' : 'copy',
+      )
     }
   }
 }

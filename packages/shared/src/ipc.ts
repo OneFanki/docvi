@@ -146,6 +146,24 @@ export const IPC = {
   /** 主进程 → 渲染进程：服务状态变化（启动、崩溃、重启） */
   serviceChanged: 'docvi:service:changed',
 
+  /**
+   * 在系统文件管理器里定位一个文件/目录（Windows 资源管理器选中它）。
+   *
+   * 与 `serviceOpenLog` 的区别：那个打开整个目录，这个要**选中**目标项——
+   * 用户要发文件给别人时，需要的是「在资源管理器里已经选中它，可以直接
+   * Ctrl+C 或拖进聊天窗口」，而不是打开目录再自己找。
+   */
+  fsRevealInFolder: 'docvi:fs:reveal-in-folder',
+  /**
+   * 把文件/目录以**系统剪贴板**的形式放到剪贴板（Windows `CF_HDROP`）。
+   *
+   * 为什么不能用 `navigator.clipboard`：浏览器剪贴板只有文本/图片/富文本，
+   * 承载不了「一个文件引用」。写文本进剪贴板虽然能粘贴到记事本，但粘到微信 /
+   * 资源管理器时不会变成文件。这里用 Electron 的 `clipboard.writeBuffer`
+   * 写入平台原生格式。
+   */
+  fsCopyToClipboard: 'docvi:fs:copy-to-clipboard',
+
   /** 桌面外壳行为：开机自启动 / 关闭窗口留在托盘 */
   desktopPrefs: 'docvi:desktop:prefs',
   desktopSetAutostart: 'docvi:desktop:set-autostart',
@@ -868,6 +886,21 @@ export interface DocviApi {
   serviceSetPort(port: number): Promise<Result<ServiceState>>
   /** 在系统文件管理器里打开数据目录（里面有 serve.log） */
   serviceOpenLog(): Promise<Result<null>>
+  /**
+   * 在系统文件管理器里定位某个工作区内的条目。
+   *
+   * 目录直接打开它本身；文件则在父目录里选中它。供右键菜单「在资源管理器中打开」。
+   * 只接受工作区 id + 相对路径：渲染层不该有「唤起任意路径文件管理器」的能力。
+   */
+  fsRevealInFolder(workspaceId: string, relPath: string): Promise<Result<null>>
+  /**
+   * 把工作区内的条目写入系统剪贴板，使其可被粘贴到资源管理器 / 微信等外部应用。
+   *
+   * 实现走 `text/uri-list`（Electron 会把它映射成各平台原生的「已复制文件」格式）。
+   * 该格式不携带 copy/cut 语义，所以这里只负责「把文件放进剪贴板」；
+   * 应用内的剪切状态与真正的删除由渲染层自己维护。
+   */
+  fsCopyToClipboard(workspaceId: string, relPaths: string[]): Promise<Result<null>>
   /** 订阅服务状态变化；返回取消订阅函数 */
   onServiceChanged(callback: (state: ServiceState) => void): () => void
 
