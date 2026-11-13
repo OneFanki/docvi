@@ -112,7 +112,7 @@ export const useThemeStore = defineStore('theme', () => {
 
   /** 插件被停用/卸载后，把指向它的选择回退到内置档位 */
   function dropPluginThemes(isGone: (key: ThemeKey) => boolean): void {
-    if (!BUILTIN_KEYS.has(theme.value) && isGone(theme.value)) theme.value = 'slate'
+    if (!BUILTIN_KEYS.has(theme.value) && isGone(theme.value)) theme.value = 'graphite'
   }
 
   /** 启动时把已存值写进 DOM，避免首帧闪烁 */
@@ -174,8 +174,20 @@ export const useThemeStore = defineStore('theme', () => {
     }
   }
 
+  /**
+   * 当前主题的明暗。
+   *
+   * 读 `data-appearance` 而不是重算一遍：`applyAppearance` 已经把「插件主题声明 >
+   * 内置表 > 默认深色」三级解析的结果写进 DOM，这里再走一遍解析等于把同一套规则
+   * 抄两份。DOM 值是唯一事实来源，主进程的 titleBarOverlay 也是照它画的。
+   */
+  const appearance = computed<'light' | 'dark'>(() =>
+    document.documentElement.dataset.appearance === 'light' ? 'light' : 'dark',
+  )
+
   return {
     theme,
+    appearance,
     contentWidth,
     sidebarCollapsed,
     editorWrap,

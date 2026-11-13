@@ -16,7 +16,7 @@ import type {
   TreeNode,
   WorkspaceEntry,
 } from '@docvi/shared'
-import { LOCAL_PREVIEW_ID } from '@docvi/shared'
+import { DEFAULT_SETTINGS, LOCAL_PREVIEW_ID } from '@docvi/shared'
 
 import { buildLocalTree, normalizeLocalPath, stripCommonRoot } from './local-preview'
 import { normalizePortal, type PortalPayloadRaw } from './portal-workspaces'
@@ -257,22 +257,18 @@ export function createWebHost(options: WebHostOptions = {}): DocviApi {
   }
 
   function readSettings(): AppSettings {
+    /*
+     * 基底直接从 DEFAULT_SETTINGS 派生，不在这里手抄一份。
+     *
+     * 手抄的那份曾经与桌面端脱钩（默认主题改了容器版还是旧的），而这种漂移
+     * 没有任何测试能发现——两边的默认值都「合法」，只是不一样。
+     * 容器宿主的差异只在于：没有「本地默认工作区」概念（内容根由部署方编排），
+     * 所以 `defaultWorkspaceSeeded` 置真表示无需播种。
+     */
     const base: AppSettings = {
-      schemaVersion: 1,
-      theme: 'slate',
-      locale: 'zh',
-      tabs: {
-        maxTabs: 0,
-        overflow: 'least-recent',
-        layout: 'single',
-        overflowX: 'scroll',
-        maxWidth: 200,
-      },
-      contentWidth: 'full',
-      sidebarCollapsed: false,
-      editorWrap: 'wrap',
+      ...DEFAULT_SETTINGS,
+      tabs: { ...DEFAULT_SETTINGS.tabs },
       desktop: { autostart: false, closeToTray: false },
-      // 容器宿主没有「本地默认工作区」概念（内容根由部署方编排），置真表示无需播种
       defaultWorkspaceSeeded: true,
     }
     try {

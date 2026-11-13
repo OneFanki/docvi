@@ -102,7 +102,8 @@ export const DEFAULT_TAB_PREFERENCES: TabPreferences = {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   schemaVersion: 1,
-  theme: 'slate',
+  // 默认石墨：与 :root 的深色基底同一套暖灰配色，首帧不会跳色
+  theme: 'graphite',
   locale: 'zh',
   tabs: { ...DEFAULT_TAB_PREFERENCES },
   // 默认铺满：内容宽度是「想专注读」时才需要的约束，不该一上来就限死

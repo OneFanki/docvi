@@ -325,8 +325,8 @@
       {
         "id": "sea",
         "title": {
-          "zh": "海岬（深色文档）",
-          "en": "Sea (dark document)"
+          "zh": "海岬",
+          "en": "Cape"
         },
         "appearance": "dark",
         "tokens": "themes/sea.json"
