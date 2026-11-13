@@ -2955,13 +2955,19 @@ async function exportDoc(format: ExportFormat): Promise<void> {
       // 文档路径决定相对资源（图片）怎么解析：优先用 DocPayload 的 path，
       // 单文件时它是绝对路径，工作区内是库内相对路径，与阅读态渲染口径一致
       docPath: currentDoc.value?.path ?? ref.relPath,
+      // 资产前缀让图片真的能加载到：没有它，离屏容器里的 /assets/x.png 是 404，
+      // inlineImages 拿到未解码的破图只能原样留下（导出不报错，产物图全裂）
+      assetPrefix: docAssetPrefix.value,
+      // 离屏渲染的主题作用域：HTML 跟随当前主题；PDF 固定 paper。
+      // 必须在这里就定好——mermaid 在 render() 时就把颜色烘焙进 SVG 了
+      renderTheme: format === 'pdf' ? 'paper' : theme.theme,
+      renderAppearance: format === 'pdf' ? 'light' : theme.appearance,
       registry: exportRegistry(),
       containerSyntax: plugins.syntax.map(item => ({
         name: item.name,
         component: item.component,
         form: item.form,
       })),
-      docTheme: theme.theme,
       title,
       locale: locale.value,
     })

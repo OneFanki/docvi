@@ -50,13 +50,27 @@ export async function mermaidPass(
   if (!blocks.length) return
 
   const doc = root.ownerDocument ?? document
-  // 派生变量定义在主题档（:root）上，从挂载容器解析即可命中当前主题
-  const sample = doc.querySelector('.doc-surface') ?? doc.documentElement
+  /*
+   * 取色必须以**传入的 root** 为准，不能读 `doc.querySelector('.doc-surface')`。
+   *
+   * 阅读态下两者恰好等价，所以旧写法看不出问题；但导出是「另起一个离屏容器
+   * 再画一遍」，此时文档里第一个 `.doc-surface` 仍是屏幕上那份。取错了会把
+   * 屏幕配色烘焙进产物——SVG 里的色值一旦写入就改不回来了。
+   *
+   * 主题签名同样走 root 向上的最近声明者：导出会临时把 documentElement 切成
+   * 目标主题再渲染（见 lib/export-doc.ts），所以这里正好能拿到那份值。用
+   * 「最近声明者」而不是直接读 documentElement，是为了让将来出现局部主题作用域
+   * 时不必再改这里。
+   */
+  const themed = root.closest<HTMLElement>('[data-theme]') ?? doc.documentElement
+  const sample = root.classList.contains('doc-surface')
+    ? root
+    : (root.querySelector<HTMLElement>('.doc-surface') ?? root)
   const style = getComputedStyle(sample)
   const vars = mermaidThemeVariables(token => style.getPropertyValue(token).trim())
   const themeKey = [
-    doc.documentElement.dataset.theme ?? '',
-    doc.documentElement.dataset.appearance ?? '',
+    themed.dataset.theme ?? '',
+    themed.dataset.appearance ?? doc.documentElement.dataset.appearance ?? '',
     JSON.stringify(vars),
   ].join('|')
 
