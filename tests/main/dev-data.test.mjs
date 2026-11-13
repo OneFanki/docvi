@@ -9,6 +9,7 @@
  *    （AGENTS 明令禁止触碰真实用户数据目录）。
  */
 import assert from 'node:assert/strict'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
@@ -19,7 +20,8 @@ import {
   userDataDirArg,
 } from '../../apps/desktop/src/main/dev-data.ts'
 
-const APP_DATA = 'C:/Users/someone/AppData/Roaming'
+/** 占位路径：用不可能存在的段名，避免被敏感扫描当成真实本机路径 */
+const APP_DATA = join(tmpdir(), 'docvi-appdata-fixture')
 /** 期望值必须用 join 构造：Windows 上 join 会把正斜杠归一成反斜杠 */
 const DEV_DIR = join(APP_DATA, DEV_DATA_DIR_NAME)
 
