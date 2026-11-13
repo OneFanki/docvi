@@ -981,12 +981,33 @@ async function ensureTabReady(tab: TabRecord): Promise<boolean> {
   return ensureDocLoaded(ref)
 }
 
-/** 按当前标签记录的滚动位置恢复（渲染完成后再调用） */
+/** 按当前标签记录的阅读位置恢复（渲染完成后再调用） */
 async function restoreScroll(): Promise<void> {
   const ref = activeRef.value
   if (!ref) return
   await nextTick()
+  /*
+   * 优先按源行落位，像素只作兜底。
+   *
+   * 为什么不能只用 scrollY：字体、正文宽度这些排版设置一改，整篇高度就变了，
+   * 同一个像素值指向的是别的内容，新排版更短时还会被浏览器 clamp 到顶部——
+   * 用户看到的就是「切个标签回来文档回顶了」。
+   */
+  if (ref.topLine > 0 && readerRef.value?.scrollToSourceLine(ref.topLine)) return
   readerRef.value?.restoreScroll(ref.scrollY)
+}
+
+/**
+ * 离开当前文档前保存阅读位置。
+ *
+ * ⚠️ 所有「换掉当前画布内容」的入口都必须调它。少一处就是一条会把文档打回
+ * 顶部的路径——设置页走的是 `tabs.openPage`，它直接 activate 而不经过
+ * `activateTab`，曾经因此漏掉保存：只切一下设置标签，回来文档就回顶了。
+ */
+function rememberReadingPosition(): void {
+  const reader = readerRef.value
+  if (!reader || !activeRef.value) return
+  tabs.setScroll(tabs.activeId ?? '', reader.getScroll(), reader.getTopLine())
 }
 
 /* ---------- 标签操作 ---------- */
@@ -994,10 +1015,7 @@ async function restoreScroll(): Promise<void> {
 /** 激活标签：写回滚动 → 切上下文 → 装载内容 */
 async function activateTab(id: string): Promise<void> {
   if (id === tabs.activeId) return
-  // 切走前保存当前屏的滚动位置
-  if (readerRef.value && activeRef.value) {
-    tabs.setScroll(tabs.activeId ?? '', readerRef.value.getScroll())
-  }
+  rememberReadingPosition()
   docMode.value = 'read'
   tabs.activate(id)
   const tab = activeTab.value
@@ -1315,16 +1333,15 @@ async function navigateInTab(tabId: string, relPath: string, newTab: boolean): P
       absolutePath: payload.absolutePath,
       title: payload.title,
       scrollY: 0,
+      topLine: 0,
     })
     revealInTree(result.tab.id, relPath)
     await ensureDocLoaded(tabs.currentDocOf(result.tab.id) as DocRef)
     return
   }
 
-  // 替换当前标签：先把当前屏滚动写回
-  if (readerRef.value && activeRef.value) {
-    tabs.setScroll(tabId, readerRef.value.getScroll())
-  }
+  // 替换当前标签：先把当前屏阅读位置写回
+  rememberReadingPosition()
   const record = documents.load(payload)
   record.workspaceId = workspaceId
   /*
@@ -1344,6 +1361,7 @@ async function navigateInTab(tabId: string, relPath: string, newTab: boolean): P
     absolutePath: payload.absolutePath,
     title: payload.title,
     scrollY: 0,
+    topLine: 0,
   })
   docMode.value = 'read'
   await store.touchRecent({
@@ -1419,6 +1437,7 @@ async function openStandalone(absolutePath: string): Promise<void> {
       absolutePath: payload.absolutePath,
       title: payload.title,
       scrollY: 0,
+      topLine: 0,
     })
     await ensureTabReady(result.tab)
     await store.touchRecent({
@@ -1726,12 +1745,14 @@ function shareWorkspace(id: string): void {
 async function stepHistory(delta: number): Promise<void> {
   const tabId = tabs.activeId
   if (!tabId || !activeTab.value || activeTab.value.kind === 'library') return
-  if (readerRef.value && activeRef.value) tabs.setScroll(tabId, readerRef.value.getScroll())
+  rememberReadingPosition()
   const next = tabs.step(tabId, delta)
   if (!next) return
   docMode.value = 'read'
   await ensureDocLoaded(next)
   await nextTick()
+  /* 源行优先：历史里那一条也可能是排版改过之前记下的位置 */
+  if (next.topLine > 0 && readerRef.value?.scrollToSourceLine(next.topLine)) return
   readerRef.value?.restoreScroll(next.scrollY)
 }
 
@@ -1915,14 +1936,16 @@ function onRendered(payload: { path: string; title: string }): void {
   if (!tab || !ref) return
   if (payload.title) tabs.setDocTitle(tab.id, payload.title)
   /*
-   * 两种恢复来源，优先级分明：
+   * 三种恢复来源，优先级分明：
    *  1. 刚切过视图 → 按源行落位（用户「正在看的内容」必须还在视野里）；
-   *  2. 否则按标签记忆的像素位置（同视图内切回来）。
+   *  2. 否则按标签记忆的源行（切标签回来，排版可能已变）；
+   *  3. 最后才退到像素值（文档没有 data-source-line 时的兜底）。
    * 锚点在 takeAnchor 里取完即清：渲染完毕会触发多次（高亮 / Mermaid / 组件
    * 挂载各一次），留着会被重放成「页面老是弹回原处」。
    */
   const anchor = takeAnchor(handoff)
   if (anchor !== null && readerRef.value?.scrollToSourceLine(anchor)) return
+  if (ref.topLine > 0 && readerRef.value?.scrollToSourceLine(ref.topLine)) return
   readerRef.value?.restoreScroll(ref.scrollY)
 }
 
@@ -3046,12 +3069,15 @@ const settingsSection = ref<SettingsSection>('general')
  */
 function openSettings(section: SettingsSection = 'general'): void {
   settingsSection.value = section
+  // openPage 内部直接 activate，不经过 activateTab——位置必须在这里自己存
+  rememberReadingPosition()
   const result = tabs.openPage('settings', t('app.settings'))
   if (!result.tab) store.setError(result.rejected ?? t('error.tabLimit'))
 }
 
 /** 打开插件页标签（单例） */
 function openPlugins(): void {
+  rememberReadingPosition()
   const result = tabs.openPage('plugins', t('app.plugins'))
   if (!result.tab) store.setError(result.rejected ?? t('error.tabLimit'))
 }

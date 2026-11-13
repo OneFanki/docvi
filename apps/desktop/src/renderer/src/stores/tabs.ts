@@ -40,8 +40,17 @@ export interface DocRef {
   relPath: string
   absolutePath: string
   title: string
-  /** 这一篇读到哪里了 */
+  /**
+   * 这一篇读到哪里了：像素位置与源行各存一份。
+   *
+   * 为什么不能只存 `scrollY`：字体、字号、正文宽度一改，整篇的排版高度就变了，
+   * 同一个像素值指向的是**别的内容**；新排版更短时还会被浏览器 clamp 到顶部。
+   * 源行是内容坐标，排版怎么变都指向同一段文字，所以恢复时优先用它，
+   * `scrollY` 只作退化兜底（比如文档没有 `data-source-line` 的情况）。
+   */
   scrollY: number
+  /** 视口顶部的源行（1 基）。0 表示没记过 */
+  topLine: number
 }
 
 export interface TabRecord {
@@ -151,6 +160,7 @@ function normalizeDocRef(value: unknown): DocRef | null {
           ? raw.relPath
           : raw.absolutePath,
     scrollY: Number(raw.scrollY) || 0,
+    topLine: Number(raw.topLine) || 0,
   }
 }
 
@@ -237,6 +247,7 @@ function migrateLegacy(): Persisted | null {
         absolutePath: source.absolutePath,
         title: tab.title ?? '',
         scrollY: tab.scrollY ?? 0,
+        topLine: tab.topLine ?? 0,
       })
       if (!ref) continue
       const isFile = ref.workspaceId === null
@@ -465,6 +476,7 @@ export const useTabsStore = defineStore('tabs', () => {
       absolutePath: input.absolutePath,
       title: input.title,
       scrollY: 0,
+      topLine: 0,
     }
     const tab: TabRecord = {
       id: newId(),
@@ -518,11 +530,18 @@ export const useTabsStore = defineStore('tabs', () => {
     return next >= 0 && next < tab.history.length
   }
 
-  /** 回写某篇的滚动位置 */
-  function setScroll(tabId: string, scrollY: number): void {
+  /**
+   * 回写某篇的阅读位置：像素与源行一起存。
+   *
+   * 两个都存不是冗余：源行是排版无关的稳定坐标（字体/宽度改完仍然对），
+   * 像素值在「没有源行标注」的文档（如渲染失败的半成品）里是唯一能用的信息。
+   */
+  function setScroll(tabId: string, scrollY: number, topLine = 0): void {
     const tab = tabs.value.find(item => item.id === tabId)
     const ref = tab ? currentDocOf(tab) : null
-    if (ref) ref.scrollY = scrollY
+    if (!ref) return
+    ref.scrollY = scrollY
+    if (topLine > 0) ref.topLine = topLine
   }
 
   /** 更新当前文档标题（正文渲染完成后首个 H1 才知道） */
