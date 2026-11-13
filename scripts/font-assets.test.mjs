@@ -206,3 +206,135 @@ test('设置项默认 harmony，且归一化接受两档', async () => {
   // 非法值回退默认，不整体失效
   assert.equal(mod.normalizeSettings({ fontFamily: 'comic-sans' }).fontFamily, 'harmony')
 })
+
+test('字体链的角色标注按字体能力给，不按位次猜', () => {
+  /*
+   * 早先按「是不是等宽栈 + 是不是 JetBrains」推角色，结果 `JetBrains Mono`
+   * 在正文栈里被标成「中文回退」——它一个汉字都没有，说明与事实相反。
+   * 角色只能来自「这个字体有没有这些字形」的固定映射。
+   */
+  const view = readFileSync(
+    new URL('apps/desktop/src/renderer/src/components/SettingsView.vue', ROOT),
+    'utf8',
+  )
+  const fn = /function chainRole\(([^)]*)\)[\s\S]*?\n\}/.exec(view)?.[0] ?? ''
+  assert.ok(fn, '找不到 chainRole')
+  assert.doesNotMatch(fn, /kind/, '角色判定不能收 kind 参数——按栈的类别决定角色就是把位次当能力')
+  assert.match(
+    view,
+    /'JetBrains Mono':\s*'settings\.fontRoleLatinMono'/,
+    '等宽字体必须标为英文等宽',
+  )
+  assert.match(
+    view,
+    /'HarmonyOS Sans SC':\s*'settings\.fontRoleAll'/,
+    '鸿蒙同时覆盖中英文，必须标为「中文 + 英文」',
+  )
+})
+
+/* ---------- 英数等宽 ---------- */
+
+test('英数等宽默认开启，且缺失字段按开启处理', async () => {
+  /*
+   * 「缺失 = 开启」是这条设置的核心，不是随手写的容错：
+   * 全新安装、旧版设置文件没有这个键、导出产物没写属性——三种场景都必须落在
+   * 开启上。若写成 `record.monoLatin === true`，任何漏写都会静默关掉它，
+   * 而用户看到的只是「界面英文忽然变宽了」，不会想到是设置丢了。
+   */
+  const mod = await import('../packages/shared/src/settings.ts')
+  assert.equal(mod.DEFAULT_SETTINGS.monoLatin, true)
+  assert.equal(mod.normalizeSettings({}).monoLatin, true)
+  assert.equal(mod.normalizeSettings({ monoLatin: undefined }).monoLatin, true)
+  assert.equal(mod.normalizeSettings({ monoLatin: false }).monoLatin, false)
+  assert.equal(mod.normalizeSettings({ monoLatin: true }).monoLatin, true)
+})
+
+test('英数等宽的 CSS 覆盖排在 system 档之后（否则被它盖掉）', () => {
+  /*
+   * 两条规则特异性相同（都是 :root 加一个属性选择器），谁在后面谁生效。
+   * system 档写的是系统字体栈，若它排在等宽覆盖之后，选「系统字体 + 英数等宽」
+   * 时英文会回到 Segoe UI——用户看到的是「开关点了没反应」。
+   */
+  const systemAt = THEME_CSS.indexOf(":root[data-font='system'] {")
+  const monoAt = THEME_CSS.indexOf(":root:not([data-mono-latin='off']) {")
+  assert.ok(systemAt > 0, '找不到 system 档')
+  assert.ok(monoAt > 0, '找不到英数等宽覆盖')
+  assert.ok(
+    monoAt > systemAt,
+    `英数等宽覆盖必须在 system 档之后，实得 system@${systemAt} > mono@${monoAt}`,
+  )
+})
+
+test('英数等宽把 JetBrains 放正文栈首位，汉字仍由鸿蒙兜', () => {
+  const block = THEME_CSS.slice(THEME_CSS.indexOf(":root:not([data-mono-latin='off']) {"))
+  const sans = /--dv-font-sans:\s*([^;]+);/.exec(block)?.[1] ?? ''
+  const names = sans
+    .split(',')
+    .map(item => item.trim().replace(/^['"]|['"]$/g, ''))
+    .filter(Boolean)
+  assert.equal(names[0], 'JetBrains Mono', `首位必须是等宽，实得 ${JSON.stringify(names)}`)
+  assert.ok(names.includes('HarmonyOS Sans SC'), `汉字需要鸿蒙兜底，实得 ${JSON.stringify(names)}`)
+})
+
+test('英数等宽的正文栈不挂永远命不中的项', () => {
+  /*
+   * `HarmonyOS Sans SC` 已同时含拉丁与汉字，它后面除通用族关键字外的任何字体
+   * 都命中不到。早先这条栈是 4 项，中间夹着 `Segoe UI`——英文被 JetBrains
+   * 拿走、汉字被鸿蒙拿走，它一次都不会被选中，却让设置页的「应用顺序」多出
+   * 一个假的层级。
+   */
+  const block = THEME_CSS.slice(THEME_CSS.indexOf(":root:not([data-mono-latin='off']) {"))
+  const sans = /--dv-font-sans:\s*([^;]+);/.exec(block)?.[1] ?? ''
+  const names = sans
+    .split(',')
+    .map(item => item.trim().replace(/^['"]|['"]$/g, ''))
+    .filter(Boolean)
+  assert.deepEqual(
+    names,
+    ['JetBrains Mono', 'HarmonyOS Sans SC', 'sans-serif'],
+    `鸿蒙之后不该再有具体字体（永远命不中），实得 ${JSON.stringify(names)}`,
+  )
+})
+
+test('system 档 + 英数等宽不残留 HarmonyOS', () => {
+  const block = THEME_CSS.slice(
+    THEME_CSS.indexOf(":root[data-font='system']:not([data-mono-latin='off'])"),
+  )
+  const sans = /--dv-font-sans:\s*([^;]+);/.exec(block)?.[1] ?? ''
+  assert.equal(
+    sans
+      .split(',')[0]
+      .trim()
+      .replace(/^['"]|['"]$/g, ''),
+    'JetBrains Mono',
+    'system 档下也应以等宽开头',
+  )
+  assert.doesNotMatch(sans, /HarmonyOS/, `system 档下不该再挂鸿蒙：${sans.trim()}`)
+})
+
+test('关闭英数等宽时删属性，不写 false（缺失才等于默认开启）', () => {
+  const store = readFileSync(new URL('apps/desktop/src/renderer/src/stores/app.ts', ROOT), 'utf8')
+  assert.match(
+    store,
+    /if \(value\)\s*delete document\.documentElement\.dataset\.monoLatin\s*else\s*document\.documentElement\.dataset\.monoLatin = 'off'/,
+    '开启态必须表现为属性缺失，写 data-mono-latin="1" 会让漏写属性掉回关闭',
+  )
+})
+
+test('导出产物只在关闭时写 data-mono-latin', () => {
+  /*
+   * 导出文件是独立文档，没有应用的 store，只能靠 <html> 属性表达这个设置。
+   * 只在关闭时写出，是因为属性缺失就是开启（与应用内一致）——两边口径一旦
+   * 不一致，就会出现「应用里是等宽、导出的 HTML 不是」这种无报错的错位。
+   */
+  const source = readFileSync(
+    new URL('apps/desktop/src/renderer/src/lib/export-doc.ts', ROOT),
+    'utf8',
+  )
+  assert.match(
+    source,
+    /renderMonoLatin \? '' : ' data-mono-latin="off"'/,
+    '导出产物必须只在关闭时写属性',
+  )
+  assert.match(source, /renderMonoLatin:/, '导出选项必须带上该设置')
+})

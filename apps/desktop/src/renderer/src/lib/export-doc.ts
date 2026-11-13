@@ -60,6 +60,12 @@ export interface ExportRenderOptions {
   renderTheme: string
   /** 离屏渲染套用的明暗（`data-appearance`，插件主题继承基底要用） */
   renderAppearance: 'light' | 'dark'
+  /**
+   * 英数是否走等宽。离屏渲染与产物 `<html>` 都要带上，否则导出会忽略该设置。
+   *
+   * 属性缺失 = 开启（与设置项默认一致），所以只有关闭时才需要写进产物。
+   */
+  renderMonoLatin: boolean
 }
 
 /**
@@ -88,9 +94,13 @@ async function renderOffscreen(options: ExportRenderOptions): Promise<{
   const previous = {
     theme: root.dataset.theme,
     appearance: root.dataset.appearance,
+    monoLatin: root.dataset.monoLatin,
   }
   root.dataset.theme = options.renderTheme
   root.dataset.appearance = options.renderAppearance
+  // 缺失 = 开启，所以只在与当前选择不同时才需要动这个属性
+  if (options.renderMonoLatin) delete root.dataset.monoLatin
+  else root.dataset.monoLatin = 'off'
 
   const host = document.createElement('div')
   // 离屏但保持真实布局：宽度给一个接近阅读列的定值，图组件才按合理尺寸排布
@@ -106,6 +116,8 @@ async function renderOffscreen(options: ExportRenderOptions): Promise<{
     else root.dataset.theme = previous.theme
     if (previous.appearance === undefined) delete root.dataset.appearance
     else root.dataset.appearance = previous.appearance
+    if (previous.monoLatin === undefined) delete root.dataset.monoLatin
+    else root.dataset.monoLatin = previous.monoLatin
   }
 
   const result = renderMarkdown(options.text, options.docPath, {
@@ -295,8 +307,11 @@ export async function buildExportHtml(options: ExportHtmlOptions): Promise<strin
     const styles = [themeCss, docCss, pluginStyleText(), EXPORT_CSS].filter(Boolean).join('\n\n')
     return `<!doctype html>
 <!-- data-theme 决定整份产物的底色/正文/代码配色。它必须与离屏渲染时套的那层
-     一致（renderTheme）：mermaid 等把颜色烘焙进 SVG 的块，事后改这里不会重画 -->
-<html lang="${escapeHtml(options.locale)}" data-theme="${escapeHtml(options.renderTheme)}">
+     一致（renderTheme）：mermaid 等把颜色烘焙进 SVG 的块，事后改这里不会重画。
+     data-mono-latin 只在关闭时写出——属性缺失即开启，与设置项默认一致 -->
+<html lang="${escapeHtml(options.locale)}" data-theme="${escapeHtml(options.renderTheme)}"${
+      options.renderMonoLatin ? '' : ' data-mono-latin="off"'
+    }>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />

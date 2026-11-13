@@ -2962,6 +2962,8 @@ async function exportDoc(format: ExportFormat): Promise<void> {
       // 必须在这里就定好——mermaid 在 render() 时就把颜色烘焙进 SVG 了
       renderTheme: format === 'pdf' ? 'paper' : theme.theme,
       renderAppearance: format === 'pdf' ? 'light' : theme.appearance,
+      // 英数等宽是排版偏好，与主题无关：两个产物都跟随设置
+      renderMonoLatin: theme.monoLatin,
       registry: exportRegistry(),
       containerSyntax: plugins.syntax.map(item => ({
         name: item.name,

@@ -206,6 +206,8 @@ const zh: Dict = {
   'settings.fontRoleLatinMono': '英文等宽',
   'settings.fontRoleCjk': '中文回退',
   'settings.fontRoleFallback': '系统兜底',
+  'settings.monoLatin': '英数等宽',
+  'settings.monoLatinHint': '开启后界面与正文里的英文数字也按等宽排版，表格与路径会更齐。',
   'settings.editorWrap': '源码折行',
   'settings.editorWrapHint': '不折行时超宽内容横向滚动，适合对齐表格与宽代码块。',
   'settings.language': '语言',
@@ -665,6 +667,9 @@ const en: Dict = {
   'settings.fontRoleLatinMono': 'Latin, monospaced',
   'settings.fontRoleCjk': 'CJK fallback',
   'settings.fontRoleFallback': 'System fallback',
+  'settings.monoLatin': 'Monospaced Latin',
+  'settings.monoLatinHint':
+    'When on, Latin letters and digits in the UI and text are also set in a monospaced face — tables and paths line up more cleanly.',
   'settings.editorWrap': 'Source wrapping',
   'settings.editorWrapHint':
     'When off, wide content scrolls horizontally — useful for aligning tables and code blocks.',

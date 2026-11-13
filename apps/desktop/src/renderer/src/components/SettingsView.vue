@@ -92,21 +92,33 @@ function readFontChains(): void {
  * 主题 / 字体切换后链条会变（system 档与 harmony 档不同），要重读。
  * nextTick 是因为属性由 watch 写入，本组件的渲染先于 DOM 更新。
  */
-watch([() => theme.theme, () => theme.fontFamily], () => void nextTick(readFontChains))
+watch(
+  [() => theme.theme, () => theme.fontFamily, () => theme.monoLatin],
+  () => void nextTick(readFontChains),
+)
 onMounted(readFontChains)
 
 /**
  * 一条链里某一项负责什么字符。
  *
- * `sans-serif` / `monospace` 是通用族关键字，不是具体字体——标成「中文回退」
- * 会误导，它们只是最后的形状兜底。
+ * 按**字体本身有没有这些字形**判断，不看它排在第几——早先按位次推的写法把
+ * `JetBrains Mono` 标成了「中文回退」，可它一个汉字都没有，用户看到的说明
+ * 与事实相反。通用族关键字（`sans-serif` / `monospace`）不是具体字体，只是
+ * 最后的形状兜底。
  */
-function chainRole(name: string, kind: 'sans' | 'mono'): string {
+const FONT_ROLES: Record<string, string> = {
+  'JetBrains Mono': 'settings.fontRoleLatinMono',
+  'HarmonyOS Sans SC': 'settings.fontRoleAll',
+  'Segoe UI': 'settings.fontRoleLatin',
+  'PingFang SC': 'settings.fontRoleCjk',
+  'Microsoft YaHei': 'settings.fontRoleCjk',
+  'Noto Sans': 'settings.fontRoleCjk',
+}
+
+function chainRole(name: string): string {
   if (name === 'sans-serif' || name === 'monospace') return t('settings.fontRoleFallback')
-  if (kind === 'mono') {
-    return name === 'JetBrains Mono' ? t('settings.fontRoleLatinMono') : t('settings.fontRoleCjk')
-  }
-  return name === 'HarmonyOS Sans SC' ? t('settings.fontRoleAll') : t('settings.fontRoleCjk')
+  const key = FONT_ROLES[name]
+  return key ? t(key) : ''
 }
 
 /**
@@ -792,6 +804,27 @@ async function openLogs(): Promise<void> {
           </div>
 
           <!--
+            英数等宽：影响界面与正文里所有英文数字，不只是代码块。
+            放在字体族下面、回退链上面——它改的正是回退链的首项，顺序上读得通。
+          -->
+          <div class="row row--spaced">
+            <span class="row__label">{{ t('settings.monoLatin') }}</span>
+            <span class="row__value">
+              <button
+                class="switch"
+                type="button"
+                :class="{ 'is-on': theme.monoLatin }"
+                :aria-pressed="theme.monoLatin"
+                :aria-label="t('settings.monoLatin')"
+                @click="theme.monoLatin = !theme.monoLatin"
+              >
+                <span class="switch__knob" />
+              </button>
+            </span>
+          </div>
+          <p class="hint">{{ t('settings.monoLatinHint') }}</p>
+
+          <!--
             回退链：直接把 CSS 里生效的顺序摊开给用户看。
             每条链按「先到先得」排列，第二项起都是补前者缺的字形——代码块那条
             尤其需要说明（JetBrains 管英文、鸿蒙管中文），否则用户会以为只用了
@@ -804,7 +837,7 @@ async function openLogs(): Promise<void> {
                 <span v-for="(name, index) in fontChains.sans" :key="name" class="font-chain__item">
                   <span v-if="index > 0" class="font-chain__arrow" aria-hidden="true">→</span>
                   <span class="font-chain__name">{{ name }}</span>
-                  <span class="font-chain__role">{{ chainRole(name, 'sans') }}</span>
+                  <span class="font-chain__role">{{ chainRole(name) }}</span>
                 </span>
               </span>
             </div>
@@ -814,7 +847,7 @@ async function openLogs(): Promise<void> {
                 <span v-for="(name, index) in fontChains.mono" :key="name" class="font-chain__item">
                   <span v-if="index > 0" class="font-chain__arrow" aria-hidden="true">→</span>
                   <span class="font-chain__name">{{ name }}</span>
-                  <span class="font-chain__role">{{ chainRole(name, 'mono') }}</span>
+                  <span class="font-chain__role">{{ chainRole(name) }}</span>
                 </span>
               </span>
             </div>

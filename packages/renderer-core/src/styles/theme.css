@@ -118,20 +118,21 @@
 
 :root {
   /*
-   * 字体栈按「先到先得」逐项回退，顺序本身就是语义。
+   * 正文与界面字体。
    *
-   * 每一项都必须**会命中**：鸿蒙 SC 同时含拉丁与汉字，所以正文栈只需要它
-   * 加一个平台兜底。中间再插「也支持中文」的字体不会改变结果，只会让用户
-   * 看到的顺序变长，还分不清哪一项真的在起作用。
+   * 只列会命中的项：鸿蒙 SC 同时含拉丁与汉字，所以它后面只需要一个平台兜底。
+   * 中间再插「也支持中文」的字体不会改变结果，只会让用户看到的顺序变长。
+   *
+   * 英文数字是否等宽由 `data-mono-latin` 属性控制（见文件末尾那条覆盖）：
+   * 开启时这个变量整体换成等宽版栈，两种状态各只有一条定义，不做排列组合。
    */
   --dv-font-sans: 'HarmonyOS Sans SC', 'Segoe UI', sans-serif;
   /*
-   * 代码块的顺序与正文**不同**，这是刻意的：
+   * 等宽栈的顺序是硬约束：
    *
    *   1. JetBrains Mono  → ASCII、标点、框线（等宽，缩进与表格靠它对齐）
    *   2. HarmonyOS Sans  → 汉字（JetBrains 没有中文字形，自动落到这一项）
    *
-   * 所以「代码块里英文等宽、中文鸿蒙」不是两套规则，而是同一条栈的自然结果。
    * ⚠️ 鸿蒙不能放最前面：Sans 不是等宽，缩进与框线会全歪。
    */
   --dv-font-mono: 'JetBrains Mono', 'HarmonyOS Sans SC', monospace;
@@ -162,7 +163,7 @@
 }
 
 /*
- * 切到系统字体：不依赖任何随包字体。
+ * 切到系统字体：不依赖随包的正文/界面字体。
  *
  * 三平台各列一个最常见的界面字体（Windows / macOS / Linux），加上 `sans-serif`
  * 兜底——这是唯一需要跨平台并列的地方，因为它们的名字互不相通，不会互相遮蔽。
@@ -173,6 +174,41 @@
 :root[data-font='system'] {
   --dv-font-sans: 'Segoe UI', 'PingFang SC', 'Noto Sans', sans-serif;
   --dv-font-mono: 'JetBrains Mono', 'Microsoft YaHei', 'PingFang SC', monospace;
+}
+
+/*
+ * 英数等宽（设置项 `monoLatin`，默认开）。
+ *
+ * ── 为什么是「换整个变量」而不是给英文单独加一层字体规则 ──
+ *
+ * 浏览器的字体回退是**逐字符**的：一条栈里第一个含该字符字形的字体负责它。
+ * 所以只要把 JetBrains Mono 放到正文栈首位，ASCII 与数字自动走它、汉字自动
+ * 落到第二位的鸿蒙——不需要按 Unicode 区段拆 DOM，也不需要 `unicode-range`
+ * 那种容易出错的写法。
+ *
+ * ── 为什么不用 :not([data-mono-latin]) 的默认值 ──
+ *
+ * 属性缺失 = 开启，与设置项的默认值一致。这样全新安装、设置文件里还没有这个
+ * 键、以及导出产物没写属性——三种情况都直接落在「开启」上。若反过来要求显式
+ * 写 `data-mono-latin="1"`，任何漏写属性的场景都会静默掉回非等宽。
+ *
+ * ⚠️ 这条必须放在 `data-font='system'` 之后：两者特异性相同（都是
+ * `:root[attr]`），靠书写顺序让「等宽优先」覆盖「system 的正文栈」。system 档下
+ * 开英数等宽的结果是 `JetBrains Mono → 各平台中文字体`，英文等宽、中文走系统。
+ */
+:root:not([data-mono-latin='off']) {
+  --dv-font-sans: 'JetBrains Mono', 'HarmonyOS Sans SC', sans-serif;
+}
+
+/*
+ * system 档 + 英数等宽：英文已被 JetBrains 拿走，这里只需要中文回退。
+ *
+ * 不能沿用 system 档的栈：那里的 `Segoe UI` 是为英文准备的，而 JetBrains 已经
+ * 覆盖了英文，它留在中间只会空占一位。剩下三项是**跨平台并列**——各平台只装了
+ * 其中一种，互不遮蔽，属于回退链里唯一合理的并列场景。
+ */
+:root[data-font='system']:not([data-mono-latin='off']) {
+  --dv-font-sans: 'JetBrains Mono', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans', sans-serif;
 }
 
 /* ══════════════ 1. UI 主题（chrome） ══════════════

@@ -7,6 +7,7 @@ import type {
   EditorWrap,
   DocPayload,
   FontFamily,
+  MonoForLatin,
   GitState,
   RecentEntry,
   TreeNode,
@@ -81,6 +82,8 @@ export const useThemeStore = defineStore('theme', () => {
   const theme = ref<ThemeKey>(boot.theme)
   /** 字体族：随包分发的鸿蒙黑体 / 系统自带 */
   const fontFamily = ref<FontFamily>(boot.fontFamily)
+  /** 界面与正文的英数是否走等宽（默认开，纯排版口味） */
+  const monoLatin = ref<MonoForLatin>(boot.monoLatin)
   /** 正文 / 编辑区宽度：铺满画布，或限制在可读行宽 */
   const contentWidth = ref<ContentWidth>(boot.contentWidth)
   /** 侧栏折叠：状态在 settings.json，首帧即按偏好渲染，不闪一下再收 */
@@ -108,6 +111,18 @@ export const useThemeStore = defineStore('theme', () => {
     if (value === 'system') document.documentElement.dataset.font = 'system'
     else delete document.documentElement.dataset.font
     if (!applyingExternal) patchSettings({ fontFamily: value })
+  })
+  /*
+   * 英数等宽：关闭时写 `off`，开启时删掉属性。
+   *
+   * 与字体族同一套「缺失即默认」的打法，理由也一样：默认值是**开启**，所以
+   * 属性缺失必须等于开启。写 `data-mono-latin="on"` 会让任何漏写属性的场景
+   * （全新安装、老设置文件、导出产物）都静默掉回非等宽。
+   */
+  watch(monoLatin, value => {
+    if (value) delete document.documentElement.dataset.monoLatin
+    else document.documentElement.dataset.monoLatin = 'off'
+    if (!applyingExternal) patchSettings({ monoLatin: value })
   })
   watch(contentWidth, value => {
     // 挂到根节点：阅读列与编辑区都读这一个属性，切模式不会一宽一窄
@@ -139,6 +154,9 @@ export const useThemeStore = defineStore('theme', () => {
     // harmony 是属性缺失态（见 watch 里的说明），只处理 system
     if (fontFamily.value === 'system') document.documentElement.dataset.font = 'system'
     else delete document.documentElement.dataset.font
+    // 等宽默认开启，同样用「缺失 = 开启」表达
+    if (monoLatin.value) delete document.documentElement.dataset.monoLatin
+    else document.documentElement.dataset.monoLatin = 'off'
     // 首帧就把明暗写进 DOM 并推给主进程：否则浅色主题启动会闪一帧深色外观
     void applyAppearance()
   }
@@ -170,6 +188,7 @@ export const useThemeStore = defineStore('theme', () => {
     editorWrap.value = next.editorWrap
     theme.value = next.theme
     fontFamily.value = next.fontFamily
+    monoLatin.value = next.monoLatin
     applyingExternal = false
   }
 
@@ -209,6 +228,7 @@ export const useThemeStore = defineStore('theme', () => {
     theme,
     appearance,
     fontFamily,
+    monoLatin,
     contentWidth,
     sidebarCollapsed,
     editorWrap,

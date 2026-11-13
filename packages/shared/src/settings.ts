@@ -55,6 +55,21 @@ export type EditorWrap = 'wrap' | 'nowrap'
 export type FontFamily = 'harmony' | 'system'
 
 /**
+ * 是否让界面与正文里的**英文与数字**也走等宽字体。
+ *
+ * 开启时正文栈变成 `JetBrains Mono → 鸿蒙`：ASCII 用等宽，汉字自动落到鸿蒙。
+ * 效果是「整个界面的英数都对齐成格」，数字列表、版本号、路径、表格会整齐很多，
+ * 代价是英文单词的字符间距比无衬线字体松散一些。
+ *
+ * 默认开启。之所以做成开关而不是直接写死：这是纯粹的排版口味，有人觉得整齐、
+ * 有人觉得松散，没有对错——不该由实现单方面决定。
+ *
+ * 实现上不新增一条字体栈，而是复用 `--dv-font-mono`：把它的顺序提到正文栈
+ * 前面即可，中文回退逻辑完全不变。
+ */
+export type MonoForLatin = boolean
+
+/**
  * 桌面外壳行为。
  *
  * 为什么放在 settings.json 而不是 service.json：
@@ -74,6 +89,8 @@ export interface AppSettings {
   theme: string
   /** 界面与正文的字体族（默认随包分发的鸿蒙黑体） */
   fontFamily: FontFamily
+  /** 界面与正文里的英文数字是否也走等宽（默认开） */
+  monoLatin: MonoForLatin
   locale: LocaleCode
   tabs: TabPreferences
   contentWidth: ContentWidth
@@ -120,6 +137,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'graphite',
   // 默认随包分发的鸿蒙黑体（见 theme.css 的 @font-face）
   fontFamily: 'harmony',
+  // 默认让英数也走等宽：整份界面横向对齐，读表格与路径时省眼
+  monoLatin: true,
   locale: 'zh',
   tabs: { ...DEFAULT_TAB_PREFERENCES },
   // 默认铺满：内容宽度是「想专注读」时才需要的约束，不该一上来就限死
@@ -185,6 +204,11 @@ export function normalizeSettings(raw: unknown): AppSettings {
       ['harmony', 'system'] as const,
       DEFAULT_SETTINGS.fontFamily,
     ),
+    /*
+     * 缺省视为开启：这是升级后新加的键，老用户的 settings.json 里没有它。
+     * 用 `=== false` 而不是 `=== true`，缺失时才会落到默认开。
+     */
+    monoLatin: record.monoLatin !== false,
     locale: pick(record.locale, ['zh', 'en'] as const, DEFAULT_SETTINGS.locale),
     tabs: {
       maxTabs: clampInt(tabsRaw.maxTabs, 0, 200, DEFAULT_TAB_PREFERENCES.maxTabs),
