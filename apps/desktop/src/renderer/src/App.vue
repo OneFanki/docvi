@@ -765,7 +765,7 @@ async function onExternalChange(absolutePath: string): Promise<void> {
    */
   if (isVisible && !editing.value) {
     leaveView(handoff, {
-      topLine: readerRef.value?.getTopLine() ?? 0,
+      topLine: readerRef.value?.getTopLine() ?? -1,
       scrollTop: readerRef.value?.getScroll() ?? 0,
     })
     touched()
@@ -846,7 +846,7 @@ async function onWorkspaceFilesChanged(change: WorkspaceFilesChange): Promise<vo
        */
       if (isVisible && !editing.value) {
         leaveView(handoff, {
-          topLine: readerRef.value?.getTopLine() ?? 0,
+          topLine: readerRef.value?.getTopLine() ?? -1,
           scrollTop: readerRef.value?.getScroll() ?? 0,
         })
         touched()
@@ -995,19 +995,67 @@ function positionTrustworthy(ref: DocRef): boolean {
   return ref.topLine > 0 || ref.scrollY < 40
 }
 
+/**
+ * 当前排版签名：决定「上次记的像素值还算不算数」。
+ *
+ * 只含**稳定**的排版设置：字体族、英数等宽、正文宽度。这三样一变，整篇
+ * 高度就重排，像素值必然失效。
+ *
+ * ⚠️ 不要放 `scrollHeight`。它随图片解码、mermaid 渲染、字体加载而变，
+ * 在「刚挂载 vs 已稳定」两个时刻本来就不同——放进来会让签名永远对不上，
+ * 于是每次都走源行分支，而源行只能定位到块起点，落点就偏了。
+ */
+function layoutSignature(): string {
+  return [theme.fontFamily, theme.monoLatin ? 'mono' : 'sans', theme.contentWidth].join('|')
+}
+
+/**
+ * 按一条记录恢复阅读位置。三处调用（切标签 / 重渲染 / 历史导航）共用。
+ *
+ * 判据顺序不能反：
+ *  1. 排版签名一致 → 像素精确（块级源行定位在高块内部会差几十像素）；
+ *  2. 签名变了或缺失 → 排版重排过，像素失效，退回源行；
+ *  3. 源行也不可用 → 像素兜底。
+ */
+function applyRecordedPosition(ref: DocRef): void {
+  const reader = readerRef.value
+  if (!reader) return
+  const unchanged = Boolean(ref.layoutKey) && ref.layoutKey === layoutSignature()
+  if (!unchanged && positionTrustworthy(ref)) {
+    if (reader.scrollToSourceLine(ref.topLine)) {
+      logPosition({ via: 'source', topLine: ref.topLine, after: Math.round(reader.getScroll()) })
+      return
+    }
+  }
+  reader.restoreScroll(ref.scrollY)
+  logPosition({
+    via: 'pixel',
+    scrollY: Math.round(ref.scrollY),
+    after: Math.round(reader.getScroll()),
+  })
+}
+
+/**
+ * 位置恢复的取证日志。
+ *
+ * 这个 bug 只能靠时序取证：一次切标签会触发多次 `rendered`，每次都会恢复
+ * 位置；只凭最终读数分不清「哪一次恢复了什么、之后又被谁覆盖」。
+ * 写进 `window.__posLog` 而不是 console——CDP 连上之前发生的记录会丢。
+ *
+ * 零成本：数组不存在时直接返回，生产环境不会创建它。探针在页面脚本执行前
+ * 用 `Page.addScriptToEvaluateOnNewDocument` 注入空数组即可开启。
+ */
+function logPosition(entry: Record<string, unknown>): void {
+  const bucket = (window as unknown as { __posLog?: unknown[] }).__posLog
+  if (!bucket) return
+  bucket.push({ t: Math.round(performance.now()), ...entry })
+}
+
 async function restoreScroll(): Promise<void> {
   const ref = activeRef.value
   if (!ref) return
   await nextTick()
-  /*
-   * 优先按源行落位，像素只作兜底。
-   *
-   * 为什么不能只用 scrollY：字体、正文宽度这些排版设置一改，整篇高度就变了，
-   * 同一个像素值指向的是别的内容，新排版更短时还会被浏览器 clamp 到顶部——
-   * 用户看到的就是「切个标签回来文档回顶了」。
-   */
-  if (positionTrustworthy(ref) && readerRef.value?.scrollToSourceLine(ref.topLine)) return
-  readerRef.value?.restoreScroll(ref.scrollY)
+  applyRecordedPosition(ref)
 }
 
 /**
@@ -1025,7 +1073,7 @@ function rememberReadingPosition(): void {
    * 可能还在待发队列里。不冲出去的话，那次滚动就永远丢了。
    */
   reader.flushScroll()
-  tabs.setScroll(tabs.activeId ?? '', reader.getScroll(), reader.getTopLine())
+  tabs.setScroll(tabs.activeId ?? '', reader.getScroll(), reader.getTopLine(), layoutSignature())
 }
 
 /**
@@ -1038,7 +1086,8 @@ function rememberReadingPosition(): void {
 function onReaderScrolled(payload: { topLine: number; scrollY: number }): void {
   const tabId = tabs.activeId
   if (!tabId) return
-  tabs.setScroll(tabId, payload.scrollY, payload.topLine)
+  logPosition({ via: 'report', scrollY: Math.round(payload.scrollY), topLine: payload.topLine })
+  tabs.setScroll(tabId, payload.scrollY, payload.topLine, layoutSignature())
 }
 
 /* ---------- 标签操作 ---------- */
@@ -1365,6 +1414,7 @@ async function navigateInTab(tabId: string, relPath: string, newTab: boolean): P
       title: payload.title,
       scrollY: 0,
       topLine: -1,
+      layoutKey: '',
     })
     revealInTree(result.tab.id, relPath)
     await ensureDocLoaded(tabs.currentDocOf(result.tab.id) as DocRef)
@@ -1393,6 +1443,7 @@ async function navigateInTab(tabId: string, relPath: string, newTab: boolean): P
     title: payload.title,
     scrollY: 0,
     topLine: -1,
+    layoutKey: '',
   })
   docMode.value = 'read'
   await store.touchRecent({
@@ -1469,6 +1520,7 @@ async function openStandalone(absolutePath: string): Promise<void> {
       title: payload.title,
       scrollY: 0,
       topLine: -1,
+      layoutKey: '',
     })
     await ensureTabReady(result.tab)
     await store.touchRecent({
@@ -1782,9 +1834,7 @@ async function stepHistory(delta: number): Promise<void> {
   docMode.value = 'read'
   await ensureDocLoaded(next)
   await nextTick()
-  /* 源行优先：历史里那一条也可能是排版改过之前记下的位置 */
-  if (positionTrustworthy(next) && readerRef.value?.scrollToSourceLine(next.topLine)) return
-  readerRef.value?.restoreScroll(next.scrollY)
+  applyRecordedPosition(next)
 }
 
 /* ---------- 关闭标签 ---------- */
@@ -1964,6 +2014,11 @@ function cancelSwitcher(): void {
 function onRendered(payload: { path: string; title: string }): void {
   const tab = activeTab.value
   const ref = activeRef.value
+  logPosition({
+    via: 'rendered',
+    hasReader: Boolean(readerRef.value),
+    path: payload.path,
+  })
   if (!tab || !ref) return
   if (payload.title) tabs.setDocTitle(tab.id, payload.title)
   /*
@@ -1976,8 +2031,8 @@ function onRendered(payload: { path: string; title: string }): void {
    */
   const anchor = takeAnchor(handoff)
   if (anchor !== null && readerRef.value?.scrollToSourceLine(anchor)) return
-  if (positionTrustworthy(ref) && readerRef.value?.scrollToSourceLine(ref.topLine)) return
-  readerRef.value?.restoreScroll(ref.scrollY)
+  applyRecordedPosition(ref)
+  logPosition({ via: 'rendered-done', scrollY: Math.round(readerRef.value?.getScroll() ?? -1) })
 }
 
 /** 保存成功：标签标题按新正文的首个 H1 更新（其它状态在文档模型里已同步） */
@@ -2037,7 +2092,7 @@ function setDocMode(mode: DocMode): void {
   const position =
     from === 'read'
       ? {
-          topLine: readerRef.value?.getTopLine() ?? 0,
+          topLine: readerRef.value?.getTopLine() ?? -1,
           scrollTop: readerRef.value?.getScroll() ?? 0,
         }
       : {

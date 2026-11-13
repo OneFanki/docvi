@@ -38,12 +38,25 @@ test('没有位置读数时锚点为空，不是 0（0 会把页面钉到顶部�
   assert.equal(peekAnchor(handoff), null)
 })
 
-test('源行取整且不为负', () => {
+test('源行取整，负数（未知）记为无锚点', () => {
   const handoff = createHandoff()
   leaveView(handoff, { topLine: 12.7, scrollTop: 0 })
   assert.equal(peekAnchor(handoff), 13)
+
+  /*
+   * 负数是 ReaderView.getTopLine 的哨兵，表示「这一篇读不到源行」。
+   *
+   * 曾经这里写的是 `Math.max(0, …)`，把 -1 压成 0——0 是**合法坐标**
+   * （用户就在最顶部），保存它等于谎称「他当时看着开头」，恢复时
+   * `scrollToSourceLine(0)` 会把文档拽回顶部。这是「切标签回顶」的最后一层
+   * 成因：文件监视回调在阅读视图刚重挂载、还没排版完时读位置，拿到 -1。
+   */
   leaveView(handoff, { topLine: -5, scrollTop: 0 })
-  assert.equal(peekAnchor(handoff), 0)
+  assert.equal(peekAnchor(handoff), null, '未知位置不能记成 0（0 是「在最顶部」）')
+
+  /* 0 必须能存下来：用户真的在最顶部时，恢复就该回到顶部 */
+  leaveView(handoff, { topLine: 0, scrollTop: 0 })
+  assert.equal(peekAnchor(handoff), 0, '合法的 0 要保留')
 })
 
 test('取锚点后必须清空（否则渲染多次会把页面反复拽回原处）', () => {

@@ -51,6 +51,17 @@ export interface DocRef {
   scrollY: number
   /** 视口顶部的源行（1 基）。0 表示没记过 */
   topLine: number
+  /**
+   * 保存 `scrollY` 时的排版签名（字体 + 正文宽度 + 文档长度）。
+   *
+   * 用途：恢复时判断「像素值还能不能信」。
+   *  - 签名一致 → 排版没变，像素精确，直接用（块级源行定位在高块内部会有
+   *    几十到几百像素误差，像素反而更准）；
+   *  - 签名变了 → 排版重排过，像素失效，退回源行定位。
+   *
+   * 空串表示旧会话没有这个字段，按「未知」处理（走源行）。
+   */
+  layoutKey: string
 }
 
 export interface TabRecord {
@@ -165,6 +176,8 @@ function normalizeDocRef(value: unknown): DocRef | null {
      * 不能填 0——那等于谎称「用户当时在最顶上」，会把人拽回开头。
      */
     topLine: Number.isFinite(Number(raw.topLine)) ? Number(raw.topLine) : -1,
+    /* 老会话没有签名字段：空串表示「不知道当时的排版」，恢复时走源行 */
+    layoutKey: typeof raw.layoutKey === 'string' ? raw.layoutKey : '',
   }
 }
 
@@ -252,6 +265,7 @@ function migrateLegacy(): Persisted | null {
         title: tab.title ?? '',
         scrollY: tab.scrollY ?? 0,
         topLine: tab.topLine ?? -1,
+        layoutKey: '',
       })
       if (!ref) continue
       const isFile = ref.workspaceId === null
@@ -481,6 +495,7 @@ export const useTabsStore = defineStore('tabs', () => {
       title: input.title,
       scrollY: 0,
       topLine: -1,
+      layoutKey: '',
     }
     const tab: TabRecord = {
       id: newId(),
@@ -535,22 +550,23 @@ export const useTabsStore = defineStore('tabs', () => {
   }
 
   /**
-   * 回写某篇的阅读位置：像素与源行一起存。
+   * 回写某篇的阅读位置。
    *
-   * 两个都存不是冗余：源行是排版无关的稳定坐标（字体/宽度改完仍然对），
-   * 像素值在「没有源行标注」的文档（如渲染失败的半成品）里是唯一能用的信息。
+   * 三样一起存：像素、源行、排版签名。恢复时按签名决定信哪个——
+   * 签名一致说明排版没变，像素精确（块级源行定位在高块内部会差几十像素）；
+   * 签名变了说明重排过，像素失效，只能靠源行。
    */
-  function setScroll(tabId: string, scrollY: number, topLine = 0): void {
+  function setScroll(tabId: string, scrollY: number, topLine = -1, layoutKey = ''): void {
     const tab = tabs.value.find(item => item.id === tabId)
     const ref = tab ? currentDocOf(tab) : null
     if (!ref) return
     ref.scrollY = scrollY
     /*
      * 0 是合法坐标（用户正看着开头），-1 表示「这篇没有行号信息」。
-     * 只拒绝负数，不要写成 `> 0`——那会把「在最顶部」也吞掉，
-     * 下次恢复就退化成像素，换字体后落到别处。
+     * 只拒绝负数，不要写成 `> 0`——那会把「在最顶部」也吞掉。
      */
     if (topLine >= 0) ref.topLine = topLine
+    if (layoutKey) ref.layoutKey = layoutKey
   }
 
   /** 更新当前文档标题（正文渲染完成后首个 H1 才知道） */

@@ -103,31 +103,36 @@ test('正文里点开另一篇文档时保存', () => {
 
 /* ---------- 恢复：源行优先 ---------- */
 
-test('恢复时源行优先，像素只作兜底', () => {
-  const body = bodyOf('restoreScroll')
-  const lineAt = body.indexOf('scrollToSourceLine(ref.topLine)')
+test('恢复时按排版签名决定信像素还是源行', () => {
+  /*
+   * 只按源行会「停在块开头」——`scrollToSourceLine` 只能定位到块的起点，
+   * 用户滚到长代码块中间时，切回来会跳到块首（实测偏差几百像素）。
+   * 只按像素会在改字体/宽度后落到别处，因为整篇高度重排了。
+   *
+   * 所以判据是排版签名：没变 → 像素精确；变了 → 退回源行。
+   */
+  const body = bodyOf('applyRecordedPosition')
+  const sigAt = body.indexOf('layoutSignature()')
+  const lineAt = body.indexOf('scrollToSourceLine')
   const pixelAt = body.indexOf('restoreScroll(ref.scrollY)')
-  assert.ok(lineAt > 0, '恢复要先尝试按源行落位')
-  assert.ok(pixelAt > lineAt, '像素恢复只能排在源行之后当兜底')
+  assert.ok(sigAt > 0, '必须先比对排版签名')
+  assert.ok(lineAt > sigAt, '签名不一致时才走源行')
+  assert.ok(pixelAt > lineAt, '源行不可用时像素兜底')
 })
 
-test('重渲染后也按源行落位（否则主题/字体一改就被拽走）', () => {
-  /*
-   * 高亮、mermaid、主题切换都会再触发一次 `rendered`。那时拿旧记忆强行落位，
-   * 用户正在看的位置会被拉回旧处，表现为「什么都没动，页面自己跳了」。
-   */
+test('三处恢复入口共用同一套判据', () => {
+  /* 各写一套必然漂移：一处修好另一处还是旧逻辑，问题就「只在一半场景下复现」 */
+  for (const name of ['restoreScroll', 'stepHistory', 'onRendered']) {
+    assert.match(bodyOf(name), /applyRecordedPosition\(/, `${name} 必须走统一判据`)
+  }
+})
+
+test('重渲染时视图锚点仍优先（切视图不丢视野）', () => {
   const body = bodyOf('onRendered')
   const anchorAt = body.indexOf('takeAnchor(handoff)')
-  const lineAt = body.indexOf('scrollToSourceLine(ref.topLine)')
-  const pixelAt = body.indexOf('restoreScroll(ref.scrollY)')
-  assert.ok(anchorAt > 0, '视图切换的锚点仍要优先')
-  assert.ok(lineAt > anchorAt, '锚点之后要按记忆的源行落位')
-  assert.ok(pixelAt > lineAt, '像素只能最后兜底')
-})
-
-test('标签内历史导航也按源行恢复', () => {
-  const body = bodyOf('stepHistory')
-  assert.match(body, /scrollToSourceLine\(next\.topLine\)/, '历史条目同样记了源行，要用上')
+  const applyAt = body.indexOf('applyRecordedPosition(ref)')
+  assert.ok(anchorAt > 0, '要取视图切换的锚点')
+  assert.ok(applyAt > anchorAt, '锚点优先，其次才是标签记忆的位置')
 })
 
 /* ---------- 持续上报：位置不能等到切走才落盘 ---------- */
@@ -183,4 +188,54 @@ test('源行为 0 时不能盲信（旧会话把它当缺省值）', () => {
   const body = bodyOf('positionTrustworthy')
   assert.match(body, /ref\.topLine < 0/, '负数（未知）必须直接判不可信')
   assert.match(body, /ref\.topLine > 0 \|\| ref\.scrollY < 40/, '0 只有在像素也接近顶部时才可信')
+})
+
+/* ---------- 恢复期的副作用不能写回存储 ---------- */
+
+test('恢复位置期间抑制滚动上报', () => {
+  /*
+   * 恢复把 scrollTop 设成 1733，浏览器随后还会因布局重排、图片解码再发几次
+   * scroll。若这些也上报，最后一条会把刚恢复的正确值覆盖成中间态
+   * （实测 1733 → 95），表现为「恢复成功但界面仍回顶」。
+   */
+  const reader = readFileSync(
+    new URL('apps/desktop/src/renderer/src/components/ReaderView.vue', ROOT),
+    'utf8',
+  )
+  assert.match(reader, /if \(restoring\) return/, '上报入口要先检查恢复标志')
+  assert.match(reader, /function beginRestore\(\)/, '要有开窗函数')
+
+  /* 三个程序性滚动入口都要开窗 */
+  for (const method of ['restoreScroll:', 'scrollToRatio:', 'scrollToSourceLine:']) {
+    const at = reader.indexOf(method)
+    assert.ok(at > 0, `找不到 ${method}`)
+    const body = reader.slice(at, at + 1400)
+    assert.match(body, /beginRestore\(\)/, `${method} 设置 scrollTop 前要开窗抑制上报`)
+  }
+})
+
+test('读不到源行时默认值必须是 -1，不能是 0', () => {
+  /*
+   * 三处 `getTopLine() ?? 0` 都曾是埋点：阅读视图刚重挂载、还没排版完时
+   * 读位置会拿到 -1，被 `?? 0` 变成 0，再经 leaveView 的 `Math.max` 固化成
+   * 「用户在最顶部」，最后被 onRendered 拿去 scrollToSourceLine(0) 拽回顶部。
+   *
+   * 只查阅读视图：编辑器的 getTopLine 没有 -1 语义，`?? 0` 对它是正确的。
+   */
+  const app = readFileSync(new URL('apps/desktop/src/renderer/src/App.vue', ROOT), 'utf8')
+  const offenders = [...app.matchAll(/readerRef\.value\?\.getTopLine\(\) \?\? 0/g)]
+  assert.equal(offenders.length, 0, '阅读视图 getTopLine 的默认值必须是 -1（未知），不能是 0')
+})
+
+test('排版签名只在排版设置变化时改变，不含内容高度', () => {
+  /*
+   * 签名里放 `scrollHeight` 会让它永远对不上：图片解码、mermaid 渲染、
+   * 字体加载都会改内容高度，刚挂载与稳定态天然不同。那样每次都走源行分支，
+   * 而源行只能定位到块起点，落点必然偏。
+   */
+  const body = bodyOf('layoutSignature')
+  for (const field of ['fontFamily', 'monoLatin', 'contentWidth']) {
+    assert.ok(body.includes(`theme.${field}`), `签名要含 ${field}`)
+  }
+  assert.doesNotMatch(body, /scrollHeight|getContentHeight/, '签名不能含内容高度')
 })

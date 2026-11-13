@@ -41,9 +41,20 @@ export function createHandoff(): ViewHandoff {
  *
  * 只认源行——像素值在这里没有跨视图意义，存下来只会制造「好像恢复了但其实
  * 偏了几屏」的假象。
+ *
+ * ⚠️ 负数是「读不到源行」的哨兵（见 ReaderView.getTopLine）。**不能**用
+ * `Math.max(0, …)` 把它压成 0：0 是合法坐标（用户在最顶部），压成 0 等于
+ * 谎称「他当时看着开头」，恢复时会把文档拽回顶部。这是「切标签回顶」的最后
+ * 一层成因——文件监视回调在阅读视图刚重新挂载、还没排版完时读位置，拿到 -1，
+ * 被压成 0 存进锚点，随后 onRendered 拿它去 `scrollToSourceLine(0)`。
  */
 export function leaveView(handoff: ViewHandoff, position: ViewPosition | null): void {
-  handoff.anchor = position ? Math.max(0, Math.round(position.topLine)) : null
+  if (!position) {
+    handoff.anchor = null
+    return
+  }
+  const line = Math.round(position.topLine)
+  handoff.anchor = line >= 0 ? line : null
 }
 
 /**

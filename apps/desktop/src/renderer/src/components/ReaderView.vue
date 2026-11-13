@@ -516,7 +516,30 @@ async function onContentClick(event: MouseEvent): Promise<void> {
  */
 let scrollReportTimer: ReturnType<typeof setTimeout> | null = null
 let pendingScroll: { topLine: number; scrollY: number } | null = null
+/**
+ * 正在按记录恢复位置。
+ *
+ * 恢复本身会触发 scroll 事件：把 scrollTop 设成 1733 后，浏览器还会因布局
+ * 重排、图片解码再发出几次 scroll。若这些也上报，最后一条会把刚才恢复的
+ * 正确值覆盖成中间态（实测 1733 → 95），于是「恢复成功但界面仍然回顶」。
+ *
+ * 抑制窗口取 300ms：大于 200ms 的节流间隔，覆盖完整一次恢复。
+ */
+let restoring = false
+let restoringTimer: ReturnType<typeof setTimeout> | null = null
+
+function beginRestore(): void {
+  restoring = true
+  if (restoringTimer) clearTimeout(restoringTimer)
+  restoringTimer = setTimeout(() => {
+    restoring = false
+    restoringTimer = null
+  }, 300)
+}
+
 function reportScroll(): void {
+  /* 恢复过程引发的 scroll 是副作用，不是用户操作，不能写回存储 */
+  if (restoring) return
   const el = scroller.value
   if (!el) return
   const surface = host.value?.querySelector<HTMLElement>('.at-doc')
@@ -598,8 +621,13 @@ defineExpose({
     return Number.isFinite(firstLine) ? 0 : -1
   },
   restoreScroll: (y: number) => {
-    if (scroller.value) scroller.value.scrollTop = y
+    if (!scroller.value) return
+    /* 恢复引发的 scroll 是副作用，不能当作「用户滚到了这里」上报回去 */
+    beginRestore()
+    scroller.value.scrollTop = y
   },
+  /** 内容总高度：排版签名的一部分，用来判断「像素值还算不算数」 */
+  getContentHeight: (): number => scroller.value?.scrollHeight ?? 0,
   /**
    * 按比例滚动（0–1）：分屏时左侧源码滚到哪，右侧就滚到对应的相对位置。
    *
@@ -611,6 +639,7 @@ defineExpose({
     if (!el) return
     const range = el.scrollHeight - el.clientHeight
     if (range <= 0) return
+    beginRestore()
     el.scrollTop = Math.max(0, Math.min(1, ratio)) * range
   },
   /**
@@ -648,10 +677,12 @@ defineExpose({
        */
       const firstLine = Number(blocks[0]?.dataset.sourceLine)
       if (Number.isFinite(firstLine) && line >= firstLine) return false
+      beginRestore()
       el.scrollTop = 0
       return true
     }
     const top = target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+    beginRestore()
     el.scrollTop = Math.max(0, top)
     return true
   },
