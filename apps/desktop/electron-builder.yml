@@ -59,6 +59,16 @@ extraResources:
   # （见 tray.ts「不要 resize 到 16」的说明）
   - from: build/tray.png
     to: tray.png
+  # 字体许可原文。
+  #
+  # ⚠️ 必须随产物分发，不是可选项：HarmonyOS Sans 的许可要求「随附版权声明与
+  # 协议原文」，JetBrains Mono 的 OFL 同样要求。字体本身经 Vite 打进
+  # out/renderer/assets/（被 CSS 引用），但这两个 .txt 没有任何代码引用它们，
+  # 因此不会自动进 asar——实测第一版产物里一份 LICENSE 都没有。
+  - from: ../../packages/renderer-core/src/assets/fonts
+    to: licenses/fonts
+    filter:
+      - 'LICENSE-*.txt'
 
 npmRebuild: false
 

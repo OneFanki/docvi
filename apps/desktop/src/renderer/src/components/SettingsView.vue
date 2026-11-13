@@ -1085,7 +1085,8 @@ async function openLogs(): Promise<void> {
             第三方字体声明。
             HarmonyOS Sans 的许可要求「在软件中显著声明使用了该字体」，这里就是
             那个声明。JetBrains Mono 用 OFL-1.1，同样在此一并列出便于溯源。
-            两份许可原文随包放在 packages/renderer-core/src/assets/fonts/。
+            两份许可原文由 electron-builder 的 extraResources 打进产物的
+            resources/licenses/fonts/，仓库内的原件在 packages/renderer-core/src/assets/fonts/。
           -->
           <div class="row">
             <span class="row__label">{{ t('about.fonts') }}</span>

@@ -48,6 +48,25 @@ test('两份字体许可原文都随包', () => {
   assert.match(readFileSync(jetbrains, 'utf8'), /SIL OPEN FONT LICENSE/i)
 })
 
+test('许可原文被打进安装包（仓库里有不等于产物里有）', () => {
+  /*
+   * 仓库里有原文不代表用户拿到的安装包里有。
+   *
+   * 打包配置的 `files` 只收 `out/**`——字体因为被 CSS 引用所以进了
+   * out/renderer/assets/，而这两个 .txt 没有任何代码引用，**不会**自动进
+   * asar。实测第一版 0.7.0 产物：6 个字体全在，LICENSE 一个都没有。
+   * 现在靠 extraResources 显式带进去。
+   */
+  const builder = readFileSync(new URL('apps/desktop/electron-builder.yml', ROOT), 'utf8')
+  const extra = builder.slice(builder.indexOf('extraResources:'))
+  assert.match(extra, /LICENSE-\*\.txt/, '打包配置要显式带上许可原文')
+  assert.match(
+    extra,
+    /from:\s*\.\.\/\.\.\/packages\/renderer-core\/src\/assets\/fonts/,
+    '许可来源目录要指向字体资产目录',
+  )
+})
+
 test('鸿蒙字体未被子集化（许可要求 unmodified copies）', () => {
   /*
    * 子集化能把 12.4MB 压到 2.7MB，非常诱人，但那属于「修改字体文件」。
