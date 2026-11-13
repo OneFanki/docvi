@@ -129,7 +129,6 @@ const zh: Dict = {
   'settings.service': '本地服务',
   'settings.exposureHint': 'MCP 与临时分享共用这一个进程、端口和令牌；关掉它两者一起停。',
   'settings.mcpSection': 'MCP（给 AI 用）',
-  'settings.mcpHint': '把这个端点与令牌填进 MCP 客户端，AI 就能检索当前工作区的文档。',
   'settings.status': '状态',
   'settings.serviceRestart': '重启服务',
   'settings.running': '运行中',
@@ -142,8 +141,6 @@ const zh: Dict = {
   'settings.hide': '隐藏令牌',
   'settings.mcpConfig': 'MCP 客户端配置',
   'settings.copyJson': '复制 JSON',
-  'settings.toolsHint':
-    '工具：list_plugins / list_components / get_component_docs / get_plugin_docs / search_docs / read_doc / list_workspaces / write_doc。AI 默认只新建、不覆盖；未指定位置时写进「文档/docvi」。工作区增减会自动同步到服务。',
   'settings.lan': '局域网访问',
   'settings.lanOn': '已开启：同一网络的设备可访问（需令牌）',
   'settings.lanOff': '仅本机可访问',
@@ -192,7 +189,6 @@ const zh: Dict = {
     '下载经过校验后才会执行安装。安装包尚未做代码签名，系统可能提示「未知发布者」，这是当前版本的已知边界。',
   'settings.appearance': '外观',
   'settings.theme': '主题',
-  'theme.lead': '选中即整套生效。插件也可以提供主题，一个插件里可以带多套。',
   'theme.builtin': '内置主题',
   'theme.fromPlugin': '来自插件 {name}',
   'theme.badge': '插件',
@@ -200,17 +196,11 @@ const zh: Dict = {
   'theme.mist': '薄雾',
   'theme.graphite': '石墨',
   'theme.paper': '纸张',
-  'settings.themeHint': '一个主题就是整套配色：窗口、正文、编辑器一起变。',
   'settings.font': '字体',
   'settings.fontHarmony': '鸿蒙黑体',
   'settings.fontSystem': '系统字体',
-  'settings.fontHarmonyHint': '随应用分发的 HarmonyOS Sans SC，界面与正文统一字形',
-  'settings.fontSystemHint': '用本机已安装的界面字体（Windows 上是微软雅黑）',
-  'settings.fontHint':
-    '代码块固定用 JetBrains Mono：鸿蒙没有公开的等宽版本，代码必须等宽才能对齐。',
   'settings.editorWrap': '源码折行',
-  'settings.editorWrapHint':
-    '折行：长行自动换到下一行（默认）。不折行：一行就是一行，超宽时横向滚动，适合对齐表格与宽代码块。',
+  'settings.editorWrapHint': '不折行时超宽内容横向滚动，适合对齐表格与宽代码块。',
   'settings.language': '语言',
   'tabmenu.close': '关闭标签页',
   'tabmenu.closeOthers': '关闭其他标签页',
@@ -408,7 +398,6 @@ const zh: Dict = {
   'confirm.save': '保存并关闭',
   'confirm.discard': '不保存',
   'confirm.cancel': '取消',
-  'settings.storageHint': '设置保存在 userData/settings.json，可直接编辑或导出。',
   'file.outsideHint': '该文件不在任何工作区内',
   'settings.openDataDir': '打开数据目录',
 
@@ -588,8 +577,6 @@ const en: Dict = {
   'settings.exposureHint':
     'MCP and temporary shares share this one process, port and token; stopping it stops both.',
   'settings.mcpSection': 'MCP (for AI)',
-  'settings.mcpHint':
-    'Wire this endpoint and token into an MCP client so AI can search the current workspace.',
 
   'settings.status': 'Status',
   'settings.serviceRestart': 'Restart service',
@@ -603,8 +590,6 @@ const en: Dict = {
   'settings.hide': 'Hide token',
   'settings.mcpConfig': 'MCP client config',
   'settings.copyJson': 'Copy JSON',
-  'settings.toolsHint':
-    'Tools: list_plugins / list_components / get_component_docs / get_plugin_docs / search_docs / read_doc / list_workspaces / write_doc. AI can create but not overwrite silently; without a target it writes into “Documents/docvi”. Workspace changes sync automatically.',
   'settings.lan': 'LAN access',
   'settings.lanOn': 'Enabled: devices on the same network can connect (token required)',
   'settings.lanOff': 'Local machine only',
@@ -656,8 +641,6 @@ const en: Dict = {
     'The installer is downloaded and verified before it runs. Builds are not code-signed yet, so the system may warn about an unknown publisher — that is a known limit of this release.',
   'settings.appearance': 'Appearance',
   'settings.theme': 'Theme',
-  'theme.lead':
-    'Picking one applies to everything. Plugins can ship themes too, several per plugin.',
   'theme.builtin': 'Built-in theme',
   'theme.fromPlugin': 'From plugin {name}',
   'theme.badge': 'Plugin',
@@ -665,19 +648,12 @@ const en: Dict = {
   'theme.mist': 'Mist',
   'theme.graphite': 'Graphite',
   'theme.paper': 'Paper',
-  'settings.themeHint':
-    'One theme is one complete palette: window, document and editor change together.',
   'settings.font': 'Font',
   'settings.fontHarmony': 'HarmonyOS Sans',
   'settings.fontSystem': 'System font',
-  'settings.fontHarmonyHint':
-    'HarmonyOS Sans SC bundled with the app — one typeface across UI and text',
-  'settings.fontSystemHint': 'Use the UI font already installed on this machine',
-  'settings.fontHint':
-    'Code blocks always use JetBrains Mono: HarmonyOS has no public monospace cut, and code needs fixed width to align.',
   'settings.editorWrap': 'Source wrapping',
   'settings.editorWrapHint':
-    'Wrap: long lines flow to the next line (default). No wrap: one line stays one line and scrolls horizontally — handy for aligning tables and wide code blocks.',
+    'When off, wide content scrolls horizontally — useful for aligning tables and code blocks.',
   'settings.language': 'Language',
   'tabmenu.close': 'Close tab',
   'tabmenu.closeOthers': 'Close other tabs',
@@ -875,7 +851,6 @@ const en: Dict = {
   'confirm.save': 'Save and close',
   'confirm.discard': "Don't save",
   'confirm.cancel': 'Cancel',
-  'settings.storageHint': 'Settings live in userData/settings.json — edit or export them directly.',
   'file.outsideHint': 'This file is not inside any workspace',
   'settings.openDataDir': 'Open data folder',
 

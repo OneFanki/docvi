@@ -23,7 +23,6 @@ function pick(id: string): void {
 
 <template>
   <div class="theme-picker">
-    <p class="theme-picker__lead">{{ t('theme.lead') }}</p>
     <div class="theme-picker__grid" role="radiogroup" :aria-label="t('settings.theme')">
       <button
         v-for="option in options"
@@ -56,13 +55,6 @@ function pick(id: string): void {
 </template>
 
 <style scoped>
-.theme-picker__lead {
-  margin: 0 0 12px;
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--dv-ui-text-muted);
-}
-
 .theme-picker__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));

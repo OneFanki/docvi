@@ -62,8 +62,8 @@ const WRAP_OPTIONS = computed(() => [
 
 /** 字体族两档：随包分发的鸿蒙黑体 / 系统自带 */
 const FONT_OPTIONS = computed(() => [
-  { id: 'harmony' as const, label: t('settings.fontHarmony'), hint: t('settings.fontHarmonyHint') },
-  { id: 'system' as const, label: t('settings.fontSystem'), hint: t('settings.fontSystemHint') },
+  { id: 'harmony' as const, label: t('settings.fontHarmony') },
+  { id: 'system' as const, label: t('settings.fontSystem') },
 ])
 
 /**
@@ -541,7 +541,6 @@ async function openLogs(): Promise<void> {
               <Bot :size="15" :stroke-width="1.8" /> {{ t('settings.mcpSection') }}
             </h2>
           </div>
-          <p class="hint">{{ t('settings.mcpHint') }}</p>
 
           <div class="row">
             <span class="row__label">{{ t('settings.endpoint') }}</span>
@@ -595,7 +594,6 @@ async function openLogs(): Promise<void> {
               </button>
             </div>
             <pre class="code">{{ mcpConfig || t('settings.noConfig') }}</pre>
-            <p class="hint">{{ t('settings.toolsHint') }}</p>
           </div>
         </section>
 
@@ -724,7 +722,6 @@ async function openLogs(): Promise<void> {
           「当前：xxx + 切换深浅」，插件主题等于藏起来了——插件装了也切不过去。
         -->
           <ThemePicker />
-          <p class="hint">{{ t('settings.themeHint') }}</p>
 
           <!--
             字体族：与主题并列放在外观分区。主题管颜色、字体管字形，两者都是
@@ -744,14 +741,12 @@ async function openLogs(): Promise<void> {
                 :style="{ fontFamily: fontPreview(option.id) }"
                 type="button"
                 :aria-pressed="theme.fontFamily === option.id"
-                :title="option.hint"
                 @click="theme.fontFamily = option.id"
               >
                 {{ option.label }}
               </button>
             </span>
           </div>
-          <p class="hint">{{ t('settings.fontHint') }}</p>
 
           <!--
             源码折行：这是编辑器排版偏好，不是主题的一部分（主题管颜色），
@@ -796,7 +791,6 @@ async function openLogs(): Promise<void> {
               </button>
             </span>
           </div>
-          <p class="hint">{{ t('settings.storageHint') }}</p>
         </section>
       </template>
 

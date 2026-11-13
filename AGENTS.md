@@ -112,6 +112,7 @@ docvi 把任意 Markdown 目录变成**可浏览 / 可搜索 / 可交互**的文
 | 决定文档该用什么表达（原生 / mermaid / 组件） | `docs/architecture/adr/0006-native-markdown-first.md`；skill `component-protocol`                      |
 | 改组件声明式协议 / `<at-*>` 标签              | skill `component-protocol`；`docs/architecture/组件协议.md`                                            |
 | 新增或改插件包                                | skill `plugin-development`；`docs/design/平台插件化与 AI 分发.md`                                      |
+| 往界面加提示文字 / 改设置页                   | `docs/engineering/界面文案规范.md`                                                                     |
 | 改容器部署器 / 运维 API                       | skill `deployer-ops`                                                                                   |
 | 改 Electron 宿主 / 桌面能力                   | `apps/desktop/src/main/`；`docs/design/docvi目标架构与实施总案.md`                                     |
 | 改主题令牌 / 新增内置主题                     | `packages/renderer-core/src/styles/theme.css`；`apps/desktop/src/renderer/src/lib/theme-options.ts`    |
