@@ -54,6 +54,36 @@ test('普通中文代码块不需要对齐（没有框线）', () => {
   assert.equal(needsAsciiAlignment('// 这是中文注释\nconst a = 1'), false)
 })
 
+/* ---------- 宽字符判定：Ambiguous 类 ---------- */
+
+test('带圈数字按全宽锁（①② 在东亚字体里占 2 栏）', () => {
+  /*
+   * East Asian Width 的 Ambiguous 类：`①` U+2460 在东亚环境按全宽渲染，
+   * 实测 13.5px vs ASCII 的 8.1px（约 1.67ch）。漏判它不会「稍微不齐」——
+   * 这一行少锁 0.67ch，后面所有框线一起偏，实测残差 5.43px。
+   */
+  for (const ch of ['①', '②', '⑩', '㉑']) {
+    const out = alignAsciiBlock(`│ ${ch} │`)
+    assert.match(out, new RegExp(`<span class="at-ascii-w2">${ch}</span>`), `${ch} 必须被锁宽`)
+  }
+})
+
+test('几何图形与装饰符号按全宽锁（Ambiguous 多见）', () => {
+  for (const ch of ['●', '■', '◆', '★', '✓', '✨']) {
+    const out = alignAsciiBlock(`│ ${ch} │`)
+    assert.match(out, new RegExp(`<span class="at-ascii-w2">${ch}</span>`), `${ch} 必须被锁宽`)
+  }
+})
+
+test('框线字符与箭头不锁（它们本来就是 1ch）', () => {
+  /*
+   * 实测：`─` `│` `┌` `→` `·` 在 JetBrains Mono 里都是 8.1px = 1ch，
+   * 包起来反而引入行内盒边界，破坏框线连续性。
+   */
+  const out = alignAsciiBlock('│ ─ → · │')
+  assert.doesNotMatch(out, /at-ascii-w2/)
+})
+
 /* ---------- 锁宽 ---------- */
 
 test('alignAsciiBlock 把汉字包成定宽 span，制表符保持裸文本', () => {

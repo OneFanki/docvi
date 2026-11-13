@@ -16,18 +16,17 @@ body,
 body {
   background: var(--dv-ui-bg);
   color: var(--dv-ui-text);
-  font-family:
-    'Inter',
-    'Segoe UI Variable Text',
-    'Segoe UI',
-    'Microsoft YaHei UI',
-    'Microsoft YaHei',
-    'PingFang SC',
-    'Hiragino Sans GB',
-    'Noto Sans SC',
-    system-ui,
-    -apple-system,
-    sans-serif;
+  /*
+   * ⚠️ 必须走变量，不能在这里硬编码字体栈。
+   *
+   * 这里曾经写死了一份 `Inter → Segoe UI Variable Text → …` 的完整链路，而
+   * theme.css 里另有一份 `--dv-font-sans`。两份并存时 body 上的直接声明赢过
+   * 变量，于是「换字体设置」完全不生效——变量改了，body 读的是写死那份，
+   * 所有继承 body 的界面与正文一起失效。CSS 变量本身完全正确，极难发现。
+   *
+   * 字体栈的唯一来源是 theme.css 的 --dv-font-sans（按 data-font 切换）。
+   */
+  font-family: var(--dv-font-sans);
   font-size: 13px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;

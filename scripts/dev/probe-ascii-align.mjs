@@ -34,11 +34,19 @@ const DOC = join(WS, 'ascii对齐探针.md')
 
 /* ---------- 图生成：逻辑宽度必须可算可证 ---------- */
 
-/** 与 ascii-align.ts 的 isFullWidth 同一套区间（这里独立实现，不复用源码） */
+/**
+ * 与 ascii-align.ts 的 isFullWidth 同一套区间。
+ *
+ * 这里独立实现而不是 import 源码：探针要能验证「源码里的判定是否够用」，
+ * 复用同一份实现就变成了自己证明自己。代价是两边必须手动同步——不一致时
+ * 探针会报「样本图不齐」，正好提醒去对齐。
+ */
 function isWide(ch) {
   const cp = ch.codePointAt(0) ?? 0
   return (
     (cp >= 0x1100 && cp <= 0x115f) ||
+    (cp >= 0x2460 && cp <= 0x24ff) ||
+    (cp >= 0x25a0 && cp <= 0x27bf) ||
     (cp >= 0x2e80 && cp <= 0x303e) ||
     (cp >= 0x3041 && cp <= 0x33ff) ||
     (cp >= 0x3400 && cp <= 0x4dbf) ||

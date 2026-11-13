@@ -497,6 +497,17 @@
   display: block;
   width: max-content;
   min-width: 100%;
+  /*
+   * ⚠️ 必须显式声明，不能靠从 <pre> 继承。
+   *
+   * 浏览器的 UA 样式表给 `code` 设了 `font-family: monospace`，这是**元素自身
+   * 的声明**，优先级高于从父元素继承来的值。所以只给 pre 设字体栈时：
+   *   pre  → "JetBrains Mono", "HarmonyOS Sans SC", monospace   ✓
+   *   code → monospace                                          ✗ 掉回系统等宽
+   * 症状是代码块里 ASCII 用系统等宽、中文落到宋体，看起来「字体没生效」，
+   * 而且 CSS 变量本身完全正确，极难靠读样式发现。
+   */
+  font-family: var(--dv-font-mono);
 }
 
 /*

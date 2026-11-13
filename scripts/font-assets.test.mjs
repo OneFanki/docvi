@@ -10,7 +10,7 @@
  * 所以用一条测试明确挡住它。
  */
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import test from 'node:test'
 
 const ROOT = new URL('..', import.meta.url)
@@ -149,6 +149,51 @@ test('设置页展示的字体顺序来自 CSS 计算值，不是另写一份', 
   assert.match(view, /getPropertyValue\(/, '字体链必须从 CSS 变量读，不能另写清单')
   assert.match(view, /--dv-font-sans/, '必须读正文栈变量')
   assert.match(view, /--dv-font-mono/, '必须读等宽栈变量')
+})
+
+test('界面不硬编码字体栈（唯一来源是 CSS 变量）', () => {
+  /*
+   * base.css 里曾经写死一份 `Inter → Segoe UI Variable Text → …`，与 theme.css
+   * 的 --dv-font-sans 并存。两份都在时 body 的直接声明赢过变量，于是**换字体
+   * 设置完全不生效**——变量改了，body 读的是写死那份。CSS 变量本身完全正确，
+   * 症状只是「改了但界面毫无变化」，极难发现。
+   *
+   * 判据：样式文件里出现 font-family 时，值必须是 var(...) 或 inherit。
+   */
+  const offenders = []
+  const roots = [
+    new URL('apps/desktop/src/renderer/src/styles/', ROOT),
+    new URL('packages/renderer-core/src/styles/', ROOT),
+  ]
+  for (const dir of roots) {
+    let names = []
+    try {
+      names = readdirSync(dir).filter(name => name.endsWith('.css'))
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      const css = readFileSync(new URL(name, dir), 'utf8')
+      /*
+       * 只扫**声明**，不扫注释：
+       *  - `@font-face` 块里的 font-family 是字体定义本身，跳过；
+       *  - 注释里会提到 `font-family: monospace` 这类示例，必须剥掉，
+       *    否则测试被自己的解释文字绊倒。
+       */
+      const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '')
+      const withoutFaces = withoutComments.replace(/@font-face\s*\{[^}]*\}/g, '')
+      for (const match of withoutFaces.matchAll(/font-family:\s*([^;]+);/g)) {
+        const value = match[1].trim()
+        if (/^var\(--|^inherit/.test(value)) continue
+        offenders.push(`${name}: font-family: ${value.slice(0, 60)}`)
+      }
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `样式里硬编码了字体栈，会让 --dv-font-* 失效：\n${offenders.join('\n')}`,
+  )
 })
 
 /* ---------- 设置项 ---------- */
