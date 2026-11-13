@@ -30,13 +30,19 @@ function valuesOf(prefix) {
 }
 
 test('设置页不解释字体选型理由', () => {
-  // 「鸿蒙没有等宽的公开版本」「固定用 JetBrains Mono」——这是为什么这么实现，
-  // 属于代码注释。用户只需要看到字体选项本身。
+  /*
+   * 「鸿蒙没有等宽的公开版本」「代码块固定用 JetBrains Mono」——这是为什么
+   * 这么实现，属于代码注释。
+   *
+   * 但**角色标注**（「英文等宽」「中文回退」）是另一回事：它描述字体栈里
+   * 每一项承担什么，正是设置页该说的。所以只挡「因为…所以…」式理由，
+   * 不挡「等宽」这个词本身。
+   */
   const hints = valuesOf('settings.font')
   for (const text of hints) {
     assert.doesNotMatch(
       text,
-      /JetBrains|等宽版本|monospace|没有公开/i,
+      /没有公开|固定用|所以|因为|monospace cut/i,
       `字体说明泄漏了实现理由：${text}`,
     )
   }

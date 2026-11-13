@@ -91,6 +91,40 @@ test('等宽栈保留鸿蒙作为 CJK 回退（代码块里的中文与界面同
   assert.match(mono, /HarmonyOS Sans SC/, '等宽栈需要鸿蒙做中文回退，否则落到宋体')
 })
 
+test('代码块的回退顺序是 JetBrains → 鸿蒙，不能颠倒', () => {
+  /*
+   * 顺序即语义：浏览器按「先到先得」逐字符回退。
+   *
+   *  - JetBrains 在前 → ASCII/框线等宽，汉字自动落到鸿蒙
+   *  - 若鸿蒙在前 → 它没有等宽变体，缩进与框线全歪
+   *
+   * 所以这两项的相对位置是硬约束，不是风格偏好。
+   */
+  const base = THEME_CSS.slice(THEME_CSS.indexOf(':root {'), THEME_CSS.indexOf('[data-font'))
+  const mono = /--dv-font-mono:\s*([^;]+);/.exec(base)?.[1] ?? ''
+  const names = mono
+    .split(',')
+    .map(item => item.trim().replace(/^['"]|['"]$/g, ''))
+    .filter(Boolean)
+  const jetbrains = names.indexOf('JetBrains Mono')
+  const harmony = names.indexOf('HarmonyOS Sans SC')
+  assert.ok(jetbrains >= 0, '等宽栈必须以 JetBrains Mono 开头')
+  assert.ok(harmony >= 0, '等宽栈需要鸿蒙兜中文')
+  assert.ok(jetbrains < harmony, `JetBrains 必须排在鸿蒙之前，实得 ${JSON.stringify(names)}`)
+})
+
+test('字体栈不堆不会命中的中间项', () => {
+  /*
+   * 鸿蒙 SC 同时含拉丁与汉字，它后面的项只在字体加载失败时才会用到。
+   * 链条过长会让设置页展示的「应用顺序」失去信息量——用户看不出哪一项真的
+   * 在起作用。正文栈限制在 3 项以内（首选 + 一个兜底 + 通用族关键字）。
+   */
+  const base = THEME_CSS.slice(THEME_CSS.indexOf(':root {'), THEME_CSS.indexOf('[data-font'))
+  const sans = /--dv-font-sans:\s*([^;]+);/.exec(base)?.[1] ?? ''
+  const count = sans.split(',').filter(item => item.trim()).length
+  assert.ok(count <= 3, `正文栈有 ${count} 项，过长会让「应用顺序」变成噪音：${sans.trim()}`)
+})
+
 test('字体切换只在 system 时写属性（缺失 = 鸿蒙）', () => {
   const store = readFileSync(new URL('apps/desktop/src/renderer/src/stores/app.ts', ROOT), 'utf8')
   assert.match(
@@ -98,6 +132,23 @@ test('字体切换只在 system 时写属性（缺失 = 鸿蒙）', () => {
     /if \(value === 'system'\)\s*document\.documentElement\.dataset\.font = 'system'\s*else\s*delete document\.documentElement\.dataset\.font/,
     'harmony 必须表现为「属性缺失」，否则漏写属性的场景会静默掉回系统字体',
   )
+})
+
+test('设置页展示的字体顺序来自 CSS 计算值，不是另写一份', () => {
+  /*
+   * 展示与实现必须是同一份数据。
+   *
+   * 如果在设置页里手写一遍字体清单，CSS 加了回退项界面不会跟着变——用户看到
+   * 的「应用顺序」就是假的，而且这种漂移没有任何其他测试能发现（两处都合法，
+   * 只是不一样）。所以约定：读 getComputedStyle 的 --dv-font-*。
+   */
+  const view = readFileSync(
+    new URL('apps/desktop/src/renderer/src/components/SettingsView.vue', ROOT),
+    'utf8',
+  )
+  assert.match(view, /getPropertyValue\(/, '字体链必须从 CSS 变量读，不能另写清单')
+  assert.match(view, /--dv-font-sans/, '必须读正文栈变量')
+  assert.match(view, /--dv-font-mono/, '必须读等宽栈变量')
 })
 
 /* ---------- 设置项 ---------- */

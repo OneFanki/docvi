@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   Bot,
   Check,
@@ -65,6 +65,49 @@ const FONT_OPTIONS = computed(() => [
   { id: 'harmony' as const, label: t('settings.fontHarmony') },
   { id: 'system' as const, label: t('settings.fontSystem') },
 ])
+
+/**
+ * 当前生效的字体回退链，直接从 CSS 变量解析。
+ *
+ * 不在前端另写一份清单：CSS 里加/删一个回退项而界面不跟着变，用户看到的
+ * 「应用顺序」就是假的。读计算值的代价只是一次 getComputedStyle，换来的是
+ * 展示与实现永远不会漂移。
+ *
+ * 空字符串表示还没挂载（SSR / 首帧），此时不渲染列表。
+ */
+const fontChains = ref<{ sans: string[]; mono: string[] }>({ sans: [], mono: [] })
+
+function readFontChains(): void {
+  const style = getComputedStyle(document.documentElement)
+  const parse = (token: string): string[] =>
+    style
+      .getPropertyValue(token)
+      .split(',')
+      .map(item => item.trim().replace(/^['"]|['"]$/g, ''))
+      .filter(Boolean)
+  fontChains.value = { sans: parse('--dv-font-sans'), mono: parse('--dv-font-mono') }
+}
+
+/*
+ * 主题 / 字体切换后链条会变（system 档与 harmony 档不同），要重读。
+ * nextTick 是因为属性由 watch 写入，本组件的渲染先于 DOM 更新。
+ */
+watch([() => theme.theme, () => theme.fontFamily], () => void nextTick(readFontChains))
+onMounted(readFontChains)
+
+/**
+ * 一条链里某一项负责什么字符。
+ *
+ * `sans-serif` / `monospace` 是通用族关键字，不是具体字体——标成「中文回退」
+ * 会误导，它们只是最后的形状兜底。
+ */
+function chainRole(name: string, kind: 'sans' | 'mono'): string {
+  if (name === 'sans-serif' || name === 'monospace') return t('settings.fontRoleFallback')
+  if (kind === 'mono') {
+    return name === 'JetBrains Mono' ? t('settings.fontRoleLatinMono') : t('settings.fontRoleCjk')
+  }
+  return name === 'HarmonyOS Sans SC' ? t('settings.fontRoleAll') : t('settings.fontRoleCjk')
+}
 
 /**
  * 让每个字体按钮用它自己代表的字体渲染。
@@ -746,6 +789,35 @@ async function openLogs(): Promise<void> {
                 {{ option.label }}
               </button>
             </span>
+          </div>
+
+          <!--
+            回退链：直接把 CSS 里生效的顺序摊开给用户看。
+            每条链按「先到先得」排列，第二项起都是补前者缺的字形——代码块那条
+            尤其需要说明（JetBrains 管英文、鸿蒙管中文），否则用户会以为只用了
+            JetBrains，或反过来疑惑「为什么中文不是等宽」。
+          -->
+          <div v-if="fontChains.sans.length" class="font-chain">
+            <div class="font-chain__line">
+              <span class="font-chain__label">{{ t('settings.fontChainText') }}</span>
+              <span class="font-chain__items">
+                <span v-for="(name, index) in fontChains.sans" :key="name" class="font-chain__item">
+                  <span v-if="index > 0" class="font-chain__arrow" aria-hidden="true">→</span>
+                  <span class="font-chain__name">{{ name }}</span>
+                  <span class="font-chain__role">{{ chainRole(name, 'sans') }}</span>
+                </span>
+              </span>
+            </div>
+            <div class="font-chain__line">
+              <span class="font-chain__label">{{ t('settings.fontChainCode') }}</span>
+              <span class="font-chain__items">
+                <span v-for="(name, index) in fontChains.mono" :key="name" class="font-chain__item">
+                  <span v-if="index > 0" class="font-chain__arrow" aria-hidden="true">→</span>
+                  <span class="font-chain__name">{{ name }}</span>
+                  <span class="font-chain__role">{{ chainRole(name, 'mono') }}</span>
+                </span>
+              </span>
+            </div>
           </div>
 
           <!--
@@ -1499,6 +1571,65 @@ async function openLogs(): Promise<void> {
 .seg--font {
   font-size: 12.5px;
   letter-spacing: 0.01em;
+}
+
+/*
+ * 字体回退链。
+ *
+ * 用箭头串起来而不是列表：顺序本身是语义（先到先得），横向排列比竖排更能
+ * 表达「前一项缺字形才轮到后一项」。窄窗口下自动折行，不强行横滚。
+ */
+.font-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--dv-ui-radius-sm);
+  background: var(--dv-ui-surface-1);
+}
+
+.font-chain__line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.font-chain__label {
+  flex: 0 0 76px;
+  font-size: 11.5px;
+  color: var(--dv-ui-text-muted);
+}
+
+.font-chain__items {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.font-chain__item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.font-chain__arrow {
+  color: var(--dv-ui-text-dim);
+  font-size: 11px;
+}
+
+.font-chain__name {
+  font-size: 11.5px;
+  color: var(--dv-ui-text-2);
+}
+
+/* 角色标注压暗一档：它是解释，不该和字体名抢注意力 */
+.font-chain__role {
+  font-size: 10.5px;
+  color: var(--dv-ui-text-dim);
 }
 
 .switch {
