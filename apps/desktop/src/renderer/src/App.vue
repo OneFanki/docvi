@@ -391,14 +391,34 @@ watch(
  * 3.5 秒就够。共用一条通道会让两者互相抢占计时器，还会把成功消息染成错误配色。
  */
 const notice = ref<string | null>(null)
+/**
+ * 成功提示上的可选操作。
+ *
+ * 只给「下一步必然要做的事」用，不是通用按钮位。目前唯一的使用者是导出：
+ * 用户拿到「已导出 xxx.pdf」之后，下一个动作几乎总是去看那个文件，
+ * 而主进程知道它落在哪——没这个按钮，用户只能自己去资源管理器里翻。
+ */
+const noticeAction = ref<{ label: string; run: () => void } | null>(null)
 let noticeTimer: ReturnType<typeof setTimeout> | null = null
-function showNotice(message: string): void {
+/**
+ * 显示成功提示。
+ *
+ * `durationMs` 默认 3.5 秒——纯通知读一眼就够。带操作按钮时要给更长时间，
+ * 因为用户得先读完路径、再判断要不要点；导出那条传 8 秒。
+ */
+function showNotice(
+  message: string,
+  action: { label: string; run: () => void } | null = null,
+  durationMs = 3500,
+): void {
   notice.value = message
+  noticeAction.value = action
   if (noticeTimer) clearTimeout(noticeTimer)
   noticeTimer = setTimeout(() => {
     notice.value = null
+    noticeAction.value = null
     noticeTimer = null
-  }, 3500)
+  }, durationMs)
 }
 
 /* ---------- 添加目录时的内容根候选 ---------- */
@@ -2964,6 +2984,9 @@ async function exportDoc(format: ExportFormat): Promise<void> {
       renderAppearance: format === 'pdf' ? 'light' : theme.appearance,
       // 英数等宽是排版偏好，与主题无关：两个产物都跟随设置
       renderMonoLatin: theme.monoLatin,
+      // PDF 抹掉整页底色，纸张颜色交给阅读器（深色阅读器看到深色）；
+      // HTML 必须有底色，独立文件没有可继承的背景
+      transparentPage: format === 'pdf',
       registry: exportRegistry(),
       containerSyntax: plugins.syntax.map(item => ({
         name: item.name,
@@ -2986,7 +3009,27 @@ async function exportDoc(format: ExportFormat): Promise<void> {
     return
   }
   if (result.data.canceled) return
-  store.setError(exportNotice(format, result.data.path, rich, t))
+  /*
+   * 导出成功走成功提示而不是错误通道：它原来用 store.setError，于是「已导出」
+   * 顶着一个红色感叹号，且必须手动关掉。
+   *
+   * 附上「打开所在文件夹」：用户拿到路径后的下一个动作几乎总是去看文件，
+   * 没有这个按钮就得自己开资源管理器翻。目标路径由主进程记录，渲染层只说
+   * 「打开那个」，不传路径（见 IPC.docExportReveal 的说明）。
+   * 提示条因此延长到 8 秒——3.5 秒不够读完路径再决定点不点。
+   */
+  showNotice(
+    exportNotice(format, result.data.path, rich, t),
+    {
+      label: t('export.revealInFolder'),
+      run: () => {
+        void window.docvi.docExportReveal().then(revealed => {
+          if (!revealed.ok) store.setError(revealed.error.message)
+        })
+      },
+    },
+    8000,
+  )
 }
 
 /* ---------- 导航 ---------- */
@@ -3619,6 +3662,9 @@ onBeforeUnmount(() => {
     <div v-if="notice" class="notice" role="status" aria-live="polite">
       <CheckCircle2 :size="15" :stroke-width="1.8" aria-hidden="true" />
       <span class="notice__text">{{ notice }}</span>
+      <button v-if="noticeAction" class="notice__action" type="button" @click="noticeAction.run()">
+        {{ noticeAction.label }}
+      </button>
     </div>
 
     <!--
@@ -3857,16 +3903,19 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-/* 成功提示与错误提示同位置但不抢焦点：错误用红色图标、成功用强调色，形状一致。
+/*
+ * 成功提示与错误提示同位置但不抢焦点：错误用红色图标、成功用绿色，形状一致。
    高度上抬一格，两者同时出现时不叠在一起。 */
 .notice {
   position: fixed;
   right: 16px;
   bottom: calc(var(--dv-ui-statusbar-h) + 62px);
   display: flex;
-  align-items: center;
+  /* 图标贴首行：路径换行时图标居中会飘到两行之间的空档里 */
+  align-items: flex-start;
   gap: 8px;
-  max-width: 460px;
+  /* 导出提示要放下一条完整路径，460px 会折成两行且末尾被截，放宽一档 */
+  max-width: 620px;
   padding: 9px 12px;
   border: 1px solid var(--dv-ui-line);
   border-radius: var(--dv-radius-md);
@@ -3878,12 +3927,48 @@ onBeforeUnmount(() => {
 
 .notice > svg {
   flex: none;
-  color: var(--dv-ui-accent);
+  /* 与首行文字基线对齐（行高 1.5 × 12.5px ≈ 19px，图标 15px 取 2px 偏移） */
+  margin-top: 2px;
+  /*
+   * 成功用绿不要用 accent：石墨主题的 accent 是橙色，橙圈在提示条上读起来
+   * 更像「警告」而不是「已完成」，与它的语义相反。
+   */
+  color: var(--dv-ui-ok);
 }
 
 .notice__text {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* 允许折行：路径是单条长词，nowrap + ellipsis 会把文件名切掉 */
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+/*
+ * 提示条上的操作（目前只有导出后的「打开所在文件夹」）。
+ *
+ * 做成文字按钮而不是图标：动作有具体名字，图标表达不清「打开文件夹」还是
+ * 「打开文件」。左侧贴一条细分隔线，与消息文本分开，避免被读成句子的一部分。
+ */
+.notice__action {
+  flex: none;
+  margin-left: 2px;
+  padding: 3px 8px;
+  border: 1px solid var(--dv-ui-line);
+  border-radius: var(--dv-radius-sm);
+  background: transparent;
+  /* 用正文色不用 accent：石墨主题的 accent 是橙色，按钮看起来像警告 */
+  color: var(--dv-ui-text);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dv-dur-1) var(--dv-ease),
+    border-color var(--dv-dur-1) var(--dv-ease);
+}
+
+.notice__action:hover {
+  border-color: var(--dv-ui-line-strong, var(--dv-ui-line));
+  background: color-mix(in srgb, var(--dv-ui-text) 8%, transparent);
+  color: var(--dv-ui-text);
 }
 
 /*

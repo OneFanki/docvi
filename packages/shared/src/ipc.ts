@@ -104,6 +104,14 @@ export const IPC = {
    * 差别只在产物字节从哪来。拆三条会让参数校验与错误码重复三份。
    */
   docExport: 'docvi:doc:export',
+  /**
+   * 在文件管理器里定位**最近一次导出**的产物。
+   *
+   * 刻意不接收路径参数：导出可以写到用户选的任意位置，若照单全收渲染层传的
+   * 绝对路径，就等于给它一个「唤起任意路径文件管理器」的能力。主进程自己记住
+   * 上次导出到哪，渲染层只能说「打开那个」，拿不到别的入口。
+   */
+  docExportReveal: 'docvi:doc:export-reveal',
   /** 草稿：崩溃/误关后的恢复缓冲 */
   draftRead: 'docvi:draft:read',
   draftWrite: 'docvi:draft:write',
@@ -832,6 +840,12 @@ export interface DocviApi {
   docWrite(request: WriteDocRequest): Promise<Result<WriteDocResult>>
   /** 导出（弹保存框 → 写文件）；用户取消时 data.canceled 为 true */
   docExport(request: ExportDocRequest): Promise<Result<ExportDocResult>>
+  /**
+   * 在文件管理器里定位最近一次导出的产物（选中该文件）。
+   *
+   * 无参数：目标由主进程自己记录，见 IPC.docExportReveal 的说明。
+   */
+  docExportReveal(): Promise<Result<null>>
   draftRead(absolutePath: string): Promise<Result<DraftPayload | null>>
   draftWrite(absolutePath: string, text: string): Promise<Result<null>>
   draftClear(absolutePath: string): Promise<Result<null>>

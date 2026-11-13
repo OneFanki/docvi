@@ -1,7 +1,7 @@
-import { BrowserWindow, dialog } from 'electron'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { BrowserWindow, dialog, shell } from 'electron'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import type { ExportDocRequest, ExportDocResult } from '@docvi/shared'
 
@@ -60,6 +60,29 @@ function withTempHtml(html: string, run: (file: string) => Promise<void>): Promi
   })
 }
 
+/**
+ * 最近一次成功导出的产物路径。
+ *
+ * 只存在于主进程内存，不落盘、不回传给渲染层。渲染层要「打开所在文件夹」时
+ * 只能调 `revealLastExport()`，它没有参数——这样就无法借这个通道去唤起任意
+ * 路径的文件管理器。
+ *
+ * 进程重启就丢，这是可接受的：提示条只活 3.5 秒，按钮与它在同一生命周期内。
+ */
+let lastExportPath: string | null = null
+
+/** 在文件管理器里选中最近一次导出的产物 */
+export async function revealLastExport(): Promise<void> {
+  if (!lastExportPath) throw new Error('还没有导出过文件')
+  // 文件可能已被用户移走或删掉：此时退而打开父目录，总比什么都不做有用
+  if (existsSync(lastExportPath)) {
+    shell.showItemInFolder(lastExportPath)
+    return
+  }
+  const error = await shell.openPath(dirname(lastExportPath))
+  if (error) throw new Error(error)
+}
+
 export async function exportDocument(
   parent: BrowserWindow,
   request: ExportDocRequest,
@@ -88,6 +111,7 @@ export async function exportDocument(
 
   if (request.format === 'markdown' || request.format === 'html') {
     writeFileSync(target, request.text, 'utf8')
+    lastExportPath = target
     return { canceled: false, path: target }
   }
 
@@ -105,11 +129,21 @@ export async function exportDocument(
       await printer.loadFile(file)
       const pdf = await printer.webContents.printToPDF({
         pageSize: 'A4',
+        /*
+         * printBackground 决定「背景绘制进 PDF 与否」。
+         *
+         * 之前一直是 true，于是 `.doc-surface` 的米色底色被整页印进 PDF，用户在
+         * 阅读器里看到一块纸面而不是阅读器自己的背景。现在页面底色已被
+         * `transparentPage` 抹成透明，这里继续 true 只影响**内容自带的色块**
+         * （代码块、提示框、mermaid 节点）——那些必须保留。
+         * 若改成 false，这些色块会一起消失，是净损失。
+         */
         printBackground: true,
         // 打印边距单位是英寸；左右留窄一些，正文本身已有排版留白
         margins: { top: 0.5, bottom: 0.5, left: 0.4, right: 0.4 },
       })
       writeFileSync(target, pdf)
+      lastExportPath = target
     } finally {
       // 隐藏窗口必须销毁：它是真实 BrowserWindow，不关会留下一个不可见进程
       printer.destroy()

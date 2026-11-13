@@ -31,6 +31,45 @@ test('PDF 走 paper，HTML 跟随文档主题', () => {
   )
 })
 
+/* ---------- 页面底色 ---------- */
+
+test('PDF 抹掉整页底色，HTML 保留主题底色', () => {
+  /*
+   * 两侧口径必须相反，理由也相反：
+   *  - PDF 里那层米色纸面会和阅读器自己的背景叠成一块突兀的色块，深色阅读器
+   *    尤其明显。抹掉后纸张颜色交给阅读器，内容色块（代码块/提示框/mermaid）
+   *    仍保留——它们是语义色，不是页面装饰。
+   *  - HTML 是独立文件，没有「阅读器背景」可继承，透明等于白底，
+   *    反而丢掉用户选的主题外观。
+   */
+  const app = readFileSync(
+    new URL('../apps/desktop/src/renderer/src/App.vue', import.meta.url),
+    'utf8',
+  )
+  assert.match(app, /transparentPage:\s*format === 'pdf'/, '只有 PDF 该抹底色；HTML 透明等于丢主题')
+
+  /* 补丁必须排在主题之后，否则 .doc-surface 的底色会把它盖回去 */
+  const order = SOURCE.slice(
+    SOURCE.indexOf('const styles = ['),
+    SOURCE.indexOf('const styles = [') + 400,
+  )
+  const themeAt = order.indexOf('themeCss')
+  const patchAt = order.indexOf('transparentPage ? TRANSPARENT_PAGE_CSS')
+  assert.ok(themeAt >= 0 && patchAt > themeAt, '透明补丁必须排在主题 CSS 之后')
+
+  /* 补丁要覆盖三层承载「页面本身」的元素，且不动内容元素 */
+  const patch = /const TRANSPARENT_PAGE_CSS = `([^`]+)`/.exec(SOURCE)?.[1] ?? ''
+  assert.ok(patch, '找不到 TRANSPARENT_PAGE_CSS')
+  for (const selector of ['html', 'body', '.docvi-export']) {
+    assert.ok(patch.includes(selector), `透明补丁要覆盖 ${selector}`)
+  }
+  assert.doesNotMatch(
+    patch,
+    /pre|code|blockquote|table|mermaid/,
+    '内容色块必须保留，补丁不能把它们一起抹掉',
+  )
+})
+
 test('离屏渲染临时切换 documentElement 主题并恢复', () => {
   assert.match(SOURCE, /root\.dataset\.theme = options\.renderTheme/, '渲染前必须切到目标主题')
   assert.match(SOURCE, /root\.dataset\.appearance = options\.renderAppearance/)
@@ -139,4 +178,68 @@ test('只读宿主不显示导出入口', () => {
   assert.ok(buttonAt > 0, '找不到导出按钮')
   const before = reader.slice(Math.max(0, buttonAt - 300), buttonAt)
   assert.match(before, /v-if="!isReadOnlyHost"/, '导出按钮必须受 isReadOnlyHost 约束')
+})
+
+/* ---------- 打开所在文件夹 ---------- */
+
+test('「打开所在文件夹」不接受路径参数（不给任意路径唤起能力）', () => {
+  /*
+   * 导出可以写到用户选的任意位置，所以「打开导出所在目录」天然会碰到绝对路径。
+   * 但如果让渲染层把路径传上来，这条通道就变成通用的「唤起任意路径文件管理器」
+   * 能力——渲染进程被 XSS 或恶意插件利用时，可以直接把用户引导到任意目录。
+   *
+   * 做法：主进程自己记住上次导出到哪，渲染层只能说「打开那个」。
+   */
+  const ipc = readFileSync(new URL('../packages/shared/src/ipc.ts', import.meta.url), 'utf8')
+  assert.match(
+    ipc,
+    /docExportReveal\(\): Promise<Result<null>>/,
+    'docExportReveal 必须无参数，否则等于开放任意路径唤起',
+  )
+
+  const main = readFileSync(new URL('../apps/desktop/src/main/ipc.ts', import.meta.url), 'utf8')
+  /* 只取这一个 handler 的签名（到第一个 `{` 为止），避免带上后续 handler */
+  const handlerAt = main.indexOf('ipcMain.handle(IPC.docExportReveal')
+  assert.ok(handlerAt > 0, '找不到 docExportReveal 的 handler')
+  const signature = main.slice(handlerAt, main.indexOf('{', handlerAt))
+  assert.doesNotMatch(signature, /_event|absolutePath|path/, 'handler 不能收任何路径类参数')
+  assert.match(signature, /async\s*\(\s*\)/, 'handler 必须无参')
+
+  /* 主进程侧必须只认自己记录的那个路径 */
+  const source = readFileSync(
+    new URL('../apps/desktop/src/main/export-doc.ts', import.meta.url),
+    'utf8',
+  )
+  assert.match(source, /let lastExportPath: string \| null = null/, '主进程要记录最近导出路径')
+  assert.match(
+    source,
+    /if \(!lastExportPath\) throw new Error/,
+    '没有导出记录时必须报错，不能回退成「打开当前目录」',
+  )
+})
+
+test('导出成功后提示条带「打开所在文件夹」而非走错误通道', () => {
+  /*
+   * 原来导出成功用 store.setError：界面弹出红色感叹号、必须手动关，用户以为
+   * 出错了。成功就该是成功提示，并且给一个能立刻用的下一步动作。
+   */
+  const app = readFileSync(
+    new URL('../apps/desktop/src/renderer/src/App.vue', import.meta.url),
+    'utf8',
+  )
+  const body = app.slice(app.indexOf('async function exportDoc'), app.indexOf('/* ---------- 导航'))
+  assert.doesNotMatch(body, /store\.setError\(exportNotice/, '成功不该走错误通道')
+  assert.match(body, /showNotice\(\s*exportNotice/, '成功要用 showNotice')
+  assert.match(body, /t\('export\.revealInFolder'\)/, '提示条必须带打开文件夹的动作')
+  assert.match(body, /docExportReveal\(\)/, '动作要调 reveal 通道')
+})
+
+test('提示条的时长足以读完路径再决定是否点击', () => {
+  const app = readFileSync(
+    new URL('../apps/desktop/src/renderer/src/App.vue', import.meta.url),
+    'utf8',
+  )
+  assert.match(app, /durationMs = 3500/, '默认提示 3.5 秒')
+  const body = app.slice(app.indexOf('async function exportDoc'), app.indexOf('/* ---------- 导航'))
+  assert.match(body, /8000,/, '带操作的导出提示要延长到 8 秒')
 })

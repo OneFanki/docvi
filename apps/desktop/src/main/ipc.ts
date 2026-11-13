@@ -35,7 +35,7 @@ import {
 } from './content.ts'
 import { copyFilesToClipboard } from './fs-clipboard.ts'
 import { createGitService } from './git.mjs'
-import { exportDocument } from './export-doc.ts'
+import { exportDocument, revealLastExport } from './export-doc.ts'
 import { clearDraft, readDraft, writeDoc, writeDraft } from './fs-write.ts'
 import { copyEntry, createEntry, moveEntry, renameEntry, resolveForTrash } from './fs-ops.ts'
 import { importImage } from './image-import.ts'
@@ -802,6 +802,21 @@ export function registerIpc(
           text: request.text,
         }),
       )
+    } catch (error) {
+      return toFailure(error)
+    }
+  })
+
+  /*
+   * 在文件管理器里定位最近一次导出。
+   *
+   * 特意**不收任何参数**：导出目标由主进程自己记录。若接收渲染层传的路径，
+   * 这个通道就变成了「唤起任意路径文件管理器」的入口，属于不必要的攻击面。
+   */
+  ipcMain.handle(IPC.docExportReveal, async () => {
+    try {
+      await revealLastExport()
+      return ok(null)
     } catch (error) {
       return toFailure(error)
     }

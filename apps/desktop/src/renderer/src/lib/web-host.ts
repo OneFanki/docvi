@@ -808,6 +808,9 @@ export function createWebHost(options: WebHostOptions = {}): DocviApi {
     async docExport() {
       return deny('容器版不支持导出到本地')
     },
+    async docExportReveal() {
+      return deny('容器版没有本地文件夹')
+    },
     async draftRead(): Promise<Result<null>> {
       return ok(null)
     },

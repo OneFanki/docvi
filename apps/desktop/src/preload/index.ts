@@ -122,6 +122,7 @@ const api: DocviApi = {
 
   docWrite: request => ipcRenderer.invoke(IPC.docWrite, request),
   docExport: request => ipcRenderer.invoke(IPC.docExport, request),
+  docExportReveal: () => ipcRenderer.invoke(IPC.docExportReveal),
   draftRead: absolutePath => ipcRenderer.invoke(IPC.draftRead, absolutePath),
   draftWrite: (absolutePath, text) => ipcRenderer.invoke(IPC.draftWrite, absolutePath, text),
   draftClear: absolutePath => ipcRenderer.invoke(IPC.draftClear, absolutePath),

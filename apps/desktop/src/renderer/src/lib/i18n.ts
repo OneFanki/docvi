@@ -477,6 +477,7 @@ const zh: Dict = {
   'export.done.pdf': '已导出 PDF：{path}',
   'export.richWarning':
     '（文档含 {count} 处 docvi 富组件：在其他编辑器里会显示为 YAML 声明与标签引用，不是渲染后的卡片）',
+  'export.revealInFolder': '打开所在文件夹',
 }
 
 const en: Dict = {
@@ -950,6 +951,7 @@ const en: Dict = {
   'export.done.pdf': 'PDF exported: {path}',
   'export.richWarning':
     ' ({count} docvi-rich component(s): other editors will show YAML declarations and tag references instead of rendered cards)',
+  'export.revealInFolder': 'Show in folder',
 }
 
 const DICTS: Record<Locale, Dict> = { zh, en }

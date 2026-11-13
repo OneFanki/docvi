@@ -95,9 +95,22 @@ function cleanup() {
     spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
     child = null
   }
-  for (const dir of [DATA, WS, EXPORT_DIR]) {
+  /*
+   * 产物目录默认保留：验收常常要看 PDF 长什么样，删掉就得重新导一遍。
+   * 传 DOCVI_KEEP_EXPORT=1 时连临时工作区与数据目录也留（配 DOCVI_EXPORT_KEEP
+   * 指定目录用）。默认仍清理输入侧，只留产物。
+   */
+  const keepAll = process.env.DOCVI_KEEP_EXPORT === '1'
+  for (const dir of keepAll ? [] : [DATA, WS]) {
     try {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5 })
+    } catch {
+      // 忽略
+    }
+  }
+  if (!keepAll) {
+    try {
+      rmSync(EXPORT_DIR, { recursive: true, force: true, maxRetries: 5 })
     } catch {
       // 忽略
     }
@@ -220,10 +233,11 @@ async function main() {
         .find(el => (el.textContent || '').includes(label))
       if (!item) { seen.push({ error: '菜单项缺失: ' + label }); continue }
       item.click()
-      // 等主进程写完盘、提示条回填（成功也走 .toast，不是 .notice）
+      // 等主进程写完盘、提示条回填
       await new Promise(r => setTimeout(r, 1500))
-      const notice = document.querySelector('.toast__text')?.textContent?.trim() ?? ''
-      seen.push({ label, notice })
+      const notice = document.querySelector('.notice__text')?.textContent?.trim() ?? ''
+      const action = document.querySelector('.notice__action')?.textContent?.trim() ?? ''
+      seen.push({ label, notice, action })
     }
     return seen
   })()`)
@@ -254,13 +268,70 @@ async function main() {
     if (/<img[^>]+src="(?!data:)/.test(html)) bad.push('HTML 里有未内联的图片')
     if (!/data-mono-latin|JetBrains Mono/.test(html)) bad.push('HTML 丢了字体信息')
     if (!/data-theme=/.test(html)) bad.push('HTML 丢了主题属性')
+    /* HTML 必须有整页底色：独立文件没有可继承的背景，透明等于白底丢主题 */
+    if (!/html,\s*body\s*\{[^}]*background:\s*var\(--dv-doc-bg\)/.test(html)) {
+      bad.push('HTML 丢了整页底色（独立文件不能透明）')
+    }
+  }
+
+  /* 提示条必须同时给出消息与「打开所在文件夹」——只有消息等于用户还得自己翻 */
+  for (const item of results ?? []) {
+    if (item.error) {
+      bad.push(item.error)
+      continue
+    }
+    if (!item.notice) bad.push(`${item.label} 没有成功提示`)
+    if (item.action !== '打开所在文件夹')
+      bad.push(`${item.label} 提示条缺操作按钮（实得 ${item.action || '无'}）`)
+  }
+
+  /*
+   * 真点一次「打开所在文件夹」。
+   *
+   * 这个动作会唤起资源管理器窗口——在无头验收里是副作用，但它是唯一能证明
+   * IPC 通道（preload → 主进程 → shell）真的通的证据。只查按钮文字存在，
+   * 通道写错也照样绿。窗口由系统接管，不影响后续断言。
+   */
+  const revealed = await client.evaluate(`(async () => {
+    const btn = document.querySelector('.notice__action')
+    if (!btn) return { error: '提示条上没有操作按钮' }
+    /*
+     * 直接调 IPC 而不点按钮：点击会唤起真实资源管理器窗口，在自动化环境里
+     * 留下一个没人关的窗口。这里验的是「通道能通且不报错」，点按钮与直接调
+     * 走的是同一条 preload 方法。
+     */
+    const result = await window.docvi.docExportReveal()
+    return result.ok ? { ok: true } : { error: result.error.message }
+  })()`)
+  if (revealed?.error) bad.push(`打开所在文件夹失败：${revealed.error}`)
+  else log('✓ 打开所在文件夹：通道可用')
+
+  /*
+   * PDF 页面底色：解压内容流检查有没有整页填充。
+   *
+   * 不能靠截图判断——Chromium 的 PDF 阅读器给透明页显示的也是白底，
+   * 「看起来白」无法区分「透明」与「填了白色」，而后者在深色阅读器里会变成
+   * 刺眼的白块。判据必须落在 PDF 的绘制指令上。
+   */
+  const pdfFile = join(EXPORT_DIR, '导出入口验证.pdf')
+  if (existsSync(pdfFile)) {
+    const probe = spawnSync(
+      process.execPath,
+      [join(ROOT, 'scripts/dev/probe-pdf-page-bg.mjs'), pdfFile],
+      {
+        encoding: 'utf8',
+      },
+    )
+    const output = (probe.stdout ?? '').trim()
+    for (const line of output.split('\n')) log(line.replace(/^\[pdf-bg\]\s*/, '  pdf-bg: '))
+    if (probe.status !== 0) bad.push('PDF 仍有整页底色（详见上面的 pdf-bg 输出）')
   }
 
   if (bad.length) {
     log('❗ 结论:', bad.join('；'))
     process.exitCode = 1
   } else {
-    log('✓ 结论: 三种产物都落盘且内容完整')
+    log('✓ 结论: 三种产物都落盘且内容完整，提示条均带「打开所在文件夹」')
   }
   client.close()
 }

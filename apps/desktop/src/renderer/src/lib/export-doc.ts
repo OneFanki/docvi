@@ -66,6 +66,17 @@ export interface ExportRenderOptions {
    * 属性缺失 = 开启（与设置项默认一致），所以只有关闭时才需要写进产物。
    */
   renderMonoLatin: boolean
+  /**
+   * 抹掉整页底色，只留内容自带的色块（PDF 传 true，HTML 不传）。
+   *
+   * 为什么 PDF 要透明：用户看到的是 PDF 阅读器里一整块米色纸面，而 PDF 阅读器
+   * 本身已有背景。让页面无底色，纸张颜色就交给阅读器决定，深浅模式都自然。
+   * 内容里的代码块、提示框、mermaid 节点仍保留各自底色——它们是语义色块。
+   *
+   * HTML 不走这条：独立文件没有「阅读器背景」可继承，透明等于白底，反而丢掉
+   * 用户选的主题外观。
+   */
+  transparentPage?: boolean
 }
 
 /**
@@ -271,10 +282,11 @@ function escapeHtml(value: string): string {
 /**
  * 打印与离线阅读专用补丁。
  *
- * 三条都是导出独有的需求，不属于屏幕样式：
+ * 四条都是导出独有的需求，不属于屏幕样式：
  *  - 正文列定宽：屏幕上有「铺满 / 收窄」开关，导出文件没有开关，必须定死；
  *  - 卡片/表格/代码块禁止跨页断开（PDF 里断成两半最难读）；
- *  - 标题后面不跟分页，避免标题孤零零落在页尾。
+ *  - 标题后面不跟分页，避免标题孤零零落在页尾；
+ *  - `pageBackground` 为 `transparent` 时抹掉**整页**底色。
  */
 const EXPORT_CSS = `
 html, body { margin: 0; padding: 0; background: var(--dv-doc-bg); }
@@ -292,6 +304,25 @@ body { color: var(--dv-doc-text); font-family: var(--dv-font-sans); }
 }
 `
 
+/**
+ * 抹掉整页底色的补丁（PDF 专用）。
+ *
+ * 为什么不是「换个白色主题」：主题里有成百个变量，换主题会把代码块、提示框、
+ * mermaid 节点的底色一并冲掉——那些是**内容自带的色块**，用户明确要保留。
+ * 这里只动三层承载「页面本身」的元素，内容里的任何 background 都不碰。
+ *
+ * `.docvi-export` 必须一起覆盖：它同时带 `.doc-surface` 类，而 theme.css 里
+ * `.doc-surface { background: var(--dv-doc-bg) }` 会把这层米色重新画上。
+ * 两条规则特异性相同（都是单类选择器），靠本补丁排在 theme.css 之后取胜。
+ *
+ * 效果是页面**没有底色**，PDF 阅读器按自己的默认背景渲染——浅色阅读器看到白，
+ * 深色阅读器看到深。文字颜色仍是主题的深色，所以只有浅色底才是安全组合，
+ * 这也是调用方只在 PDF 用它的原因。
+ */
+const TRANSPARENT_PAGE_CSS = `
+html, body, .docvi-export { background: transparent; }
+`
+
 export interface ExportHtmlOptions extends ExportRenderOptions {
   title: string
   locale: string
@@ -304,7 +335,15 @@ export async function buildExportHtml(options: ExportHtmlOptions): Promise<strin
     const body = cleanClone(surface)
     materializeEmbeds(body)
     await inlineImages(body)
-    const styles = [themeCss, docCss, pluginStyleText(), EXPORT_CSS].filter(Boolean).join('\n\n')
+    const styles = [
+      themeCss,
+      docCss,
+      pluginStyleText(),
+      EXPORT_CSS,
+      options.transparentPage ? TRANSPARENT_PAGE_CSS : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
     return `<!doctype html>
 <!-- data-theme 决定整份产物的底色/正文/代码配色。它必须与离屏渲染时套的那层
      一致（renderTheme）：mermaid 等把颜色烘焙进 SVG 的块，事后改这里不会重画。
