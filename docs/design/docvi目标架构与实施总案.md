@@ -285,6 +285,12 @@ export interface ContentPort {
 `data-doc-theme`，编辑器不再有 `data-editor-theme`；导出 HTML 也写同一个 `data-theme`。
 历史 `--at-*` 变量仍作为 `.doc-surface` 内的别名存在，指向 `--dv-c-*`，供未迁移的组件包使用。
 
+**导出产物的主题口径**：HTML 跟随当前文档主题（用户选深色就是要深色的样子）；
+PDF 固定 `paper`（浅色）——深色底打印费墨，也常与阅读器的深色 UI 叠成一片。
+因为选择器都挂在 `:root` 上，导出只能在渲染期间临时切 `documentElement` 的
+`data-theme`，无法只给离屏容器加属性（那样选择器不命中，mermaid 会把屏幕配色
+烘焙进 SVG）。详见 `apps/desktop/src/renderer/src/lib/export-doc.ts`。
+
 插件主题协议相应简化：`contributes.themes[]` 只需要 `{ id, title, appearance, tokens }`，
 原本的 `targets` 字段被删除——一个主题要么整套提供，要么不提供。
 
