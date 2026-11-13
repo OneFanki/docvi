@@ -28,6 +28,54 @@
 
 ### English
 
+## [0.7.0] - 2026-11-13
+
+### 中文
+
+- **像素级对齐的 ASCII 框图**：以前框线图的中文、带圈数字会让竖线错开几个像素，整张图看起来是歪的；现在按字符实际宽度锁列，线条严丝合缝
+- **字体换成鸿蒙黑体，设置里可切换**：界面与正文默认使用随包分发的 HarmonyOS Sans（三字重），等宽用 JetBrains Mono。新增「英数等宽」开关，默认开启——界面和正文里的英文数字也走等宽字体，路径与表格更齐
+- **可以导出成一页 HTML 或 PDF 了**：HTML 是单文件、图片以 base64 内联，拿走就能给人看；PDF 页面不再带底色，纸张颜色跟随阅读器，代码块、提示框里的色块照旧保留。文档头部新增导出入口，导出成功后可直接「打开所在文件夹」
+- **原生 Markdown 优先**：同一份 md 在任何编辑器里都能读，docvi 专属组件降级为可选表达，不再要求先学一套语法
+- **宽表格能读了**：首列冻结、列宽按内容分配，超宽表格横向滚动时表头跟着走
+
+#### 完整变更
+
+- **字体体系**：`@font-face` 随包分发 3 个 HarmonyOS Sans SC 字重 + 3 个 JetBrains Mono 字重（woff2，共 12.4MB，未子集化以满足许可要求）；`data-font` 缺失即鸿蒙、`data-mono-latin` 缺失即开启，属性缺失一律落在产品主推形态上
+- **修掉字体不生效的系统性问题**：`base.css` 曾硬编码一整套字体栈，作为元素直接声明压过 `--dv-font-sans`，导致「换字体毫无反应」；`<code>` 另受 UA 样式表 `font-family: monospace` 支配，只给 `pre` 设字体不够。两处都已收口到 CSS 变量，并加测试禁止样式里出现硬编码字体栈
+- **ASCII 对齐**：`ascii-align.ts` 锁宽表补入 East Asian Width 的 Ambiguous 区段（`①` U+2460-24FF、几何图形 U+25A0-27BF），这些字符在 CJK 字体下按全宽渲染，漏判会让整行偏移 0.67ch
+- **导出**：`renderOffscreen` 离屏渲染后二次克隆，图片走 `fetch` + `Blob` 取原始字节而非 canvas 重绘（后者会把 JPEG 转 PNG、丢动图与 SVG 语义、跨域还 taint 画布）；PDF 由隐藏窗口 `printToPDF` 生成，页面底色用追加补丁抹成透明，内容色块保留
+- **导出入口**：原先只能从命令面板搜到，界面上没有按钮。现改为阅读视图头部下拉，只读宿主不显示；`docExportReveal` 不接收路径参数，目标由主进程记录
+- **阅读位置**：位置同时记像素、源行与排版签名，恢复时按签名决定信哪个。修掉「切标签回顶」的五层成因——`openPage` 绕过 `activateTab` 漏保存、只存像素在改字体后失效、滚动从未落盘、旧会话把「未知」存成 0、恢复引发的 scroll 副作用覆盖恢复结果
+- **默认主题改石墨**：「海岬」去掉「深色文档」后缀（前面的图标已能表达明暗）
+- **原生 Markdown 优先（ADR-0006）**：`packages/server` 的渲染管线改为 md 直出，组件降级；编辑器里表格与 mermaid 不再随光标展开源码
+- **宽表格**：首列冻结与列宽按内容分配，`scripts/*.test.mjs` 覆盖
+- **文件操作**：目录树右键可复制路径、在资源管理器中定位，文件可复制到系统剪贴板
+- **其他修复**：外部改盘后按源行恢复位置、灯箱双击与空格误关闭、二次启动请求被静默吞掉
+- 新增测试：字体资产与许可合规 22 例、ASCII 对齐 14 例、阅读位置 15 例、视图交接 11 例、导出产物 13 例；新增探针 `probe-real-session`（复制真实数据目录复现）、`probe-reading-position`、`probe-scroll-race`、`probe-stale-session`、`probe-pdf-page-bg`
+
+### English
+
+- **Pixel-aligned ASCII diagrams**: box-drawing art with CJK characters and circled digits used to drift a few pixels off, leaving every vertical rule crooked. Column widths are now locked to real glyph widths, so the frames line up exactly
+- **New default typeface, and it's switchable**: the UI and document body now ship with HarmonyOS Sans (three weights), with JetBrains Mono for code. A new "Monospaced Latin" switch (on by default) sets Latin letters and digits in the UI and body to a monospaced face too, so paths and tables line up
+- **Export to a single-file HTML or PDF**: the HTML is fully self-contained with base64-inlined images; the PDF page background is now transparent so the paper colour follows your reader, while semantic blocks (code, callouts) keep their own fills. There's a new export entry in the document header, with "Show in folder" right in the success toast
+- **Native Markdown first**: the same `.md` reads fine in any editor — docvi-specific components are now an optional layer rather than a prerequisite
+- **Wide tables are readable**: the first column stays frozen, widths follow content, and the header tracks horizontal scrolling
+
+#### Full changelog
+
+- **Fonts**: bundle 3 HarmonyOS Sans SC weights plus 3 JetBrains Mono weights as woff2 (12.4 MB total, not subsetted to satisfy the licence); `data-font` absent means HarmonyOS, `data-mono-latin` absent means enabled — so any missing attribute lands on the product default
+- **Fixed a systemic font bug**: `base.css` hardcoded its own font stack, and as an element-level declaration it beat `--dv-font-sans`, making the font setting do nothing; `<code>` was additionally governed by the UA stylesheet's `font-family: monospace`. Both now route through CSS variables, with a test forbidding hardcoded stacks in stylesheets
+- **ASCII alignment**: the width table in `ascii-align.ts` now covers the East Asian Width Ambiguous ranges (`①` U+2460-24FF, geometric shapes U+25A0-27BF); these render full-width in CJK fonts and a miss shifts a whole line by 0.67ch
+- **Export**: offscreen-render then clone; images are inlined via `fetch` + `Blob` (raw bytes) rather than a canvas redraw, which would convert JPEG to PNG, drop animation and SVG semantics, and taint on cross-origin; PDFs come from a hidden window's `printToPDF`, with the page background stripped by an appended patch while content blocks keep their fills
+- **Export entry point**: previously reachable only from the command palette. Now a dropdown in the reader header, hidden on read-only hosts; `docExportReveal` takes no path argument — the main process remembers the target
+- **Reading position**: stores pixels, source line, and a layout signature, then picks the right one on restore. Fixes five layers behind "switching tabs jumps back to top" — `openPage` bypassing `activateTab`, pixel-only storage breaking after a font change, scroll never persisted, old sessions storing "unknown" as 0, and restore-triggered scroll events overwriting the restored value
+- **Default theme is now Graphite**; the "Cape" theme drops its "(dark document)" suffix since the swatch already conveys it
+- **Native Markdown first (ADR-0006)**: the render pipeline in `packages/server` emits Markdown directly with components as a fallback; tables and mermaid no longer expand to source as the cursor enters them
+- **Wide tables**: frozen first column, content-sized columns
+- **File operations**: right-click to copy a path or reveal in the file manager; files can be copied to the system clipboard
+- **Other fixes**: reading position restored by source line after external changes, lightbox double-click and space handling, second-instance requests silently dropped
+- New tests: 22 font-asset/licence cases, 14 ASCII-alignment cases, 15 reading-position cases, 11 view-handoff cases, 13 export cases; new probes `probe-real-session` (reproduces against a copy of real user data), `probe-reading-position`, `probe-scroll-race`, `probe-stale-session`, `probe-pdf-page-bg`
+
 ## [0.6.1] - 2026-11-09
 
 ### 中文

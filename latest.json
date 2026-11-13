@@ -1,6 +1,6 @@
 {
-  "version": "0.6.1",
+  "version": "0.7.0",
   "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
-  "notes": "后台不再偷偷吃 CPU 了——以前开着一个大仓库，只要有程序往里写文件就会把所有工作区的搜索索引整个重建，一次十几秒占满一个核；现在只重建变化的那一个。点「下载更新」能看到进度了，点「取消」也真的会停。",
+  "notes": "字体换成鸿蒙黑体并可切换，ASCII 框图与宽表格对齐到像素级；新增单文件 HTML 与 PDF 导出，PDF 页面不再带底色。原生 Markdown 优先，组件降级为可选表达。",
   "homepage": "https://github.com/OneFanki/docvi"
 }
