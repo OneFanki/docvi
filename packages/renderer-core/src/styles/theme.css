@@ -36,17 +36,113 @@
  * 存量组件迁移完成后删除别名块（见 docs/design/docvi目标架构与实施总案.md）。
  */
 
+/* ══════════════ 字体资产 ══════════════ */
+
+/*
+ * 鸿蒙黑体 SC（HarmonyOS Sans SC），三字重随应用分发。
+ *
+ * ⚠️ 许可要求（见 src/assets/fonts/LICENSE-HarmonyOS-Sans.txt）：
+ *  - 只能分发**未修改**的字体；因此这里存的是原 TTF 无损转 woff2，没做子集化；
+ *  - 必须在软件里显著声明使用了该字体（见设置页「关于」的声明）；
+ *  - 必须随附许可原文（同目录 LICENSE 文件）。
+ *
+ * 为什么是 woff2 而不是原 TTF：woff2 是无损封装（字形数据位级相同），
+ * 24MB → 12.4MB，且所有现代 Chromium 都支持。子集化能把体积压到 2.7MB，
+ * 但那属于「修改字体文件」，与许可条款冲突。
+ *
+ * 字体放在 renderer-core 而不是 apps/desktop：主题与字体是渲染层的共享资产，
+ * 桌面与容器两个宿主都要用。放桌面端会让容器版 404。
+ *
+ * 路径用相对引用交给打包器处理：产物文件名带哈希，手写绝对路径会失效。
+ */
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  src: url('../assets/fonts/HarmonyOSSansSC-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  src: url('../assets/fonts/HarmonyOSSansSC-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  src: url('../assets/fonts/HarmonyOSSansSC-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/*
+ * JetBrains Mono（代码块等宽），OFL-1.1，见 src/assets/fonts/LICENSE-JetBrainsMono.txt。
+ *
+ * 为什么要随包分发而不是只写字体名：写 `'JetBrains Mono', Consolas, …` 时，
+ * 只有本机装过它的用户才看得到，其余人静默回退到 Consolas——同一个应用在不同
+ * 机器上长得不一样，而用户没有被告知。
+ *
+ * ⚠️ 鸿蒙没有公开的等宽变体（官方发布的 pack 里只有 Sans / Condensed / SC / TC /
+ * Arabic，isFixedPitch 全为 0；实测 2026-11-13），所以代码块用 JetBrains Mono，
+ * 中文回退鸿蒙 SC——这是唯一能同时满足「等宽」与「中文同字形」的组合。
+ */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('../assets/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('../assets/fonts/JetBrainsMono-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('../assets/fonts/JetBrainsMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ══════════════ 全局常量（与主题无关） ══════════════ */
 
 :root {
+  /*
+   * 字体栈通过 `<html data-font="harmony|system">` 切换，默认（无属性）= 鸿蒙。
+   *
+   * 为什么用属性而不是 JS 逐个元素改 style：与主题同一套打法——属性一变，
+   * 所有消费字体变量的地方自动跟随。也便于导出时在产物里固定某一套。
+   * 默认由选择器顺序保证（鸿蒙就是基础值），不依赖设置文件里存过值。
+   *
+   * 之所以只有**一个**开关而不是「界面字体 / 文档字体」两个：用户的心智是
+   * 「这个应用用什么字体」，拆两维会立刻面对组合问题（界面系统字体 + 文档鸿蒙
+   * 到底算不算一种需求？）。真出现这种需求再加维度，不要现在预留。
+   */
   --dv-font-sans:
-    'Inter', 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei',
-    'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
-  /* ⚠️ 等宽栈末尾必须显式给中文无衬线回退：Consolas 没有中文字形，
-     Windows 会落到宋体（衬线），等宽块里的中文看起来像印刷体。 */
+    'HarmonyOS Sans SC', 'Inter', 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI',
+    'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', system-ui, -apple-system,
+    sans-serif;
+  /*
+   * ⚠️ 等宽栈末尾必须显式给中文回退：Consolas 没有中文字形，Windows 会落到
+   * 宋体（衬线），等宽块里的中文看起来像印刷体。
+   *
+   * ⚠️ 鸿蒙字体包里**没有等宽变体**（HarmonyOS_Sans / SC / TC / Condensed 的
+   * isFixedPitch 全为 0，实测 2026-11-13），所以代码块不能改用鸿蒙——那会让
+   * 缩进与框线全歪。这里只把鸿蒙挂作 CJK 回退，让中文与界面同一套字形。
+   */
   --dv-font-mono:
     'JetBrains Mono', 'Cascadia Mono', 'SFMono-Regular', Consolas, 'Liberation Mono',
-    'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', monospace;
+    'HarmonyOS Sans SC', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', monospace;
 
   --dv-radius-sm: 5px;
   --dv-radius-md: 7px;
@@ -71,6 +167,22 @@
   --dv-ui-dur-2: var(--dv-dur-2);
   --dv-ui-ease: var(--dv-ease);
   --dv-ui-ok: var(--dv-ui-success);
+}
+
+/*
+ * 切到系统字体：把两套栈还原成「不依赖随包字体」的形态。
+ *
+ * 只列系统自带字体，不保留 HarmonyOS——用户选「系统字体」就是不想用鸿蒙，
+ * 栈里还留着它等于没切。等宽那一路仍然保留 JetBrains Mono：它同样随包分发，
+ * 且代码块没有等宽字体就没法对齐，不该跟着这个开关一起关掉。
+ */
+:root[data-font='system'] {
+  --dv-font-sans:
+    'Inter', 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+  --dv-font-mono:
+    'JetBrains Mono', 'Cascadia Mono', 'SFMono-Regular', Consolas, 'Liberation Mono',
+    'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', monospace;
 }
 
 /* ══════════════ 1. UI 主题（chrome） ══════════════

@@ -169,6 +169,9 @@ const zh: Dict = {
   'about.version': '版本',
   'about.platform': '平台',
   'about.dataDir': '数据目录',
+  'about.fonts': '内置字体',
+  'about.fontHarmony': 'HarmonyOS Sans SC（© 2021 Huawei Device Co., Ltd.）',
+  'about.fontJetbrains': 'JetBrains Mono（SIL OFL 1.1）',
   'about.checkUpdate': '检查更新',
   'about.checking': '检查中…',
   'about.upToDate': '已是最新版本（{version}）',
@@ -198,6 +201,13 @@ const zh: Dict = {
   'theme.graphite': '石墨',
   'theme.paper': '纸张',
   'settings.themeHint': '一个主题就是整套配色：窗口、正文、编辑器一起变。',
+  'settings.font': '字体',
+  'settings.fontHarmony': '鸿蒙黑体',
+  'settings.fontSystem': '系统字体',
+  'settings.fontHarmonyHint': '随应用分发的 HarmonyOS Sans SC，界面与正文统一字形',
+  'settings.fontSystemHint': '用本机已安装的界面字体（Windows 上是微软雅黑）',
+  'settings.fontHint':
+    '代码块固定用 JetBrains Mono：鸿蒙没有公开的等宽版本，代码必须等宽才能对齐。',
   'settings.editorWrap': '源码折行',
   'settings.editorWrapHint':
     '折行：长行自动换到下一行（默认）。不折行：一行就是一行，超宽时横向滚动，适合对齐表格与宽代码块。',
@@ -622,6 +632,9 @@ const en: Dict = {
   'about.version': 'Version',
   'about.platform': 'Platform',
   'about.dataDir': 'Data directory',
+  'about.fonts': 'Bundled fonts',
+  'about.fontHarmony': 'HarmonyOS Sans SC (© 2021 Huawei Device Co., Ltd.)',
+  'about.fontJetbrains': 'JetBrains Mono (SIL OFL 1.1)',
   'about.checkUpdate': 'Check for updates',
   'about.checking': 'Checking…',
   'about.upToDate': 'Up to date ({version})',
@@ -654,6 +667,14 @@ const en: Dict = {
   'theme.paper': 'Paper',
   'settings.themeHint':
     'One theme is one complete palette: window, document and editor change together.',
+  'settings.font': 'Font',
+  'settings.fontHarmony': 'HarmonyOS Sans',
+  'settings.fontSystem': 'System font',
+  'settings.fontHarmonyHint':
+    'HarmonyOS Sans SC bundled with the app — one typeface across UI and text',
+  'settings.fontSystemHint': 'Use the UI font already installed on this machine',
+  'settings.fontHint':
+    'Code blocks always use JetBrains Mono: HarmonyOS has no public monospace cut, and code needs fixed width to align.',
   'settings.editorWrap': 'Source wrapping',
   'settings.editorWrapHint':
     'Wrap: long lines flow to the next line (default). No wrap: one line stays one line and scrolls horizontally — handy for aligning tables and wide code blocks.',

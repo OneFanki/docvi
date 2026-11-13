@@ -60,6 +60,24 @@ const WRAP_OPTIONS = computed(() => [
   { id: 'nowrap' as const, label: t('status.wrapOff') },
 ])
 
+/** 字体族两档：随包分发的鸿蒙黑体 / 系统自带 */
+const FONT_OPTIONS = computed(() => [
+  { id: 'harmony' as const, label: t('settings.fontHarmony'), hint: t('settings.fontHarmonyHint') },
+  { id: 'system' as const, label: t('settings.fontSystem'), hint: t('settings.fontSystemHint') },
+])
+
+/**
+ * 让每个字体按钮用它自己代表的字体渲染。
+ *
+ * 直接写字体栈而不是读 `--dv-font-sans`：后者会随当前选择变化，两个按钮会
+ * 变成一样的效果（选中鸿蒙时「系统字体」按钮也用鸿蒙显示），失去对比意义。
+ */
+function fontPreview(id: 'harmony' | 'system'): string {
+  return id === 'harmony'
+    ? "'HarmonyOS Sans SC', system-ui, sans-serif"
+    : "'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif"
+}
+
 /**
  * 标签页设置：直接改内存里的 preferences，由 App 的 watch 写回 settings.json。
  *
@@ -709,6 +727,33 @@ async function openLogs(): Promise<void> {
           <p class="hint">{{ t('settings.themeHint') }}</p>
 
           <!--
+            字体族：与主题并列放在外观分区。主题管颜色、字体管字形，两者都是
+            「整个应用长什么样」的一部分，用户找的时候会往同一处找。
+
+            预览按钮**用它自己的字体渲染**（:style），这样不用点下去就能比出差别
+            ——纯文字标签「鸿蒙黑体 / 系统字体」对不熟字体名的用户没有信息量。
+          -->
+          <div class="row row--spaced">
+            <span class="row__label">{{ t('settings.font') }}</span>
+            <span class="row__value">
+              <button
+                v-for="option in FONT_OPTIONS"
+                :key="option.id"
+                class="seg seg--font"
+                :class="{ 'is-on': theme.fontFamily === option.id }"
+                :style="{ fontFamily: fontPreview(option.id) }"
+                type="button"
+                :aria-pressed="theme.fontFamily === option.id"
+                :title="option.hint"
+                @click="theme.fontFamily = option.id"
+              >
+                {{ option.label }}
+              </button>
+            </span>
+          </div>
+          <p class="hint">{{ t('settings.fontHint') }}</p>
+
+          <!--
             源码折行：这是编辑器排版偏好，不是主题的一部分（主题管颜色），
             所以单独一行放在外观分区里，用户找「显示怎么排」时能看见。
           -->
@@ -937,6 +982,21 @@ async function openLogs(): Promise<void> {
             </span>
           </div>
 
+          <!--
+            第三方字体声明。
+            HarmonyOS Sans 的许可要求「在软件中显著声明使用了该字体」，这里就是
+            那个声明。JetBrains Mono 用 OFL-1.1，同样在此一并列出便于溯源。
+            两份许可原文随包放在 packages/renderer-core/src/assets/fonts/。
+          -->
+          <div class="row">
+            <span class="row__label">{{ t('about.fonts') }}</span>
+            <span class="row__value about__fonts">
+              <span>{{ t('about.fontHarmony') }}</span>
+              <span class="about__fonts-sep" aria-hidden="true">·</span>
+              <span>{{ t('about.fontJetbrains') }}</span>
+            </span>
+          </div>
+
           <p
             v-if="about.update"
             class="hint"
@@ -1078,6 +1138,19 @@ async function openLogs(): Promise<void> {
 
 .about__link:hover {
   text-decoration: underline;
+}
+
+/* 内置字体声明：许可要求在软件里显著标注，别让它挤成一团看不清 */
+.about__fonts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--dv-ui-text-muted);
+}
+
+.about__fonts-sep {
+  color: var(--dv-ui-text-dim);
 }
 
 /* 更新操作区：按钮与进度在同一行，高度固定，切换阶段时不跳 */
@@ -1423,6 +1496,15 @@ async function openLogs(): Promise<void> {
   background: var(--dv-ui-surface-3);
   color: var(--dv-ui-text);
   border-color: transparent;
+}
+
+/*
+ * 字体按钮：字号略大一点，字形差异才看得出来（11.5px 时鸿蒙与雅黑的区别
+ * 在小字号上几乎不可分辨，用户无法判断自己选了什么）。
+ */
+.seg--font {
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
 }
 
 .switch {

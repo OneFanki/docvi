@@ -43,6 +43,18 @@ export type ContentWidth = 'full' | 'measure'
 export type EditorWrap = 'wrap' | 'nowrap'
 
 /**
+ * 界面与正文使用的字体族。
+ *
+ * 只有两档：随包分发的鸿蒙黑体，或用户系统自带的字体。刻意不做「界面字体 /
+ * 文档字体」两个维度——用户的心智是「这个应用用什么字体」，拆开会立刻带来
+ * 组合问题（界面系统 + 文档鸿蒙算不算合法需求？），而目前没有任何真实诉求支持它。
+ *
+ * `harmony` 是默认值。若把它写成 `system` 再让 UI 默认选鸿蒙，则设置文件缺失时
+ * 会闪一下系统字体——默认必须是字体栈本身的第一项，见 theme.css `:root` 分支。
+ */
+export type FontFamily = 'harmony' | 'system'
+
+/**
  * 桌面外壳行为。
  *
  * 为什么放在 settings.json 而不是 service.json：
@@ -60,6 +72,8 @@ export interface AppSettings {
   schemaVersion: 1
   /** 主题 id（内置 graphite / paper，或 `plugin-<插件>-<id>`） */
   theme: string
+  /** 界面与正文的字体族（默认随包分发的鸿蒙黑体） */
+  fontFamily: FontFamily
   locale: LocaleCode
   tabs: TabPreferences
   contentWidth: ContentWidth
@@ -104,6 +118,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   schemaVersion: 1,
   // 默认石墨：与 :root 的深色基底同一套暖灰配色，首帧不会跳色
   theme: 'graphite',
+  // 默认随包分发的鸿蒙黑体（见 theme.css 的 @font-face）
+  fontFamily: 'harmony',
   locale: 'zh',
   tabs: { ...DEFAULT_TAB_PREFERENCES },
   // 默认铺满：内容宽度是「想专注读」时才需要的约束，不该一上来就限死
@@ -163,6 +179,12 @@ export function normalizeSettings(raw: unknown): AppSettings {
   return {
     schemaVersion: 1,
     theme: text(legacyTheme, DEFAULT_SETTINGS.theme),
+    // 旧设置文件没有这一项 → 落到默认（鸿蒙），与全新安装一致
+    fontFamily: pick(
+      record.fontFamily,
+      ['harmony', 'system'] as const,
+      DEFAULT_SETTINGS.fontFamily,
+    ),
     locale: pick(record.locale, ['zh', 'en'] as const, DEFAULT_SETTINGS.locale),
     tabs: {
       maxTabs: clampInt(tabsRaw.maxTabs, 0, 200, DEFAULT_TAB_PREFERENCES.maxTabs),

@@ -6,6 +6,7 @@ import type {
   ContentWidth,
   EditorWrap,
   DocPayload,
+  FontFamily,
   GitState,
   RecentEntry,
   TreeNode,
@@ -78,6 +79,8 @@ export const useThemeStore = defineStore('theme', () => {
   const boot = window.docvi.bootSettings
   /** 当前主题 id：一个主题 = 一整套变量（界面 + 正文 + 编辑器 + 组件） */
   const theme = ref<ThemeKey>(boot.theme)
+  /** 字体族：随包分发的鸿蒙黑体 / 系统自带 */
+  const fontFamily = ref<FontFamily>(boot.fontFamily)
   /** 正文 / 编辑区宽度：铺满画布，或限制在可读行宽 */
   const contentWidth = ref<ContentWidth>(boot.contentWidth)
   /** 侧栏折叠：状态在 settings.json，首帧即按偏好渲染，不闪一下再收 */
@@ -92,6 +95,19 @@ export const useThemeStore = defineStore('theme', () => {
     document.documentElement.dataset.theme = value
     void applyAppearance()
     if (!applyingExternal) patchSettings({ theme: value })
+  })
+  /*
+   * 字体：只在**切到 system** 时写属性，harmony 时删掉。
+   *
+   * 属性缺失 = 鸿蒙（见 theme.css 的 `:root` 分支）。这样全新安装、设置文件里
+   * 还没有这个键、导出产物没写属性——三种情况都直接落在鸿蒙上，不需要额外
+   * 的兜底分支。若反过来「harmony 时写 data-font='harmony'」，那任何漏写属性的
+   * 场景都会掉回系统字体且无人察觉。
+   */
+  watch(fontFamily, value => {
+    if (value === 'system') document.documentElement.dataset.font = 'system'
+    else delete document.documentElement.dataset.font
+    if (!applyingExternal) patchSettings({ fontFamily: value })
   })
   watch(contentWidth, value => {
     // 挂到根节点：阅读列与编辑区都读这一个属性，切模式不会一宽一窄
@@ -120,6 +136,9 @@ export const useThemeStore = defineStore('theme', () => {
     document.documentElement.dataset.contentWidth = contentWidth.value
     document.documentElement.dataset.sidebar = sidebarCollapsed.value ? 'collapsed' : 'expanded'
     document.documentElement.dataset.theme = theme.value
+    // harmony 是属性缺失态（见 watch 里的说明），只处理 system
+    if (fontFamily.value === 'system') document.documentElement.dataset.font = 'system'
+    else delete document.documentElement.dataset.font
     // 首帧就把明暗写进 DOM 并推给主进程：否则浅色主题启动会闪一帧深色外观
     void applyAppearance()
   }
@@ -150,6 +169,7 @@ export const useThemeStore = defineStore('theme', () => {
     sidebarCollapsed.value = next.sidebarCollapsed
     editorWrap.value = next.editorWrap
     theme.value = next.theme
+    fontFamily.value = next.fontFamily
     applyingExternal = false
   }
 
@@ -188,6 +208,7 @@ export const useThemeStore = defineStore('theme', () => {
   return {
     theme,
     appearance,
+    fontFamily,
     contentWidth,
     sidebarCollapsed,
     editorWrap,
