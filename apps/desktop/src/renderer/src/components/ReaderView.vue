@@ -93,6 +93,14 @@ const emit = defineEmits<{
   export: [format: 'markdown' | 'html' | 'pdf']
   /** 正文里的站内链接（绝对路径）：容器版交给 App 走 SPA 路由，避免整页刷新 */
   navigate: [path: string]
+  /**
+   * 阅读位置变化（节流）。
+   *
+   * 必须上报而不是只在切走时读一次：滚动本身不写任何 store，只在切标签 /
+   * 切视图时才保存的话，用户滚完到下次动作之间的位置从未落盘——任何一次
+   * 重新应用位置（切标签回来、重渲染）拿到的都是陈旧值。
+   */
+  scrolled: [payload: { topLine: number; scrollY: number }]
 }>()
 
 const scroller = ref<HTMLElement | null>(null)
@@ -402,6 +410,9 @@ onBeforeUnmount(() => {
   mount?.dispose()
   mount = null
   clearMatches()
+  /* 卸载前把最后一段未上报的滚动位置发出去，否则关闭/切换会丢最后几十像素 */
+  flushScroll()
+  scroller.value?.removeEventListener('scroll', reportScroll)
 })
 
 /** 代码块复制：事件委托，避免给每个块单独绑监听 */
@@ -492,9 +503,64 @@ async function onContentClick(event: MouseEvent): Promise<void> {
   }
 }
 
+/*
+ * 滚动位置上报（节流）。
+ *
+ * 为什么要持续上报：滚动本身不写任何 store。只在切走时读一次的话，用户滚完
+ * 但还没做任何动作的那段时间，位置从未落盘——任何一次重新应用位置（切标签
+ * 回来、重渲染、主题/字体变化）拿到的都是陈旧值，表现就是「回顶」。
+ *
+ * 节流 200ms：滚动事件每秒几十次，每次都写 store 会让 session.json 的 600ms
+ * 防抖永远不触发（每次都被重置），反而永远写不进去。200ms 既保证「几乎实时」，
+ * 又让防抖有机会落盘。
+ */
+let scrollReportTimer: ReturnType<typeof setTimeout> | null = null
+let pendingScroll: { topLine: number; scrollY: number } | null = null
+function reportScroll(): void {
+  const el = scroller.value
+  if (!el) return
+  const surface = host.value?.querySelector<HTMLElement>('.at-doc')
+  if (!surface) return
+  const viewportTop = el.getBoundingClientRect().top
+  let line = 0
+  let found = false
+  for (const block of surface.querySelectorAll<HTMLElement>('[data-source-line]')) {
+    const value = Number(block.dataset.sourceLine)
+    if (!Number.isFinite(value)) continue
+    if (block.getBoundingClientRect().bottom <= viewportTop + 1) {
+      line = value
+      found = true
+    } else break
+  }
+  pendingScroll = { topLine: found ? line : -1, scrollY: Math.round(el.scrollTop) }
+  if (scrollReportTimer) return
+  scrollReportTimer = setTimeout(() => {
+    scrollReportTimer = null
+    if (pendingScroll) emit('scrolled', pendingScroll)
+  }, 200)
+}
+
+/** 立刻把待上报的位置发出去（卸载前必须调，否则最后一段滚动丢失） */
+function flushScroll(): void {
+  if (scrollReportTimer) {
+    clearTimeout(scrollReportTimer)
+    scrollReportTimer = null
+  }
+  if (pendingScroll) {
+    emit('scrolled', pendingScroll)
+    pendingScroll = null
+  }
+}
+
+watch(scroller, el => {
+  el?.addEventListener('scroll', reportScroll, { passive: true })
+})
+
 /* 供父组件控制（标签切换保位 / 大纲跳转 / 全局快捷键） */
 defineExpose({
   host,
+  /** 把待上报的滚动位置立刻发出去（父组件在切走前调，避免丢最后一段） */
+  flushScroll,
   openFind,
   getScroll: () => scroller.value?.scrollTop ?? 0,
   /**
@@ -512,14 +578,24 @@ defineExpose({
     if (!blocks.length) return 0
     const viewportTop = el.getBoundingClientRect().top
     let line = 0
+    let found = false
     for (const block of blocks) {
       const value = Number(block.dataset.sourceLine)
       if (!Number.isFinite(value)) continue
       // 块的下沿还在视口上方 → 它已经完全滚过去了，取它的起始行
-      if (block.getBoundingClientRect().bottom <= viewportTop + 1) line = value
-      else break
+      if (block.getBoundingClientRect().bottom <= viewportTop + 1) {
+        line = value
+        found = true
+      } else break
     }
-    return line
+    /*
+     * 返回 -1 表示「这一篇的块都没有可用行号」，与 legit 的 0（用户正看着
+     * 开头）区分开。混用同一个 0 会让调用方以为拿到了有效坐标，于是跳过
+     * 像素兜底，落点变成顶部。
+     */
+    if (found) return line
+    const firstLine = Number(blocks[0]?.dataset.sourceLine)
+    return Number.isFinite(firstLine) ? 0 : -1
   },
   restoreScroll: (y: number) => {
     if (scroller.value) scroller.value.scrollTop = y
@@ -562,6 +638,16 @@ defineExpose({
       }
     }
     if (!target) {
+      /*
+       * 找不到「起始行 ≤ 目标行」的块，说明目标行落在首个块之前（用户本来
+       * 就在最顶上），或者这一篇的块根本没有可用行号。
+       *
+       * 不能一律 scrollTop = 0 并声称成功：后者会让调用方跳过像素兜底，
+       * 于是「记了位置却回顶」。区分方式看目标行：目标行 > 首个块的起始行
+       * 却没匹配到，就是行号不可用，返回 false 让调用方走兜底。
+       */
+      const firstLine = Number(blocks[0]?.dataset.sourceLine)
+      if (Number.isFinite(firstLine) && line >= firstLine) return false
       el.scrollTop = 0
       return true
     }

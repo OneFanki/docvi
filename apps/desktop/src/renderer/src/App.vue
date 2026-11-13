@@ -982,6 +982,19 @@ async function ensureTabReady(tab: TabRecord): Promise<boolean> {
 }
 
 /** 按当前标签记录的阅读位置恢复（渲染完成后再调用） */
+/**
+ * 记录的位置是否可信到能当主判据。
+ *
+ * `topLine` 为 0 时多疑一步：老会话文件里这个字段默认就是 0（上一版把
+ * 「不知道」也存成 0）。照单全收的话 `scrollToSourceLine(0)` 会把文档滚到
+ * 顶部**并返回 true**，压住像素兜底——正是「切标签回顶」的成因。
+ * 只有像素也接近顶部时，0 才是真的「用户就在开头」。
+ */
+function positionTrustworthy(ref: DocRef): boolean {
+  if (ref.topLine < 0) return false
+  return ref.topLine > 0 || ref.scrollY < 40
+}
+
 async function restoreScroll(): Promise<void> {
   const ref = activeRef.value
   if (!ref) return
@@ -993,7 +1006,7 @@ async function restoreScroll(): Promise<void> {
    * 同一个像素值指向的是别的内容，新排版更短时还会被浏览器 clamp 到顶部——
    * 用户看到的就是「切个标签回来文档回顶了」。
    */
-  if (ref.topLine > 0 && readerRef.value?.scrollToSourceLine(ref.topLine)) return
+  if (positionTrustworthy(ref) && readerRef.value?.scrollToSourceLine(ref.topLine)) return
   readerRef.value?.restoreScroll(ref.scrollY)
 }
 
@@ -1007,7 +1020,25 @@ async function restoreScroll(): Promise<void> {
 function rememberReadingPosition(): void {
   const reader = readerRef.value
   if (!reader || !activeRef.value) return
+  /*
+   * 先 flush：ReaderView 的滚动上报有 200ms 节流，切走前的最后一段滚动
+   * 可能还在待发队列里。不冲出去的话，那次滚动就永远丢了。
+   */
+  reader.flushScroll()
   tabs.setScroll(tabs.activeId ?? '', reader.getScroll(), reader.getTopLine())
+}
+
+/**
+ * 阅读位置持续回写（ReaderView 节流后上报）。
+ *
+ * 与 `rememberReadingPosition` 的分工：那个是「切走前补一刀」，这个是「边滚
+ * 边记」。只有前者的话，用户滚完但还没切走的这段时间位置从未落盘，任何一次
+ * 重新应用位置（切标签回来、重渲染）都会拿到陈旧值——表现为回顶。
+ */
+function onReaderScrolled(payload: { topLine: number; scrollY: number }): void {
+  const tabId = tabs.activeId
+  if (!tabId) return
+  tabs.setScroll(tabId, payload.scrollY, payload.topLine)
 }
 
 /* ---------- 标签操作 ---------- */
@@ -1333,7 +1364,7 @@ async function navigateInTab(tabId: string, relPath: string, newTab: boolean): P
       absolutePath: payload.absolutePath,
       title: payload.title,
       scrollY: 0,
-      topLine: 0,
+      topLine: -1,
     })
     revealInTree(result.tab.id, relPath)
     await ensureDocLoaded(tabs.currentDocOf(result.tab.id) as DocRef)
@@ -1361,7 +1392,7 @@ async function navigateInTab(tabId: string, relPath: string, newTab: boolean): P
     absolutePath: payload.absolutePath,
     title: payload.title,
     scrollY: 0,
-    topLine: 0,
+    topLine: -1,
   })
   docMode.value = 'read'
   await store.touchRecent({
@@ -1437,7 +1468,7 @@ async function openStandalone(absolutePath: string): Promise<void> {
       absolutePath: payload.absolutePath,
       title: payload.title,
       scrollY: 0,
-      topLine: 0,
+      topLine: -1,
     })
     await ensureTabReady(result.tab)
     await store.touchRecent({
@@ -1752,7 +1783,7 @@ async function stepHistory(delta: number): Promise<void> {
   await ensureDocLoaded(next)
   await nextTick()
   /* 源行优先：历史里那一条也可能是排版改过之前记下的位置 */
-  if (next.topLine > 0 && readerRef.value?.scrollToSourceLine(next.topLine)) return
+  if (positionTrustworthy(next) && readerRef.value?.scrollToSourceLine(next.topLine)) return
   readerRef.value?.restoreScroll(next.scrollY)
 }
 
@@ -1945,7 +1976,7 @@ function onRendered(payload: { path: string; title: string }): void {
    */
   const anchor = takeAnchor(handoff)
   if (anchor !== null && readerRef.value?.scrollToSourceLine(anchor)) return
-  if (ref.topLine > 0 && readerRef.value?.scrollToSourceLine(ref.topLine)) return
+  if (positionTrustworthy(ref) && readerRef.value?.scrollToSourceLine(ref.topLine)) return
   readerRef.value?.restoreScroll(ref.scrollY)
 }
 
@@ -3563,6 +3594,7 @@ onBeforeUnmount(() => {
           @export="exportDoc"
           @navigate="onContentNavigate"
           @rendered="onRendered"
+          @scrolled="onReaderScrolled"
         />
         <EditorView
           v-else-if="currentDoc"

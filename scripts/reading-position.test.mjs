@@ -42,13 +42,26 @@ test('文档位置同时记像素与源行', () => {
   assert.match(TABS, /scrollY: number/, 'DocRef 要有 scrollY')
   assert.match(TABS, /topLine: number/, 'DocRef 要有 topLine（排版无关的坐标）')
 
-  /* 归一化：老标签记录没有这个字段，必须能读成 0 而不是 NaN */
-  assert.match(TABS, /topLine: Number\(raw\.topLine\) \|\| 0/, '旧记录缺 topLine 时要回落到 0')
+  /*
+   * 老会话文件没有 topLine。必须读成 -1（「不知道」），不能读成 0。
+   * 0 是合法坐标（用户就在开头），拿它当缺省值等于谎称「他当时在最顶上」，
+   * 恢复时会把文档拽回开头。
+   */
+  assert.match(
+    TABS,
+    /topLine: Number\.isFinite\(Number\(raw\.topLine\)\) \? Number\(raw\.topLine\) : -1/,
+    '旧记录缺 topLine 时要回落到 -1（未知），不能是 0',
+  )
 
-  /* setScroll 要同时写两份 */
+  /* setScroll 要同时写两份，且不能把合法的 0 吞掉 */
   const setter = TABS.slice(TABS.indexOf('function setScroll('))
-  assert.match(setter.slice(0, 600), /ref\.scrollY = scrollY/)
-  assert.match(setter.slice(0, 600), /ref\.topLine = topLine/, 'setScroll 必须一起记源行')
+  assert.match(setter.slice(0, 900), /ref\.scrollY = scrollY/)
+  assert.match(setter.slice(0, 900), /ref\.topLine = topLine/, 'setScroll 必须一起记源行')
+  assert.match(
+    setter.slice(0, 900),
+    /if \(topLine >= 0\)/,
+    '只拒绝负数（-1 = 未知）；写成 > 0 会把「在最顶部」也吞掉',
+  )
 })
 
 /* ---------- 保存：每条离开路径都要存 ---------- */
@@ -115,4 +128,59 @@ test('重渲染后也按源行落位（否则主题/字体一改就被拽走）'
 test('标签内历史导航也按源行恢复', () => {
   const body = bodyOf('stepHistory')
   assert.match(body, /scrollToSourceLine\(next\.topLine\)/, '历史条目同样记了源行，要用上')
+})
+
+/* ---------- 持续上报：位置不能等到切走才落盘 ---------- */
+
+test('滚动时持续回写位置（不是只在切走时读一次）', () => {
+  /*
+   * 只在切走时读一次的话，用户滚完但还没做任何动作的那段时间位置从未落盘，
+   * 任何一次重新应用位置（切标签回来、重渲染）都会拿到陈旧值——回顶。
+   * 这是「我明明滚到了中间，切个标签就回顶」的根因。
+   */
+  const reader = readFileSync(
+    new URL('apps/desktop/src/renderer/src/components/ReaderView.vue', ROOT),
+    'utf8',
+  )
+  assert.match(
+    reader,
+    /scrolled: \[payload: \{ topLine: number; scrollY: number \}\]/,
+    '要声明上报事件',
+  )
+  assert.match(reader, /addEventListener\('scroll', reportScroll/, '要监听滚动')
+
+  const app = readFileSync(new URL('apps/desktop/src/renderer/src/App.vue', ROOT), 'utf8')
+  assert.match(app, /function onReaderScrolled\(/, 'App 要接收上报')
+  assert.match(app, /@scrolled="onReaderScrolled"/, '普通阅读视图要接上事件')
+})
+
+test('切走前 flush 待上报的位置（节流窗口内的最后一段不能丢）', () => {
+  const body = bodyOf('rememberReadingPosition')
+  assert.match(body, /reader\.flushScroll\(\)/, '切走前必须把节流队列冲空')
+})
+
+test('节流间隔要短于会话防抖，否则永远写不进去', () => {
+  /*
+   * session.json 的写入是 600ms 防抖。若上报频率高于这个防抖的间隔（即
+   * 每次都重置计时器），防抖永远不触发，位置永远不落盘。200ms 上报 + 600ms
+   * 防抖能保证「滚动停下后 600ms 一定写盘」。
+   */
+  const reader = readFileSync(
+    new URL('apps/desktop/src/renderer/src/components/ReaderView.vue', ROOT),
+    'utf8',
+  )
+  const interval = /scrollReportTimer = setTimeout\([\s\S]{0,200}?\},\s*(\d+)\)/.exec(reader)?.[1]
+  assert.ok(interval, '找不到节流间隔')
+  assert.ok(Number(interval) < 600, `节流 ${interval}ms 必须小于会话防抖 600ms`)
+})
+
+test('源行为 0 时不能盲信（旧会话把它当缺省值）', () => {
+  /*
+   * 上一版把「没有源行信息」也存成 0。加载旧会话后若照单全收，
+   * scrollToSourceLine(0) 会把文档滚到顶部**并返回 true**，压住像素兜底——
+   * 这正是用户机器上能复现、而全新数据目录测不出来的原因。
+   */
+  const body = bodyOf('positionTrustworthy')
+  assert.match(body, /ref\.topLine < 0/, '负数（未知）必须直接判不可信')
+  assert.match(body, /ref\.topLine > 0 \|\| ref\.scrollY < 40/, '0 只有在像素也接近顶部时才可信')
 })

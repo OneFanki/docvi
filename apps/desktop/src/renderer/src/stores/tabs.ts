@@ -160,7 +160,11 @@ function normalizeDocRef(value: unknown): DocRef | null {
           ? raw.relPath
           : raw.absolutePath,
     scrollY: Number(raw.scrollY) || 0,
-    topLine: Number(raw.topLine) || 0,
+    /*
+     * 老会话文件没有这个字段：用 -1 表示「不知道」，恢复时直接走像素兜底。
+     * 不能填 0——那等于谎称「用户当时在最顶上」，会把人拽回开头。
+     */
+    topLine: Number.isFinite(Number(raw.topLine)) ? Number(raw.topLine) : -1,
   }
 }
 
@@ -247,7 +251,7 @@ function migrateLegacy(): Persisted | null {
         absolutePath: source.absolutePath,
         title: tab.title ?? '',
         scrollY: tab.scrollY ?? 0,
-        topLine: tab.topLine ?? 0,
+        topLine: tab.topLine ?? -1,
       })
       if (!ref) continue
       const isFile = ref.workspaceId === null
@@ -476,7 +480,7 @@ export const useTabsStore = defineStore('tabs', () => {
       absolutePath: input.absolutePath,
       title: input.title,
       scrollY: 0,
-      topLine: 0,
+      topLine: -1,
     }
     const tab: TabRecord = {
       id: newId(),
@@ -541,7 +545,12 @@ export const useTabsStore = defineStore('tabs', () => {
     const ref = tab ? currentDocOf(tab) : null
     if (!ref) return
     ref.scrollY = scrollY
-    if (topLine > 0) ref.topLine = topLine
+    /*
+     * 0 是合法坐标（用户正看着开头），-1 表示「这篇没有行号信息」。
+     * 只拒绝负数，不要写成 `> 0`——那会把「在最顶部」也吞掉，
+     * 下次恢复就退化成像素，换字体后落到别处。
+     */
+    if (topLine >= 0) ref.topLine = topLine
   }
 
   /** 更新当前文档标题（正文渲染完成后首个 H1 才知道） */
