@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { AlertTriangle, ChevronDown, ChevronUp, FileText, Search, Share2, X } from 'lucide-vue-next'
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  FileText,
+  Search,
+  Share2,
+  X,
+} from 'lucide-vue-next'
 import {
   enhanceMermaidSvg,
   highlightPass,
@@ -16,6 +25,7 @@ import {
 import type { DocPayload } from '@docvi/shared'
 import { isStandaloneDoc } from '@docvi/shared'
 import ImageLightbox from '@plugins/base/src/components/ImageLightbox.vue'
+import ContextMenu, { type MenuItem } from './ContextMenu.vue'
 import { createHostRegistry } from '../lib/component-registry'
 import { isReadOnlyHost } from '../lib/host'
 import { linkToAssetUrl, openHtmlInSandbox } from '../lib/html-sandbox'
@@ -74,6 +84,13 @@ const emit = defineEmits<{
   rendered: [payload: { path: string; title: string }]
   /** 分享当前文档：链接生成、复制都在宿主做（这里只管按钮位置） */
   share: []
+  /**
+   * 导出当前文档的某种格式。
+   *
+   * 只发一个「用户点了哪种格式」，真正读缓冲区、离屏渲染、落盘都在 App 做——
+   * 阅读视图拿不到编辑器缓冲（用户可能改了没保存），也不该知道导出文件存在哪。
+   */
+  export: [format: 'markdown' | 'html' | 'pdf']
   /** 正文里的站内链接（绝对路径）：容器版交给 App 走 SPA 路由，避免整页刷新 */
   navigate: [path: string]
 }>()
@@ -82,6 +99,33 @@ const scroller = ref<HTMLElement | null>(null)
 const host = ref<HTMLElement | null>(null)
 const rendered = ref<RenderResult | null>(null)
 const copiedLang = ref<string | null>(null)
+
+/** 导出下拉：三种格式各有各的用途，单图标表达不了选择，所以做成菜单 */
+const exportOpen = ref(false)
+const exportButton = ref<HTMLElement | null>(null)
+const exportMenu = ref({ x: 0, y: 0 })
+
+function toggleExportMenu(): void {
+  if (exportOpen.value) {
+    exportOpen.value = false
+    return
+  }
+  const rect = exportButton.value?.getBoundingClientRect()
+  if (!rect) return
+  exportMenu.value = { x: rect.left, y: rect.bottom + 4 }
+  exportOpen.value = true
+}
+
+function pickExport(format: 'markdown' | 'html' | 'pdf'): void {
+  exportOpen.value = false
+  emit('export', format)
+}
+
+const exportItems = computed<MenuItem[]>(() => [
+  { id: 'markdown', label: t('reader.exportMarkdown'), hint: '.md' },
+  { id: 'html', label: t('reader.exportHtml'), hint: '.html' },
+  { id: 'pdf', label: t('reader.exportPdf'), hint: '.pdf' },
+])
 
 const plugins = usePluginStore()
 const { t } = useI18n()
@@ -580,6 +624,19 @@ defineExpose({
             </span>
             <button
               v-if="!isReadOnlyHost"
+              ref="exportButton"
+              v-tooltip="t('reader.export')"
+              class="reader__share"
+              type="button"
+              :aria-label="t('reader.export')"
+              :aria-expanded="exportOpen"
+              aria-haspopup="menu"
+              @click="toggleExportMenu"
+            >
+              <Download :size="13" :stroke-width="1.8" />
+            </button>
+            <button
+              v-if="!isReadOnlyHost"
               v-tooltip="t('reader.share')"
               class="reader__share"
               type="button"
@@ -604,6 +661,20 @@ defineExpose({
         </footer>
       </article>
     </div>
+
+    <!--
+      导出菜单挂在滚动容器外面，与查找条同理：放在 reader 里会随内容滚动，
+      长文档滚到一半时菜单就飘到视口外了。
+    -->
+    <ContextMenu
+      :open="exportOpen"
+      :x="exportMenu.x"
+      :y="exportMenu.y"
+      :items="exportItems"
+      :anchor="exportButton"
+      @close="exportOpen = false"
+      @select="pickExport($event as 'markdown' | 'html' | 'pdf')"
+    />
 
     <!-- 画布右上角浮层：不参与滚动、不占文档高度 -->
     <div v-if="findOpen" class="findbar">

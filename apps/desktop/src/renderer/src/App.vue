@@ -3473,6 +3473,7 @@ onBeforeUnmount(() => {
               source-lines
               @outline="outline = $event"
               @error="store.setError($event)"
+              @export="exportDoc"
               @rendered="onSplitRendered"
             />
           </div>
@@ -3490,6 +3491,7 @@ onBeforeUnmount(() => {
           @error="store.setError($event)"
           @pick-file="openFileDialog"
           @share="shareCurrentDoc"
+          @export="exportDoc"
           @navigate="onContentNavigate"
           @rendered="onRendered"
         />

@@ -87,3 +87,56 @@ test('导出产物剔除只对屏幕有意义的按钮', () => {
     assert.ok(cleaner.includes(`.${selector}`), `.${selector} 必须被清掉`)
   }
 })
+
+/* ---------- 界面入口 ---------- */
+
+test('阅读视图每个实例都接上了导出的三种格式', () => {
+  /*
+   * 导出入口原先只存在于命令面板（Ctrl+K），界面上没有任何按钮——用户根本
+   * 不知道有这功能。加了按钮之后，风险变成「新加的阅读视图实例忘了接线」：
+   * 按钮渲染出来、点了却什么都不发生，且不报错。
+   *
+   * 所以检查的是**每个 <ReaderView> 都有 @export**，而不是「源码里出现过 @export」。
+   */
+  const app = readFileSync(
+    new URL('../apps/desktop/src/renderer/src/App.vue', import.meta.url),
+    'utf8',
+  )
+  const instances = app.split('<ReaderView').slice(1)
+  assert.ok(instances.length >= 2, `预期至少两个阅读视图实例，实得 ${instances.length}`)
+  for (const [index, chunk] of instances.entries()) {
+    // 每个实例的属性区到下一个标签结束为止
+    const body = chunk.slice(0, chunk.indexOf('/>') + 2)
+    assert.match(body, /@export="exportDoc"/, `第 ${index + 1} 个 ReaderView 没接 @export`)
+  }
+
+  /* 视图侧：按钮存在、菜单里三种格式齐全、事件声明带 format 参数 */
+  const reader = readFileSync(
+    new URL('../apps/desktop/src/renderer/src/components/ReaderView.vue', import.meta.url),
+    'utf8',
+  )
+  assert.match(reader, /export: \[format: 'markdown' \| 'html' \| 'pdf'\]/, '事件签名必须带格式')
+  for (const key of ['reader.exportMarkdown', 'reader.exportHtml', 'reader.exportPdf']) {
+    assert.ok(reader.includes(key), `菜单缺少 ${key}`)
+  }
+  assert.match(
+    reader,
+    /ContextMenu[\s\S]{0,400}@select="pickExport/,
+    '下拉菜单必须接回 pickExport，否则点了没反应',
+  )
+})
+
+test('只读宿主不显示导出入口', () => {
+  /*
+   * 容器读者面（`isReadOnlyHost`）没有主进程，导出要走 IPC 落盘——那里既没有
+   * IPC 也不该让读者下载整站文档。按钮必须与分享按钮同样受这个条件约束。
+   */
+  const reader = readFileSync(
+    new URL('../apps/desktop/src/renderer/src/components/ReaderView.vue', import.meta.url),
+    'utf8',
+  )
+  const buttonAt = reader.indexOf('ref="exportButton"')
+  assert.ok(buttonAt > 0, '找不到导出按钮')
+  const before = reader.slice(Math.max(0, buttonAt - 300), buttonAt)
+  assert.match(before, /v-if="!isReadOnlyHost"/, '导出按钮必须受 isReadOnlyHost 约束')
+})
