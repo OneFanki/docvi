@@ -28,6 +28,8 @@ export const IPC = {
   appOpenPath: 'docvi:app:open-path',
   /** 渲染进程启动时拉取排队的打开请求（同时作为「已就绪」信号） */
   appPendingPaths: 'docvi:app:pending-paths',
+  /** 主进程 → 渲染进程：原生应用菜单里由页面执行的动作 */
+  appMenuAction: 'docvi:app:menu-action',
 
   workspaceList: 'docvi:workspace:list',
   workspaceAdd: 'docvi:workspace:add',
@@ -647,6 +649,14 @@ export interface ImageImportResult {
   size: number
 }
 
+/**
+ * 原生应用菜单交给页面执行的动作。
+ *
+ * 菜单加速键由主进程接管，页面收不到同一个按键；能落到渲染层的动作只列在
+ * 这里，主进程与 preload 都按这份白名单校验，避免通道被误用时执行任意字符串。
+ */
+export type MenuAction = 'settings' | 'shortcuts' | 'openFile' | 'closeTab'
+
 /** preload 经 contextBridge 暴露给渲染进程的完整表面。 */
 export interface DocviApi {
   /**
@@ -833,6 +843,12 @@ export interface DocviApi {
 
   /** 订阅「外部要求打开某个文件」；返回取消订阅函数 */
   onOpenPath(callback: (absolutePath: string) => void): () => void
+  /**
+   * 订阅原生应用菜单动作（容器版没有原生菜单，可不实现）。
+   *
+   * 返回取消订阅函数。通道只承载 `MenuAction` 白名单里的值。
+   */
+  onMenuAction?(callback: (action: MenuAction) => void): () => void
   /** 拖放文件取磁盘路径（webUtils；渲染进程拿不到 File.path） */
   pathsForFiles(files: File[]): string[]
 

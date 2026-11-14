@@ -23,6 +23,7 @@ import { useServiceStore } from '../stores/service'
 import { useTabsStore } from '../stores/tabs'
 import { useThemeStore } from '../stores/app'
 import { LOCALES, useI18n } from '../lib/i18n'
+import { IS_MAC } from '../lib/shortcuts'
 import ThemePicker from './ThemePicker.vue'
 
 /**
@@ -168,6 +169,15 @@ interface AboutState {
 }
 
 const about = ref<AboutState>({ info: null, update: null, checking: false })
+
+/**
+ * macOS：安装包是 dmg，点「安装」只会挂载镜像，用户还要自己拖进 Applications。
+ * 按钮文案与说明必须按平台说真话，不能沿用 Windows 的「重启并安装」。
+ *
+ * 用同步的 `IS_MAC` 而不是等 `about.info` 回来：异步判定会让 mac 用户先看到
+ * 一帧「重启并安装」，再跳成「打开安装包」。
+ */
+const isMac = IS_MAC
 
 async function loadAbout(): Promise<void> {
   const result = await window.docvi.appRuntimeInfo()
@@ -1127,7 +1137,8 @@ async function openLogs(): Promise<void> {
                 </span>
               </div>
               <button class="btn btn--primary btn--sm" type="button" @click="installUpdate">
-                {{ t('about.installNow') }}
+                <template v-if="isMac">{{ t('about.installNowMac') }}</template>
+                <template v-else>{{ t('about.installNow') }}</template>
               </button>
             </template>
 
@@ -1192,7 +1203,8 @@ async function openLogs(): Promise<void> {
             </template>
           </div>
 
-          <p class="hint">{{ t('about.updateNote') }}</p>
+          <p v-if="isMac" class="hint">{{ t('about.updateNoteMac') }}</p>
+          <p v-else class="hint">{{ t('about.updateNote') }}</p>
         </section>
       </template>
 

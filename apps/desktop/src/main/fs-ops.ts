@@ -3,13 +3,14 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { basename, dirname, join, sep } from 'node:path'
+import { basename, dirname, join, relative, sep } from 'node:path'
 
 import type { FsEntryKind } from '@docvi/shared'
 
@@ -56,7 +57,9 @@ function assertName(name: string): string {
 
 /** 目标目录：相对路径解析到内容根内，并确认它确实是个目录 */
 function requireDir(root: string, relPath: string): string {
-  const abs = relPath ? resolveInside(root, relPath) : root
+  // 空相对路径 = 根目录。同样要取 realpath，否则在 macOS 的 /var 符号链接下，
+  // 这里返回的 root 与 resolveInside 返回的 realpath 不是同一套前缀。
+  const abs = relPath ? resolveInside(root, relPath) : realpathSync(root)
   const stat = statSync(abs)
   if (!stat.isDirectory()) {
     throw Object.assign(new Error('目标不是目录'), { code: 'E_INVALID' as const })
@@ -64,11 +67,22 @@ function requireDir(root: string, relPath: string): string {
   return abs
 }
 
+/**
+ * 绝对路径 → 内容根相对路径。
+ *
+ * 不能用 `abs.slice(root.length)`：`resolveInside` 返回的是 realpath，而调用方
+ * 传入的 root 可能带符号链接（macOS 的 `/var` → `/private/var`、用户把工作区
+ * 放在链接目录下）。两边真实路径不一致时，slice 会把路径从错误位置切断，
+ * 返回 `g-XXXX/assets/a.png` 这种带随机段的结果。
+ */
 function toRel(root: string, abs: string): string {
-  return abs
-    .slice(root.length)
-    .replace(/^[/\\]/, '')
-    .replaceAll('\\', '/')
+  let base = root
+  try {
+    base = realpathSync(root)
+  } catch {
+    // 根暂时不可解析时退回原值：后面的 resolveInside 已经保证了合法性
+  }
+  return relative(base, abs).replaceAll('\\', '/')
 }
 
 /** abs 是否等于 parent 或在其之内（目录移动/复制的自包含判定） */

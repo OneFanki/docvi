@@ -1,9 +1,9 @@
-import { app, BrowserWindow, ipcMain, protocol, net, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, net, protocol, screen, shell } from 'electron'
 import { realpathSync } from 'node:fs'
 import { join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { IPC } from '@docvi/shared'
+import { IPC, type MenuAction } from '@docvi/shared'
 
 import { registerIpc, createStore, createRecent, type DesktopHostOptions } from './ipc.ts'
 import type { WorkspaceStore } from './store.ts'
@@ -20,6 +20,9 @@ import { createSettingsStore, sessionFilePath, settingsFilePath } from './settin
 import { DEV_APP_NAME, devDataDir } from './dev-data.ts'
 import { createTray, focusWindow, markQuitting, shouldHideOnClose } from './tray.ts'
 import { dataDir } from './paths.ts'
+import { installApplicationMenu } from './menu.ts'
+import { installNativeContextMenu } from './context-menu.ts'
+import { readWindowState, trackWindowState } from './window-state.ts'
 
 /**
  * docvi 主进程入口。
@@ -145,7 +148,15 @@ protocol.registerSchemesAsPrivileged([
  * 不去猜 Chromium 的开关参数，避免把 `--user-data-dir=...` 当成文档打开。
  */
 function markdownArgs(argv: string[]): string[] {
-  return argv.filter(arg => !arg.startsWith('-') && /\.md$/i.test(arg))
+  return argv.filter(arg => !arg.startsWith('-') && isMarkdownPath(arg))
+}
+
+/**
+ * 文件关联声明了 `md` 与 `markdown` 两种扩展名，识别也必须用同一份规则。
+ * 只写 `.md$` 时，双击 `.markdown` 会被 `open-file` 静默丢掉。
+ */
+function isMarkdownPath(path: string): boolean {
+  return /\.(md|markdown)$/i.test(path)
 }
 
 /**
@@ -185,6 +196,8 @@ if (!app.requestSingleInstanceLock()) {
 let mainWindow: BrowserWindow | null = null
 /** 窗口未就绪前收到的打开请求先排队，渲染进程就绪后统一投递 */
 let pendingPaths: string[] = []
+/** 窗口/渲染层尚未就绪时收到的菜单动作，等渲染层拉取队列时再投 */
+let pendingMenuAction: MenuAction | null = null
 /** 渲染进程是否已挂载监听（以它拉取队列为信号，避免 send 丢消息） */
 let rendererReady = false
 
@@ -222,6 +235,11 @@ function windowChromeColors(appearance: WindowAppearance): {
 /** 应用窗口 chrome 配色（Windows 才有 overlay；其余平台是系统自绘） */
 function applyWindowAppearance(appearance: WindowAppearance): void {
   windowAppearance = appearance
+  /*
+   * 系统外观也要跟着应用主题走：macOS 的打开面板、右键菜单、滚动条等原生控件
+   * 读的是 NSAppearance。只改页面 CSS 的话，深色应用里会弹出浅色系统面板。
+   */
+  nativeTheme.themeSource = appearance
   if (process.platform !== 'win32' || !mainWindow) return
   try {
     mainWindow.setTitleBarOverlay({ ...windowChromeColors(appearance), height: 44 })
@@ -230,13 +248,29 @@ function applyWindowAppearance(appearance: WindowAppearance): void {
   }
 }
 
+/** 当前所有屏幕的可用工作区；窗口坐标的记忆与恢复都以它为准 */
+function displayAreas(): Electron.Rectangle[] {
+  return screen.getAllDisplays().map(display => display.workArea)
+}
+
+/** 窗口状态文件（与 session.json 分开：这份是纯窗口现场，不参与设置导出） */
+function windowStateFile(): string {
+  return join(dataDir(), 'window-state.json')
+}
+
 function createWindow(): void {
   const chrome = windowChromeColors(windowAppearance)
+  /*
+   * 窗口现场优先：尺寸 / 位置 / 最大化都从上一次退出时恢复。
+   * 显示器被拔掉的情况由 normalizeWindowState 处理（坐标落在屏幕外就丢弃）。
+   */
+  const state = readWindowState(windowStateFile(), displayAreas())
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 840,
+    width: state.width,
+    height: state.height,
     minWidth: 880,
     minHeight: 560,
+    ...(state.x !== undefined && state.y !== undefined ? { x: state.x, y: state.y } : {}),
     show: false,
     title: isolatedDev ? DEV_APP_NAME : 'docvi',
     backgroundColor: chrome.color,
@@ -255,9 +289,16 @@ function createWindow(): void {
 
   mainWindow.once('ready-to-show', () => {
     if (!mainWindow) return
+    if (state.maximized) mainWindow.maximize()
     if (HEADLESS) parkWindowOffscreen(mainWindow)
     else mainWindow.show()
   })
+
+  // 文本右键菜单：复制 / 粘贴 / 拼写建议（Electron 默认一个都不给）
+  installNativeContextMenu(mainWindow)
+
+  // 无头夹具的窗口停在屏幕外，记下来的坐标没有意义，也会污染真实会话
+  if (!HEADLESS) trackWindowState(mainWindow, windowStateFile(), displayAreas)
 
   /*
    * 关闭窗口的决策只在这里做：
@@ -338,24 +379,65 @@ function flushPendingPaths(): void {
   if (!mainWindow || !rendererReady || !pendingPaths.length) return
   const paths = pendingPaths
   pendingPaths = []
-  for (const path of paths) mainWindow.webContents.send(IPC.appOpenPath, path)
+  for (const path of paths) {
+    // macOS「最近使用」/ Dock 菜单的数据源；Windows/Linux 上该调用是空操作
+    if (process.platform === 'darwin') app.addRecentDocument(path)
+    mainWindow.webContents.send(IPC.appOpenPath, path)
+  }
 }
 
 function openPath(path: string): void {
   pendingPaths.push(path)
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.focus()
-    flushPendingPaths()
+  /*
+   * macOS 上「应用还活着但没有窗口」是常态：关闭窗口后进程不退，Dock 图标仍在。
+   * 这时双击 .md / 从 Finder 拖文件过来，必须真的把窗口建出来或显示出来，
+   * 只 push 队列会让用户看到「应用激活了，但文件没打开」。
+   */
+  if (!mainWindow) {
+    if (app.isReady()) createWindow()
+    return
   }
+  if (!mainWindow.isVisible()) mainWindow.show()
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.focus()
+  flushPendingPaths()
 }
 
 /** 渲染进程启动时拉取队列：同时把它标记为已就绪 */
 function takePendingPaths(): string[] {
   rendererReady = true
+  if (pendingMenuAction) {
+    const action = pendingMenuAction
+    pendingMenuAction = null
+    // 等这次 invoke 的响应先回到渲染层，再推事件
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC.appMenuAction, action)
+      }
+    }, 0)
+  }
   const paths = pendingPaths
   pendingPaths = []
   return paths
+}
+
+/**
+ * 把菜单动作交给渲染层执行。
+ *
+ * 窗口不存在时要先建窗（macOS 菜单栏在无窗口时依然可用）；渲染层还没挂好监听
+ * 就先排队，由 `takePendingPaths` 统一冲掉。
+ */
+function sendMenuAction(action: MenuAction): void {
+  if (!mainWindow) {
+    pendingMenuAction = action
+    if (app.isReady()) createWindow()
+    return
+  }
+  if (!mainWindow.isVisible()) mainWindow.show()
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.focus()
+  if (rendererReady) mainWindow.webContents.send(IPC.appMenuAction, action)
+  else pendingMenuAction = action
 }
 
 /**
@@ -482,8 +564,11 @@ app.on('second-instance', (_event, argv) => {
    * 也没关系——渲染进程挂载后会主动拉 `appPendingPaths` 取走。
    */
   if (mainWindow) {
+    if (!mainWindow.isVisible()) mainWindow.show()
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
+  } else if (app.isReady()) {
+    createWindow()
   }
   for (const path of markdownArgs(argv)) openPath(path)
 })
@@ -491,7 +576,7 @@ app.on('second-instance', (_event, argv) => {
 // macOS：双击关联文件 / 拖到 Dock 图标
 app.on('open-file', (event, path) => {
   event.preventDefault()
-  if (/\.md$/i.test(path)) openPath(path)
+  if (isMarkdownPath(path)) openPath(path)
 })
 
 app.whenReady().then(() => {
@@ -602,7 +687,7 @@ app.whenReady().then(() => {
    */
   closeToTrayEnabled = settings.get().desktop.closeToTray
   // 建窗之前先定好配色：否则浅色主题启动会闪一帧深色窗口按钮
-  windowAppearance = settings.get().theme === 'paper' ? 'light' : 'dark'
+  applyWindowAppearance(settings.get().theme === 'paper' ? 'light' : 'dark')
 
   const showWindow = (): void => {
     if (!mainWindow) {
@@ -630,6 +715,16 @@ app.whenReady().then(() => {
     }
   }
   ensureTray()
+
+  /*
+   * macOS 应用菜单必须在窗口与 showWindow 都就绪之后装：菜单里的「设置 / 打开
+   * 主窗口 / 关闭标签」都要么走 IPC、要么直接操作窗口。
+   */
+  installApplicationMenu({
+    isDev: !app.isPackaged,
+    send: sendMenuAction,
+    showWindow,
+  })
 
   // 启动时按设置文件里的愿望对齐注册表：两边不一致时以愿望为准修一次
   void (async () => {
@@ -724,8 +819,15 @@ app.whenReady().then(() => {
   // 「待打开队列」只在主进程有状态，直接在这里挂 handler，避免 ipc.ts 反向依赖入口
   ipcMain.handle(IPC.appPendingPaths, () => ({ ok: true, data: takePendingPaths() }))
 
+  /*
+   * Dock 图标点击。
+   *
+   * 不能只看「窗口数量为 0」：开了「关闭留托盘」后窗口是被 hide() 的，对象还在，
+   * 用户点 Dock 会什么都没发生。窗口存在就显式显示并聚焦。
+   */
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (!mainWindow) createWindow()
+    else focusWindow(mainWindow)
   })
 })
 

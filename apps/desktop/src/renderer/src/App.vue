@@ -44,6 +44,7 @@ import { usePluginStore } from './stores/plugins'
 import { useServiceStore } from './stores/service'
 import { useI18n, applyExternalLocale, migrateLegacyLocale } from './lib/i18n'
 import { isReadOnlyHost, isWebHost } from './lib/host'
+import { MOD_LABEL, TAB_MOD_LABEL } from './lib/shortcuts'
 import { sameDocumentPath } from './lib/external-change'
 import { affectsDocument, affectsTree } from './lib/workspace-change'
 import {
@@ -592,6 +593,18 @@ onMounted(async () => {
 
   const unsubscribe = window.docvi.onOpenPath(path => void openStandalone(path))
   unregisters.push(unsubscribe)
+  /*
+   * 原生应用菜单动作（⌘W 关标签 / ⌘, 设置 / ⌘O 打开文件 / ⌘/ 快捷键）。
+   * 菜单加速键由主进程接管，页面收不到同名按键，只能由这条通道执行。
+   */
+  unregisters.push(
+    window.docvi.onMenuAction?.(action => {
+      if (action === 'settings') openSettings('general')
+      else if (action === 'shortcuts') shortcutsOpen.value = true
+      else if (action === 'openFile') void openFileDialog()
+      else if (action === 'closeTab' && tabs.activeId) void closeTab(tabs.activeId)
+    }) ?? (() => undefined),
+  )
   // 外部改动：主进程 watcher 只推路径，读盘与「采用 / 冲突」判定都在渲染层
   unregisters.push(window.docvi.onExternalChange(path => void onExternalChange(path)))
   // 目录结构变化：AI / git 新建或删了文件，侧栏与搜索索引都要跟上
@@ -2691,7 +2704,7 @@ function registerCommands(): void {
       title: t('app.library'),
       keywords: 'library home 首页',
       group: t('group.general'),
-      hint: 'Ctrl+1',
+      hint: `${MOD_LABEL}+1`,
       run: () => goLibrary(),
     },
     {
@@ -2699,7 +2712,7 @@ function registerCommands(): void {
       title: t('cmd.openFile'),
       keywords: 'open file markdown 文件',
       group: t('group.general'),
-      hint: 'Ctrl+O',
+      hint: `${MOD_LABEL}+O`,
       run: () => openFileDialog(),
     },
     {
@@ -2741,7 +2754,7 @@ function registerCommands(): void {
       title: t('tabmenu.close'),
       keywords: 'close tab 关闭 标签',
       group: t('group.tabs'),
-      hint: 'Ctrl+W',
+      hint: `${MOD_LABEL}+W`,
       run: () => {
         if (tabs.activeId) void closeTab(tabs.activeId)
       },
@@ -2784,7 +2797,7 @@ function registerCommands(): void {
       title: t('cmd.nextTab'),
       keywords: 'next tab 下一个标签',
       group: t('group.tabs'),
-      hint: 'Ctrl+Tab',
+      hint: `${TAB_MOD_LABEL}+Tab`,
       run: () => openSwitcher(),
     },
     {
@@ -2815,7 +2828,7 @@ function registerCommands(): void {
       title: t('cmd.toggleContentWidth'),
       keywords: 'width measure full 宽度 收窄 限宽 铺满 版心',
       group: t('group.appearance'),
-      hint: 'Ctrl+Alt+W',
+      hint: `${MOD_LABEL}+Alt+W`,
       run: () => toggleContentWidth(),
     },
     {
@@ -2823,7 +2836,7 @@ function registerCommands(): void {
       title: t('cmd.toggleOutline'),
       keywords: 'outline toc 大纲 目录',
       group: t('group.appearance'),
-      hint: 'Ctrl+Alt+B',
+      hint: `${MOD_LABEL}+Alt+B`,
       run: () => {
         if (outlineAvailable.value) showOutline.value = !showOutline.value
       },
@@ -2833,7 +2846,7 @@ function registerCommands(): void {
       title: t('cmd.toggleTree'),
       keywords: 'tree sidebar explorer 目录树 侧栏 折叠',
       group: t('group.appearance'),
-      hint: 'Ctrl+B',
+      hint: `${MOD_LABEL}+B`,
       run: () => {
         if (treeAvailable.value) showTree.value = !showTree.value
       },
@@ -2843,7 +2856,7 @@ function registerCommands(): void {
       title: t('cmd.editLive'),
       keywords: 'edit live preview 编辑 实时预览',
       group: t('group.document'),
-      hint: 'Ctrl+E',
+      hint: `${MOD_LABEL}+E`,
       run: () => setDocMode(docMode.value === 'read' ? 'live' : 'read'),
     },
     {
@@ -2858,7 +2871,7 @@ function registerCommands(): void {
       title: t('cmd.split'),
       keywords: 'split preview 分屏 预览 并排 side',
       group: t('group.document'),
-      hint: 'Ctrl+\\',
+      hint: `${MOD_LABEL}+\\`,
       run: () => setDocMode(docMode.value === 'split' ? 'read' : 'split'),
     },
     {
@@ -2866,7 +2879,7 @@ function registerCommands(): void {
       title: t('cmd.save'),
       keywords: 'save write 保存',
       group: t('group.document'),
-      hint: 'Ctrl+S',
+      hint: `${MOD_LABEL}+S`,
       run: () => (editing.value ? editorRef.value?.save() : undefined),
     },
     {
@@ -2910,7 +2923,7 @@ function registerCommands(): void {
       title: t('cmd.shortcuts'),
       keywords: 'keys shortcut help 快捷键 帮助',
       group: t('group.help'),
-      hint: 'Ctrl+/',
+      hint: `${MOD_LABEL}+/`,
       run: () => {
         shortcutsOpen.value = true
       },
@@ -2981,7 +2994,7 @@ function registerCommands(): void {
       title: t('cmd.find'),
       keywords: 'find search 查找 搜索',
       group: t('group.document'),
-      hint: 'Ctrl+F',
+      hint: `${MOD_LABEL}+F`,
       run: () => {
         readerRef.value?.openFind()
       },

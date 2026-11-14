@@ -31,6 +31,7 @@ import { isReadOnlyHost } from '../lib/host'
 import { linkToAssetUrl, openHtmlInSandbox } from '../lib/html-sandbox'
 import { usePluginStore } from '../stores/plugins'
 import { useI18n } from '../lib/i18n'
+import { MOD_LABEL } from '../lib/shortcuts'
 import { clearMatches, collectMatches, paintMatches, scrollToRange } from '../lib/find-in-doc'
 
 /**
@@ -704,7 +705,7 @@ defineExpose({
       <div v-if="!doc" class="reader__empty">
         <FileText :size="28" :stroke-width="1.4" aria-hidden="true" />
         <p class="reader__empty-title">{{ t('empty.reader.title') }}</p>
-        <p class="reader__empty-hint">{{ t('empty.reader.hint') }}</p>
+        <p class="reader__empty-hint">{{ t('empty.reader.hint', { key: `${MOD_LABEL}+O` }) }}</p>
         <p v-if="showTreeHint" class="reader__empty-hint">{{ t('file.outsideHint') }}</p>
         <button
           v-if="!isReadOnlyHost"

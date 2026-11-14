@@ -123,6 +123,9 @@
    * 只列会命中的项：鸿蒙 SC 同时含拉丁与汉字，所以它后面只需要一个平台兜底。
    * 中间再插「也支持中文」的字体不会改变结果，只会让用户看到的顺序变长。
    *
+   * 想要 macOS 的 SF Pro 请在设置里切「系统字体」：system 档已把
+   * `-apple-system` 排在首位（见下方 `data-font='system'`）。
+   *
    * 英文数字是否等宽由 `data-mono-latin` 属性控制（见文件末尾那条覆盖）：
    * 开启时这个变量整体换成等宽版栈，两种状态各只有一条定义，不做排列组合。
    */
@@ -172,8 +175,10 @@
  * 没法对齐，不该跟着这个开关一起关掉。
  */
 :root[data-font='system'] {
-  --dv-font-sans: 'Segoe UI', 'PingFang SC', 'Noto Sans', sans-serif;
-  --dv-font-mono: 'JetBrains Mono', 'Microsoft YaHei', 'PingFang SC', monospace;
+  /* mac 上 SF Pro 必须排在 Segoe UI 前：后者在 mac 永远不命中，排前面只是噪音 */
+  --dv-font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Noto Sans', sans-serif;
+  --dv-font-mono: 'JetBrains Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
 }
 
 /*

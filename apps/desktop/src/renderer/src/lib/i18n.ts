@@ -64,7 +64,7 @@ const zh: Dict = {
   'editor.emptyHint': '输入 / 插入内容',
 
   'empty.reader.title': '还没有打开文档',
-  'empty.reader.hint': '从左侧目录选择一篇，或按 Ctrl+O 打开任意 Markdown 文件。',
+  'empty.reader.hint': '从左侧目录选择一篇，或按 {key} 打开任意 Markdown 文件。',
   'empty.reader.open': '打开文件…',
   'empty.tree': '此目录下没有 Markdown 文档',
   'empty.plugins': '还没有插件。可以从文件夹安装一个包含 plugin.json 的插件包。',
@@ -183,10 +183,13 @@ const zh: Dict = {
   'about.cancelDownload': '取消下载',
   'about.readyToInstall': '已下载 {version}，校验通过',
   'about.installNow': '重启并安装',
+  'about.installNowMac': '打开安装包',
   'about.webCannotUpdate': '容器版由部署方升级，请让运维重建镜像',
   'about.noChecksum': '该版本未提供校验值，请从下载页手动安装',
   'about.updateNote':
     '下载经过校验后才会执行安装。安装包尚未做代码签名，系统可能提示「未知发布者」，这是当前版本的已知边界。',
+  'about.updateNoteMac':
+    'macOS 会打开下载好的 dmg：请把 docvi 拖入「应用程序」覆盖旧版本。安装包尚未做代码签名；若系统提示「已损坏」，请在终端执行 xattr -dr com.apple.quarantine /Applications/docvi.app 后再打开。',
   'settings.appearance': '外观',
   'settings.theme': '主题',
   'theme.builtin': '内置主题',
@@ -524,7 +527,7 @@ const en: Dict = {
   'editor.emptyHint': 'Type / to insert content',
 
   'empty.reader.title': 'No document open',
-  'empty.reader.hint': 'Pick one from the sidebar, or press Ctrl+O to open any Markdown file.',
+  'empty.reader.hint': 'Pick one from the sidebar, or press {key} to open any Markdown file.',
   'empty.reader.open': 'Open file…',
   'empty.tree': 'No Markdown documents in this folder',
   'empty.plugins': 'No plugins yet. Install a folder containing plugin.json.',
@@ -648,11 +651,14 @@ const en: Dict = {
   'about.cancelDownload': 'Cancel download',
   'about.readyToInstall': '{version} downloaded and verified',
   'about.installNow': 'Restart and install',
+  'about.installNowMac': 'Open installer',
   'about.webCannotUpdate':
     'Container builds are upgraded by the operator — ask them to rebuild the image',
   'about.noChecksum': 'This release has no checksum, so install it manually from the download page',
   'about.updateNote':
     'The installer is downloaded and verified before it runs. Builds are not code-signed yet, so the system may warn about an unknown publisher — that is a known limit of this release.',
+  'about.updateNoteMac':
+    'macOS opens the downloaded dmg: drag docvi into Applications to replace the old version. Builds are not notarized; if macOS says the app is damaged, run xattr -dr com.apple.quarantine /Applications/docvi.app in Terminal and open it again.',
   'settings.appearance': 'Appearance',
   'settings.theme': 'Theme',
   'theme.builtin': 'Built-in theme',

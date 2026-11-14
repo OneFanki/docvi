@@ -5,6 +5,7 @@ import {
   type AppSettings,
   type DocviApi,
   type GitProgressEvent,
+  type MenuAction,
   type ServiceState,
   type UpdateProgress,
 } from '@docvi/shared'
@@ -110,6 +111,23 @@ const api: DocviApi = {
     }
     ipcRenderer.on(IPC.appOpenPath, listener)
     return () => ipcRenderer.removeListener(IPC.appOpenPath, listener)
+  },
+
+  /**
+   * 原生应用菜单动作。
+   *
+   * 与打开文件同一个边界纪律：payload 必须是白名单里的字符串，未知值直接丢弃，
+   * 不让菜单通道变成「任意动作注入」。
+   */
+  onMenuAction: callback => {
+    const allowed = new Set<MenuAction>(['settings', 'shortcuts', 'openFile', 'closeTab'])
+    const listener = (_event: unknown, payload: unknown): void => {
+      if (typeof payload === 'string' && allowed.has(payload as MenuAction)) {
+        callback(payload as MenuAction)
+      }
+    }
+    ipcRenderer.on(IPC.appMenuAction, listener)
+    return () => ipcRenderer.removeListener(IPC.appMenuAction, listener)
   },
 
   /**

@@ -20,6 +20,7 @@ import { BUILTIN_KINDS } from '../plugins/builtin'
 import { useDocumentStore } from '../stores/documents'
 import { usePluginStore } from '../stores/plugins'
 import { useI18n } from '../lib/i18n'
+import { MOD_LABEL } from '../lib/shortcuts'
 import { buildInsertPlan, filterItems, type InsertItem } from '../lib/insert-menu'
 import { insertedBlockRange } from '../lib/insert-plan'
 import SlashMenu from './SlashMenu.vue'
@@ -558,7 +559,7 @@ function mountEditor(): void {
         if (draft.updatedAt <= current.mtime) return
         documents.setText(props.absolutePath, draft.text)
         editor?.setText(draft.text)
-        emit('error', '已恢复上次未保存的草稿（Ctrl+S 保存，或切回阅读丢弃）')
+        emit('error', `已恢复上次未保存的草稿（${MOD_LABEL}+S 保存，或切回阅读丢弃）`)
       })
     }
   }

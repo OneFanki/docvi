@@ -4,6 +4,7 @@ import { FolderOpen } from 'lucide-vue-next'
 
 import type { TreeNode } from '@docvi/shared'
 import { useI18n } from '../lib/i18n'
+import { MOD_LABEL } from '../lib/shortcuts'
 import { isTreeDrag, parentDirOf, rangeSelection, TREE_DND_TYPE } from '../lib/tree-selection'
 import TreeItem from './TreeItem.vue'
 import ContextMenu, { type MenuItem } from './ContextMenu.vue'
@@ -426,12 +427,12 @@ const menuItems = computed<MenuItem[]>(() => {
      * 两组「复制/剪切」相邻但语义不同，用分隔线隔开并各自带「文件」后缀说明：
      * 不带「文件」的是应用内粘贴用，带的是给外部应用用的系统剪贴板。
      */
-    { id: 'tree.cut', label: t('tree.cut'), hint: 'Ctrl+X' },
-    { id: 'tree.copy', label: t('tree.copy'), hint: 'Ctrl+C' },
+    { id: 'tree.cut', label: t('tree.cut'), hint: `${MOD_LABEL}+X` },
+    { id: 'tree.copy', label: t('tree.copy'), hint: `${MOD_LABEL}+C` },
     {
       id: 'tree.paste',
       label: t('tree.paste'),
-      hint: 'Ctrl+V',
+      hint: `${MOD_LABEL}+V`,
       disabled: !props.canPaste,
     },
     { id: 'tree.cutFile', label: t('tree.cutFile'), separatorBefore: true },

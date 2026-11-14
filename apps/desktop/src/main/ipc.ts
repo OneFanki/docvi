@@ -446,7 +446,10 @@ export function registerIpc(
       if (typeof path !== 'string' || !path) return fail('E_INVALID', 'path 必须是非空字符串')
       const entry = store.find(workspaceId)
       if (!entry) return fail('E_NOT_FOUND', '工作区不存在')
-      return ok(readDoc(entry.root, path))
+      const doc = readDoc(entry.root, path)
+      // 工作区内打开的文档也进 macOS「最近使用」；重复路径由系统去重
+      if (process.platform === 'darwin') app.addRecentDocument(doc.absolutePath)
+      return ok(doc)
     } catch (error) {
       return toFailure(error)
     }
@@ -709,6 +712,8 @@ export function registerIpc(
         return fail('E_INVALID', 'absolutePath 必须是非空字符串')
       }
       const doc = readStandaloneDoc(absolutePath)
+      // macOS「最近使用」/ File → Open Recent 的数据源；其它平台是空操作
+      if (process.platform === 'darwin') app.addRecentDocument(doc.absolutePath)
       /*
        * 登记资产根并回传前缀：单文件没有内容根，图片的相对路径必须有地方落地。
        * 不登记的话渲染层只能把 `images/a.png` 拼到 `docvi://app/`（渲染产物目录），

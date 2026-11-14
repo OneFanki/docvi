@@ -2,6 +2,8 @@
 import { nextTick, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 
+import { MOD_LABEL } from '../lib/shortcuts'
+
 /**
  * 源码编辑弹窗：给「实时预览里不展开源码」的块一个显式编辑入口。
  *
@@ -79,7 +81,7 @@ function onKeydown(event: KeyboardEvent): void {
       </header>
       <textarea ref="textareaRef" v-model="draft" class="srcmodal__area" spellcheck="false" />
       <footer class="srcmodal__foot">
-        <span class="srcmodal__hint">Ctrl+Enter 保存</span>
+        <span class="srcmodal__hint">{{ MOD_LABEL }}+Enter 保存</span>
         <button class="srcmodal__btn" type="button" @click="emit('close')">取消</button>
         <button class="srcmodal__btn srcmodal__btn--primary" type="button" @click="save">
           保存

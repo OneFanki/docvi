@@ -5,6 +5,7 @@ import { Blocks, FileText, Folder, House, ListChecks, Settings, X } from 'lucide
 import type { TabRecord } from '../stores/tabs'
 import { isRealScopeLabel, tabTitleOf } from '../stores/tabs'
 import { useI18n } from '../lib/i18n'
+import { MOD_LABEL, TAB_MOD_LABEL } from '../lib/shortcuts'
 import ContextMenu, { type MenuItem } from './ContextMenu.vue'
 
 /**
@@ -89,7 +90,7 @@ const menuItems = computed<MenuItem[]>(() => {
   const isLibrary = tab?.kind === 'library'
   const hasDoc = Boolean(tab?.history.length)
   return [
-    { id: 'tab.close', label: t('tabmenu.close'), disabled: isLibrary, hint: 'Ctrl+W' },
+    { id: 'tab.close', label: t('tabmenu.close'), disabled: isLibrary, hint: `${MOD_LABEL}+W` },
     { id: 'tab.closeOthers', label: t('tabmenu.closeOthers'), disabled: isLibrary },
     { id: 'tab.closeRight', label: t('tabmenu.closeRight'), disabled: isLibrary },
     {
@@ -309,7 +310,7 @@ defineExpose({ revealTab })
     </div>
 
     <button
-      v-tooltip="{ text: `${t('switcher.title')} (Ctrl+Tab)`, placement: 'bottom' }"
+      v-tooltip="{ text: `${t('switcher.title')} (${TAB_MOD_LABEL}+Tab)`, placement: 'bottom' }"
       class="tabbar__switcher"
       type="button"
       :aria-label="t('switcher.title')"

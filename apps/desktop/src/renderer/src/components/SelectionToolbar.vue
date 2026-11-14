@@ -15,6 +15,7 @@ import {
 } from 'lucide-vue-next'
 
 import type { SelectionMarks } from '@docvi/editor'
+import { MOD_LABEL } from '../lib/shortcuts'
 
 /**
  * 选区气泡工具条。
@@ -173,7 +174,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
 
       <template v-else>
         <button
-          v-tooltip="'加粗（Ctrl+B）'"
+          v-tooltip="`加粗（${MOD_LABEL}+B）`"
           class="bubble__btn"
           :class="{ 'is-active': active('bold') }"
           :aria-pressed="active('bold')"
@@ -183,7 +184,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
           <Bold :size="14" :stroke-width="2" />
         </button>
         <button
-          v-tooltip="'斜体（Ctrl+I）'"
+          v-tooltip="`斜体（${MOD_LABEL}+I）`"
           class="bubble__btn"
           :class="{ 'is-active': active('italic') }"
           :aria-pressed="active('italic')"
