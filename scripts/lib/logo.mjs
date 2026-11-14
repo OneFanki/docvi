@@ -143,6 +143,42 @@ export const LOGO_SVG_COMPACT = `<svg xmlns="http://www.w3.org/2000/svg" viewBox
 </svg>`
 
 /**
+ * macOS 菜单栏模板图（template image）专用：**单色 + alpha 轮廓**。
+ *
+ * 为什么不用带底板的彩色标缩一版：
+ *  - macOS 只把 alpha 当遮罩重新上色，彩色会被抹成纯黑/纯白；
+ *  - 三张半透明纸叠在一起，16pt 下会糊成一坨灰块（实测就是用户说的「很丑」）。
+ *
+ * 所以菜单栏走**轮廓文档**：一条 2.2 单位的描边、右下角切成斜角（品牌里那条
+ * 斜带的简化），内部只留 2–3 条正文线。轮廓在 16pt 下仍然清楚是「一页文档」，
+ * 斜切角是它与通用文件图标唯一不同的地方。
+ *
+ * 16pt 用 COMPACT（两行正文），32pt（@2x）用完整版（三行）——与托盘彩色图
+ * 「小尺寸减细节」的策略一致。
+ */
+const TEMPLATE_BODY =
+  'M10.5 3.5h11a3 3 0 0 1 3 3v15.5L18 28.5h-7.5a3 3 0 0 1-3-3v-19a3 3 0 0 1 3-3z'
+
+function templateSvg(lines) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="100%" height="100%">
+  <g fill="none" stroke="#000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="${TEMPLATE_BODY}"/>
+    ${lines}
+  </g>
+</svg>`
+}
+
+/** 32pt（@2x）：三行正文 */
+export const LOGO_SVG_TEMPLATE = templateSvg(
+  '<path d="M11.3 11h9.3"/><path d="M11.3 15.5h10.3"/><path d="M11.3 20h7.3"/>',
+)
+
+/** 16pt：减到两行，避免两条 1px 横线糊在一起 */
+export const LOGO_SVG_TEMPLATE_COMPACT = templateSvg(
+  '<path d="M11.3 12h9.7"/><path d="M11.3 17.5h8.7"/>',
+)
+
+/**
  * 界面内标记（标题栏 / 运维页顶栏）：**不带底板**，只留三张琥珀纸与深色斜带。
  *
  * 用户明确要求标题栏不要底板——深色方块贴在浅色主题的标题栏上像一个黑补丁。

@@ -59,6 +59,12 @@ extraResources:
   # （见 tray.ts「不要 resize 到 16」的说明）
   - from: build/tray.png
     to: tray.png
+  # macOS 菜单栏模板图：16pt + @2x。template image 只认 alpha，必须单色出图，
+  # 不能拿彩色 tray.png 顶替（会变成实心方块）。
+  - from: build/trayTemplate.png
+    to: trayTemplate.png
+  - from: build/trayTemplate@2x.png
+    to: trayTemplate@2x.png
   # 字体许可原文。
   #
   # ⚠️ 必须随产物分发，不是可选项：HarmonyOS Sans 的许可要求「随附版权声明与
@@ -143,6 +149,15 @@ mac:
   # 未做公证时开启 Hardened Runtime 会让 ad-hoc 签名拒绝 Electron 自带的
   # 预签名框架（Team ID 不同），表现为应用启动即崩。必须关。
   hardenedRuntime: false
+  # 文件目录的 TCC 用途说明。
+  #
+  # 首次启动会在 `<文档>/docvi` 播种默认工作区，用户也可能直接打开桌面/下载
+  # 目录里的文档；从 macOS Catalina 起这些目录受 TCC 保护。带上用途说明后，
+  # 系统弹窗会显示「为什么要访问」，而不是一个无法解释的请求。
+  extendInfo:
+    NSDocumentsFolderUsageDescription: docvi 需要访问「文档」文件夹，用于存放默认工作区与打开你选择的 Markdown 文档。
+    NSDesktopFolderUsageDescription: docvi 需要访问「桌面」文件夹，用于打开你选择的 Markdown 文档与图片。
+    NSDownloadsFolderUsageDescription: docvi 需要访问「下载」文件夹，用于打开你下载的 Markdown 文档。
 
 dmg:
   # 拖拽式安装布局：左侧应用图标、右侧「应用程序」快捷方式

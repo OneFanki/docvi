@@ -9,7 +9,11 @@
  * 输出：缺省 `apps/desktop/build/plugins/`（打包产物，已被 gitignore；由
  * electron-builder 的 extraResources 收进安装包），`--out` 可改到任意目录。
  *
- * 复制内容：plugin.json / dist / docs / examples（README 与源码不进包）。
+ * 复制内容：plugin.json / dist / docs / examples / themes（README 与源码不进包）。
+ *
+ * `themes/` 不能漏：plugin.json 里的主题声明是 `tokens: themes/sea.json`，
+ * 少复制这一层后打包版会在启动时请求 `docvi://plugin/<name>/themes/*.json` 并 404，
+ * 表现为「插件主题在开发版有、安装版没有」——控制台只留下两条 ERR_FILE_NOT_FOUND。
  *
  * 用法：node scripts/assemble-plugins.mjs [--out <目录>]
  */
@@ -20,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SOURCE_DIR = join(ROOT, 'plugins')
 const DEFAULT_OUT = join(ROOT, 'apps', 'desktop', 'build', 'plugins')
-const COPY_ITEMS = ['plugin.json', 'dist', 'docs', 'examples']
+const COPY_ITEMS = ['plugin.json', 'dist', 'docs', 'examples', 'themes']
 
 function parseArgs(argv) {
   const options = { out: DEFAULT_OUT }
