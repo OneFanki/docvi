@@ -5,6 +5,7 @@ import { Blocks, FileText, Folder, Settings } from 'lucide-vue-next'
 import type { TabRecord } from '../stores/tabs'
 import { isRealScopeLabel, tabTitleOf } from '../stores/tabs'
 import { useI18n } from '../lib/i18n'
+import { TAB_MOD_LABEL } from '../lib/shortcuts'
 
 /**
  * Ctrl+Tab 切换浮层（WebStorm 手感）。
@@ -48,7 +49,7 @@ const current = computed(() => props.items[props.cursor] ?? null)
     <div class="switcher" role="listbox" aria-label="切换标签页">
       <div class="switcher__head">
         <span>{{ t('switcher.title') }}</span>
-        <span class="switcher__hint">Ctrl+Tab · 松开切换</span>
+        <span class="switcher__hint">{{ TAB_MOD_LABEL }}+Tab · 松开切换</span>
       </div>
       <div class="switcher__list">
         <button

@@ -14,6 +14,7 @@
  *   icon.ico    16/20/24/32/40/48/64/96/128/256（Windows，覆盖 100%–300% DPI）
  *   icon.icns   16…1024（macOS）
  *   tray.png    32×32 简化版，托盘专用（主进程直接加载，不再 resize）
+ *   trayTemplate.png / @2x  macOS 菜单栏单色模板图（16pt + 32pt）
  *   docs/assets/logo.svg（文档与外部引用）
  *   apps/desktop/src/renderer/public/favicon.svg（浏览器标签页图标）
  *
@@ -27,7 +28,12 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { LOGO_SVG, LOGO_SVG_COMPACT } from './lib/logo.mjs'
+import {
+  LOGO_SVG,
+  LOGO_SVG_COMPACT,
+  LOGO_SVG_TEMPLATE,
+  LOGO_SVG_TEMPLATE_COMPACT,
+} from './lib/logo.mjs'
 
 /**
  * ICO 档位要覆盖 Windows 的每一个 DPI 缩放档，缺一档系统就会拿邻近尺寸拉伸：
@@ -59,6 +65,14 @@ const COMPACT_MAX_SIZE = 24
 /** 托盘图标：32px 的简化版。Windows 在 150% DPI 下按 24px 显示，
  *  从 32 单次降采样比「16px 再被系统放大」干净得多（后者是双重重采样）。 */
 const TRAY_SIZE = 32
+
+/**
+ * macOS 菜单栏模板图：16pt 槽位 + @2x。
+ *
+ * 必须与 Windows 的彩色 tray.png 分开出图：template image 只认 alpha，
+ * 带底板的彩色图会被系统渲染成一个实心方块（详见 logo.mjs）。
+ */
+const TRAY_TEMPLATE_SIZES = [16, 32]
 
 /** 系统 Chromium 候选（本机只需要命中一个） */
 function findChromium() {
@@ -102,8 +116,12 @@ async function renderAll(jobs, chromium, workDir) {
     </style></head><body>${svg}</body></html>`
   const fullPath = join(workDir, 'logo.html')
   const compactPath = join(workDir, 'logo-compact.html')
+  const templatePath = join(workDir, 'logo-template.html')
+  const templateCompactPath = join(workDir, 'logo-template-compact.html')
   writeFileSync(fullPath, page(LOGO_SVG))
   writeFileSync(compactPath, page(LOGO_SVG_COMPACT))
+  writeFileSync(templatePath, page(LOGO_SVG_TEMPLATE))
+  writeFileSync(templateCompactPath, page(LOGO_SVG_TEMPLATE_COMPACT))
 
   const port = 9600 + Math.floor(Math.random() * 300)
   const profile = join(workDir, 'profile')
@@ -152,15 +170,22 @@ async function renderAll(jobs, chromium, workDir) {
 
     const out = new Map()
     for (const job of jobs) {
-      const key = `${job.size}${job.compact ? '-c' : ''}`
+      const key = `${job.size}${job.compact ? '-c' : ''}${job.template ? '-t' : ''}${job.compactTemplate ? 'c' : ''}`
       await send('Emulation.setDeviceMetricsOverride', {
         width: job.size,
         height: job.size,
         deviceScaleFactor: 1,
         mobile: false,
       })
+      const source = job.template
+        ? job.compactTemplate
+          ? templateCompactPath
+          : templatePath
+        : job.compact
+          ? compactPath
+          : fullPath
       await send('Page.navigate', {
-        url: `file:///${(job.compact ? compactPath : fullPath).replace(/\\/g, '/')}`,
+        url: `file:///${source.replace(/\\/g, '/')}`,
       })
       await wait(600)
       const shot = await send('Page.captureScreenshot', { format: 'png', fromSurface: true })
@@ -203,6 +228,18 @@ function killTree(child, profile) {
         ],
         { stdio: 'ignore' },
       )
+    } else if (profile) {
+      // macOS / Linux 同样按本次唯一的 profile 路径清理：Chrome 的 launcher
+      // 不是进程组首进程，process.kill(-pid) 可能打不中，残留 Chrome 会让脚本
+      // 永远不退出（产物已写完，命令却挂住）。
+      spawnSync('pkill', ['-f', profile], { stdio: 'ignore' })
+      if (child?.pid) {
+        try {
+          process.kill(child.pid, 'SIGKILL')
+        } catch {
+          /* 已退出 */
+        }
+      }
     } else if (child?.pid) {
       process.kill(-child.pid, 'SIGKILL')
     }
@@ -268,6 +305,9 @@ try {
   // 24px 及以下各渲一份简化版，其余用完整版
   const jobs = RENDER_SIZES.map(size => ({ size, compact: size <= COMPACT_MAX_SIZE }))
   jobs.push({ size: TRAY_SIZE, compact: true, tray: true })
+  // 16pt 用两行正文的 compact 版；32pt（@2x）用三行完整版
+  jobs.push({ size: TRAY_TEMPLATE_SIZES[0], template: true, compactTemplate: true })
+  jobs.push({ size: TRAY_TEMPLATE_SIZES[1], template: true })
   const png = await renderAll(jobs, chromium, workDir)
   const at = size => png.get(`${size}${size <= COMPACT_MAX_SIZE ? '-c' : ''}`)
   const trayPng = png.get(`${TRAY_SIZE}-c`)
@@ -284,8 +324,11 @@ try {
   )
   // 托盘专用：预生成 32px 简化版，主进程直接加载、不再 resize（见 tray.ts）
   writeFileSync(join(outDir, 'tray.png'), trayPng)
+  // macOS 菜单栏：16pt 模板图 + @2x 伴生文件（nativeImage 自动配对）
+  writeFileSync(join(outDir, 'trayTemplate.png'), png.get('16-tc'))
+  writeFileSync(join(outDir, 'trayTemplate@2x.png'), png.get('32-t'))
   console.log(
-    `[icons] 已生成 icon.png / icon.ico / icon.icns / tray.png（${RENDER_SIZES.length} 档尺寸）`,
+    `[icons] 已生成 icon.png / icon.ico / icon.icns / tray.png / trayTemplate.png（${RENDER_SIZES.length} 档尺寸）`,
   )
 
   // 同源的矢量副本：文档引用与浏览器标签页图标都用它，避免 PNG 走样

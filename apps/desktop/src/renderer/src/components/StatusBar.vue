@@ -17,6 +17,7 @@ import type { DocPayload } from '@docvi/shared'
 import { isStandaloneDoc } from '@docvi/shared'
 
 import { useI18n } from '../lib/i18n'
+import { MOD_LABEL } from '../lib/shortcuts'
 import { fitPathTail } from '../lib/path-elide'
 import { taskState } from '../lib/tasks'
 import { useThemeOptions } from '../lib/theme-options'
@@ -408,7 +409,7 @@ onBeforeUnmount(() => {
             <span>{{ t('status.mode.read') }}</span>
           </button>
           <button
-            v-tooltip="`${t('status.mode.live')} (Ctrl+E)`"
+            v-tooltip="`${t('status.mode.live')} (${MOD_LABEL}+E)`"
             class="status__btn"
             :class="{ 'is-on': mode === 'live' }"
             type="button"
@@ -430,7 +431,7 @@ onBeforeUnmount(() => {
             <span>{{ t('status.mode.source') }}</span>
           </button>
           <button
-            v-tooltip="`${t('status.mode.split')} (Ctrl+\\)`"
+            v-tooltip="`${t('status.mode.split')} (${MOD_LABEL}+\\)`"
             class="status__btn"
             :class="{ 'is-on': mode === 'split' }"
             type="button"
@@ -471,7 +472,7 @@ onBeforeUnmount(() => {
         主题与服务芯片推来推去。
       -->
         <button
-          v-tooltip="`${t('status.contentWidth')} (Ctrl+Alt+W)`"
+          v-tooltip="`${t('status.contentWidth')} (${MOD_LABEL}+Alt+W)`"
           class="status__btn status__btn--fixed"
           type="button"
           :aria-label="t('status.widthAction', { action: widthLabel })"
@@ -494,7 +495,7 @@ onBeforeUnmount(() => {
       -->
         <button
           ref="themeButton"
-          v-tooltip="`${t('status.chooseTheme')} (Ctrl+Shift+L)`"
+          v-tooltip="`${t('status.chooseTheme')} (${MOD_LABEL}+Shift+L)`"
           class="status__btn status__btn--fixed status__btn--truncate"
           type="button"
           :class="{ 'is-on': themeMenu.open }"

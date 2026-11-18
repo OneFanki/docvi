@@ -198,7 +198,20 @@ http://127.0.0.1:<port>/mcp
 从 [Releases](https://github.com/OneFanki/docvi/releases) 下载安装包。
 
 发布产物**没有代码签名**（个人开源项目不购买证书），首次运行系统会提示来源不可信，
-属于预期行为：Windows 点「更多信息」→「仍要运行」；macOS 右键 →「打开」确认一次。
+属于预期行为：Windows 点「更多信息」→「仍要运行」。
+
+macOS 安装说明：
+
+1. 下载 `docvi-<版本>-mac-<架构>.dmg`，打开后把 docvi 拖入「应用程序」；
+2. 首次打开若提示「无法验证开发者」，到「系统设置 → 隐私与安全性」点「仍要打开」；
+3. 若提示「已损坏，无法打开」（Chrome 下载会带 quarantine 标记，ad-hoc 签名过不了
+   Gatekeeper），在终端执行一次：
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/docvi.app
+   ```
+
+随后正常双击即可。每次升级替换 `/Applications/docvi.app` 后如再次被拦，重复第 3 步。
 
 > 当前为 0.x 阶段，数据格式与接口可能变化。
 

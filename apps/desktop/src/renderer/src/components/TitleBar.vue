@@ -4,6 +4,7 @@ import { onMounted, ref } from 'vue'
 
 import { useI18n } from '../lib/i18n'
 import { isWebHost } from '../lib/host'
+import { IS_MAC, MOD_LABEL } from '../lib/shortcuts'
 
 /**
  * 标题栏：44px，整条是系统拖拽区。
@@ -58,7 +59,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <header class="titlebar" :class="{ 'is-web': isWebHost }">
+  <header class="titlebar" :class="{ 'is-web': isWebHost, 'is-mac': IS_MAC }">
     <div class="titlebar__brand no-drag">
       <!--
         与应用图标同一套几何与配色（scripts/lib/logo.mjs 的 LOGO_MARK）：三张错位的
@@ -114,7 +115,10 @@ onMounted(async () => {
     <div class="titlebar__spacer" />
 
     <button
-      v-tooltip="{ text: `${t('titlebar.searchPlaceholder')}（Ctrl+K）`, placement: 'bottom' }"
+      v-tooltip="{
+        text: `${t('titlebar.searchPlaceholder')}（${MOD_LABEL}+K）`,
+        placement: 'bottom',
+      }"
       class="titlebar__search no-drag"
       type="button"
       :aria-label="t('titlebar.searchPlaceholder')"
@@ -122,12 +126,12 @@ onMounted(async () => {
     >
       <Search :size="13" :stroke-width="1.8" class="titlebar__search-icon" aria-hidden="true" />
       <span class="titlebar__search-text">{{ t('titlebar.searchPlaceholder') }}</span>
-      <kbd class="titlebar__search-key">Ctrl K</kbd>
+      <kbd class="titlebar__search-key">{{ MOD_LABEL }} K</kbd>
     </button>
 
     <div class="titlebar__group no-drag">
       <button
-        v-tooltip="{ text: `${t('titlebar.toggleTree')}（Ctrl+B）`, placement: 'bottom' }"
+        v-tooltip="{ text: `${t('titlebar.toggleTree')}（${MOD_LABEL}+B）`, placement: 'bottom' }"
         class="titlebar__icon"
         type="button"
         :disabled="!treeAvailable"
@@ -140,7 +144,10 @@ onMounted(async () => {
       </button>
 
       <button
-        v-tooltip="{ text: `${t('titlebar.toggleOutline')}（Ctrl+Alt+B）`, placement: 'bottom' }"
+        v-tooltip="{
+          text: `${t('titlebar.toggleOutline')}（${MOD_LABEL}+Alt+B）`,
+          placement: 'bottom',
+        }"
         class="titlebar__icon"
         type="button"
         :disabled="!outlineAvailable"
@@ -221,6 +228,19 @@ onMounted(async () => {
 /* 容器读者面：没有原生窗口按钮，右侧图标直接贴边。
    留 148px 会把设置/运维图标白白推离右边缘（用户实测「应该靠最右侧」）。 */
 .titlebar.is-web {
+  padding-right: 12px;
+}
+
+/*
+ * macOS：窗口控制按钮（红绿灯）在**左侧**，主进程把三个按钮放在 x=12。
+ * 左边必须让出约 78px，否则品牌标记会被压在红绿灯下面；右侧没有原生按钮，
+ * Windows 的 148px overlay 占位必须收回，否则四个入口离右边缘差出一大截。
+ *
+ * 容器版（is-web）没有 traffic lights，`:not(.is-web)` 保证在浏览器里打开时
+ * 仍按容器布局走。
+ */
+.titlebar.is-mac:not(.is-web) {
+  padding-left: 78px;
   padding-right: 12px;
 }
 

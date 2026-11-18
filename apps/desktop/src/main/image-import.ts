@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs'
-import { extname, join } from 'node:path'
+import { extname, join, relative } from 'node:path'
 
 import type { ImageImportRequest, ImageImportResult } from '@docvi/shared'
 
@@ -82,7 +82,12 @@ function toPosix(path: string): string {
 /** 相对文档目录的路径：`assets/图.png` / `../assets/图.png` 由调用方决定 */
 function relativeFromDoc(docRelPath: string, absoluteAsset: string, root: string): string {
   const docDir = docRelPath.includes('/') ? docRelPath.slice(0, docRelPath.lastIndexOf('/')) : ''
-  const assetRel = toPosix(absoluteAsset.slice(root.length).replace(/^[/\\]/, ''))
+  /*
+   * 用 realpath 与 relative 计算，不能 slice(root.length)：
+   * macOS 的 `/var` 是 `/private/var` 的符号链接，assetDir 返回 realpath，
+   * 直接按原 root 长度切会把路径从中间截断（测试里表现为 `g-XXX/assets/a.png`）。
+   */
+  const assetRel = toPosix(relative(realpathSync(root), absoluteAsset))
   if (!docDir) return assetRel
   // 素材目录与文档同级，直接去掉文档目录前缀即可（不做 ../ 计算：同级是本实现的约定）
   return assetRel.startsWith(`${docDir}/`) ? assetRel.slice(docDir.length + 1) : assetRel

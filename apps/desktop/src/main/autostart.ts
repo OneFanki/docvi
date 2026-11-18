@@ -3,16 +3,19 @@ import { app } from 'electron'
 import { promisify } from 'node:util'
 
 /**
- * 开机自启动（Windows）。
+ * 开机自启动（Windows / macOS）。
  *
- * 走 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 而不是把快捷方式塞进
- * 启动文件夹：注册表是用户级（不需要管理员权限）、可读可删、失败时能立刻拿到
- * 退出码；启动文件夹还要处理 .lnk 生成，多一层依赖。
+ * Windows 走 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 而不是把快捷
+ * 方式塞进启动文件夹：注册表是用户级（不需要管理员权限）、可读可删、失败时能
+ * 立刻拿到退出码；启动文件夹还要处理 .lnk 生成，多一层依赖。
  *
- * 为什么不用 `app.setLoginItemSettings`：它在 Windows 上写的是
+ * 为什么 Windows 不用 `app.setLoginItemSettings`：它在 Windows 上写的是
  * `HKCU\...\Run` 里带 updater 语义的键值（应用名为键），与「用户自己看得懂、
- * 能手动删掉」的目标不完全一致；而 macOS 上要另走 LaunchAgents。这里只做
- * Windows，直接写注册表最直接。
+ * 能手动删掉」的目标不完全一致。
+ *
+ * macOS 反过来：系统只认 `SMAppService`（Electron 封装为
+ * `app.setLoginItemSettings`），自己写 LaunchAgents 既拿不到「登录项」授权
+ * 状态，也会在系统设置里显示成一个无法解释的后台项。因此 macOS 走 Electron API。
  */
 
 const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
@@ -44,8 +47,19 @@ export interface AutostartState {
 }
 
 export async function readAutostart(): Promise<AutostartState> {
+  if (process.platform === 'darwin') {
+    if (!app.isPackaged) {
+      return { enabled: false, command: '', error: '开发版不支持开机自启' }
+    }
+    // 系统设置里的「登录项」才是事实；设置文件只是愿望
+    return {
+      enabled: app.getLoginItemSettings().openAtLogin,
+      command: '',
+      error: null,
+    }
+  }
   if (process.platform !== 'win32') {
-    return { enabled: false, command: '', error: '仅支持 Windows' }
+    return { enabled: false, command: '', error: '仅支持 Windows / macOS' }
   }
   const result = await reg(['query', RUN_KEY, '/v', VALUE_NAME])
   if (!result.ok) {
@@ -57,8 +71,20 @@ export async function readAutostart(): Promise<AutostartState> {
 }
 
 export async function writeAutostart(enabled: boolean): Promise<AutostartState> {
+  if (process.platform === 'darwin') {
+    if (!app.isPackaged) {
+      return { enabled: false, command: '', error: '开发版不支持开机自启' }
+    }
+    app.setLoginItemSettings({ openAtLogin: enabled })
+    // 回读系统状态：被 MDM / 用户拒绝时 set 可能没有真正生效
+    return {
+      enabled: app.getLoginItemSettings().openAtLogin,
+      command: '',
+      error: null,
+    }
+  }
   if (process.platform !== 'win32') {
-    return { enabled: false, command: '', error: '仅支持 Windows' }
+    return { enabled: false, command: '', error: '仅支持 Windows / macOS' }
   }
   if (enabled) {
     const command = launchCommand()

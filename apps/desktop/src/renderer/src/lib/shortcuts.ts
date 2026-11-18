@@ -13,15 +13,25 @@ export interface ShortcutGroup {
 
 /**
  * 展示用的按键写法：`Mod` 在 Windows/Linux 渲染成 Ctrl、mac 渲染成 ⌘。
- * 平台在启动时确定一次（preload 暴露的 platform），不必每次渲染都判断。
+ * 平台在启动时确定一次，不必每次渲染都判断。
  */
-export const MOD_LABEL =
+export const IS_MAC =
   typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent)
-    ? '⌘'
-    : 'Ctrl'
+
+export const MOD_LABEL = IS_MAC ? '⌘' : 'Ctrl'
+
+/**
+ * 「切换标签」用的是 Ctrl+Tab（⌘⇥ 被 macOS 的系统应用切换器占用），
+ * 展示文案必须跟着实现走，不能笼统写成 Mod。
+ */
+export const TAB_MOD_LABEL = IS_MAC ? '⌃' : 'Ctrl'
 
 export function formatKeys(keys: string[]): string[] {
-  return keys.map(key => (key === 'Mod' ? MOD_LABEL : key))
+  return keys.map(key => {
+    if (key === 'Mod') return MOD_LABEL
+    if (key === 'TabMod') return TAB_MOD_LABEL
+    return key
+  })
 }
 
 export const SHORTCUT_GROUPS: ShortcutGroup[] = [
@@ -34,6 +44,8 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ['Mod', 'Alt', 'W'], action: '正文宽度：铺满 / 收窄' },
       { keys: ['Mod', 'O'], action: '打开单个 Markdown 文件' },
       { keys: ['Mod', 'Shift', 'L'], action: '打开主题选择' },
+      // ⌘, 由 macOS 应用菜单接管；Windows/Linux 没有菜单条，也没有这个习惯键位
+      ...(IS_MAC ? [{ keys: ['Mod', ','], action: '打开设置' }] : []),
       { keys: ['Mod', '/'], action: '快捷键与帮助' },
       { keys: ['Esc'], action: '关闭面板 / 退出编辑模式' },
     ],
@@ -42,8 +54,8 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: '标签',
     items: [
       { keys: ['Mod', 'W'], action: '关闭当前标签' },
-      { keys: ['Mod', 'Shift', 'Tab'], action: '上一个标签' },
-      { keys: ['Mod', 'Tab'], action: '下一个标签' },
+      { keys: ['TabMod', 'Shift', 'Tab'], action: '上一个标签' },
+      { keys: ['TabMod', 'Tab'], action: '下一个标签' },
       { keys: ['←', '→'], action: '标签条内切换（焦点在标签上时）' },
       { keys: ['Delete'], action: '关闭标签（焦点在标签上时）' },
     ],

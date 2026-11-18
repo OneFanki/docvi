@@ -28,6 +28,16 @@ export function markQuitting(): void {
 }
 
 function iconPath(): string {
+  /*
+   * macOS 菜单栏图标必须是 template image：只取 alpha 通道，由系统按菜单栏
+   * 明暗自动上色。彩色 tray.png 在深色菜单栏里会变成一块看不清的色斑；
+   * 32px 的尺寸也不是菜单栏的 16pt 槽位。
+   */
+  if (process.platform === 'darwin') {
+    return app.isPackaged
+      ? join(process.resourcesPath, 'trayTemplate.png')
+      : join(app.getAppPath(), 'build/trayTemplate.png')
+  }
   // 打包后 build/tray.png 经 electron-builder 落到 resources 根
   return app.isPackaged
     ? join(process.resourcesPath, 'tray.png')
@@ -58,6 +68,8 @@ export function createTray(options: TrayOptions): TrayHandle {
   // 给 32px 让系统单次降采样，任何 DPI 档都只经历一次滤波。
   // （32px 也是简化版：托盘最小档 16px 下正文短线只剩 0.75 像素，会糊成灰纹。）
   const image = nativeImage.createFromPath(iconPath())
+  // 必须在交给 Tray 之前标记：macOS 只在该标记存在时按菜单栏明暗重绘
+  if (process.platform === 'darwin') image.setTemplateImage(true)
   tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image)
   /*
    * 用 `app.getName()` 而不是字面量 'docvi'：开发版叫 `docvi dev`，
@@ -81,8 +93,13 @@ export function createTray(options: TrayOptions): TrayHandle {
   }
   apply()
 
-  // 左键单击唤起窗口；右键由系统弹菜单，与 Windows 托盘惯例一致
-  tray.on('click', options.show)
+  /*
+   * Windows：左键唤起窗口，右键由系统弹菜单。
+   * macOS：设置 contextMenu 后左键本来就弹菜单；再绑 click 会导致「菜单和窗口
+   * 同时出现」。mac 用户点图标就是要看菜单，双击再唤起窗口。
+   */
+  if (process.platform === 'darwin') tray.on('double-click', options.show)
+  else tray.on('click', options.show)
 
   return {
     refresh: apply,
