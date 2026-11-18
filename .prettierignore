@@ -12,6 +12,8 @@ docs/assets
 # 打包产物与组装视图
 packages/*/release
 apps/desktop/out
+# 分享页运行时产物（esbuild 压缩输出 + mermaid 官方构建，不是仓库代码）
+apps/desktop/build/share-assets
 
 # 插件语法示例：块内是 YAML，prettier 会把收尾 `:::` 当成列表延续补上缩进，
 # 改坏示例（扫描器虽容错 0-3 格，但示例本身应当展示规范写法）

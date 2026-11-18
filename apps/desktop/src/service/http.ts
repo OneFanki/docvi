@@ -1,16 +1,18 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname } from 'node:path'
 
-import type { ShareEntry } from '@docvi/shared'
+import type { ShareEntry, ShareTheme } from '@docvi/shared'
 
 import { dispatch, type McpDeps } from '../../../../packages/server/src/mcp.mjs'
+import { SHARE_ASSET_PREFIX } from './share.ts'
 
 /**
  * 服务进程的 HTTP 面。
  *
- * 三条路由：
+ * 四条路由：
  *  - `POST /mcp`   MCP 端点（Bearer 令牌；本机监听但仍要求令牌——防同机其它进程误连）
  *  - `GET  /s/<id>[/...]` 临时分享（链接即凭证：16 位随机 id 不可枚举）
+ *  - `GET  /share-assets/<文件>` 分享页的浏览器端运行时（mermaid / 图表增强）
  *  - `GET  /health` 健康检查（不带敏感信息，供端口探测与诊断）
  *
  * 令牌只对 MCP 生效：分享链接要能直接粘给别人，不能再要求额外凭证。
@@ -37,6 +39,13 @@ const ASSET_TYPES: Record<string, string> = {
   '.json': 'application/json; charset=utf-8',
 }
 
+/** 分享页运行时资产的类型（只有我们自己产出的那几份） */
+const SHARE_RUNTIME_TYPES: Record<string, string> = {
+  'runtime.js': 'text/javascript; charset=utf-8',
+  'share-highlight.js': 'text/javascript; charset=utf-8',
+  'mermaid.min.js': 'text/javascript; charset=utf-8',
+}
+
 /** 分享路由真正用到的字段：url 由 store 在 list() 时拼（端口/局域网会变），路由不需要它 */
 export type ShareTarget = Pick<ShareEntry, 'id' | 'path' | 'kind' | 'createdAt'>
 
@@ -50,15 +59,41 @@ export interface HttpOptions {
   token: string
   mcp: McpDeps
   shares: ShareLookup
-  /** 读分享目标里的相对文件（目录分享）或整文件（文件分享） */
+  /**
+   * 读分享目标里的相对文件（目录分享）或整文件（文件分享）。
+   *
+   * 一律返回原始字节：下载源文件与页面内资产走的是同一条读取，区别只在
+   * HTTP 层怎么设响应头。
+   */
   readShareFile(
     share: ShareTarget,
     relPath: string,
   ): Promise<{ body: Buffer; type: string } | 'not-found'>
-  /** 渲染一篇分享文档为 HTML（由调用方决定排版与主题） */
-  renderShareDoc(share: ShareTarget, relPath: string): Promise<string | null>
+  /**
+   * 渲染一篇分享文档为 HTML（由调用方决定排版与主题），并回传解析后的源文件
+   * 相对路径（下载按钮要用）。
+   */
+  renderShareDoc(
+    share: ShareTarget,
+    relPath: string,
+    theme: ShareTheme,
+  ): Promise<{ html: string; rel: string } | null>
   /** 分享根目录的导航（目录分享的首页）；文件分享返回 null */
-  renderShareIndex(share: ShareTarget): Promise<string | null>
+  renderShareIndex(share: ShareTarget, theme: ShareTheme): Promise<string | null>
+  /** 分享页当前要跟随的主题（渲染时才取，主题改了不必重启服务） */
+  shareTheme(): ShareTheme
+  /**
+   * 把请求路径归一成真实文档相对路径（目录 → 落地页、省略扩展名 → 补 .md）。
+   * 阅读与下载共用，避免两处归一口径不一致。
+   */
+  resolveShareDocRel(share: ShareTarget, relPath: string): string | null
+  /**
+   * 读分享页的浏览器端运行时文件（`runtime.js` / `mermaid.min.js`）。
+   *
+   * 由调用方提供而不是在这里 resolve 路径：产物布局在 dev 与打包态不同，
+   * 那是宿主的实现细节，HTTP 层只认「给个文件名，还我内容」。
+   */
+  readRuntimeAsset(name: string): Buffer | null
   log(level: 'info' | 'warn' | 'error', message: string): void
 }
 
@@ -69,6 +104,26 @@ function send(res: ServerResponse, status: number, type: string, body: string | 
     // 分享页含用户内容：禁止被嵌入任意站点，也禁止嗅探类型
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'SAMEORIGIN',
+    'Referrer-Policy': 'no-referrer',
+  })
+  res.end(body)
+}
+
+/**
+ * 附件响应（下载源文件）。
+ *
+ * `filename` 走 RFC 5987 的 `filename*`：中文文件名直接塞进 `filename=` 会被
+ * 浏览器按 latin1 解成乱码，用户下下来是一串问号。`filename=` 留一份 ASCII
+ * 兜底（老浏览器 / 非 UTF-8 场景）。
+ */
+function sendDownload(res: ServerResponse, filename: string, body: Buffer): void {
+  const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
+  res.writeHead(200, {
+    'Content-Type': 'application/octet-stream',
+    'Content-Disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    'Content-Length': body.length,
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
   })
   res.end(body)
@@ -142,6 +197,33 @@ function parseSharePath(url: string): { id: string; rel: string[] } | null {
   return { id, rel: segments }
 }
 
+/**
+ * 下载源文件。
+ *
+ * 与阅读共用同一套路径归一（`resolveShareDocRel`）：分享页上的下载链接就是
+ * 「当前这篇文档的地址 + `?download=1`」，所以「省略 .md」「目录落到
+ * index.md」这些规则只能有一处，否则会出现「页面能看、下载 404」。
+ */
+async function serveDownload(
+  options: HttpOptions,
+  share: ShareTarget,
+  relPath: string,
+  res: ServerResponse,
+): Promise<void> {
+  const rel = options.resolveShareDocRel(share, relPath)
+  if (rel === null) {
+    send(res, 404, 'text/plain; charset=utf-8', '文档不存在')
+    return
+  }
+  const asset = await options.readShareFile(share, rel)
+  if (asset === 'not-found') {
+    send(res, 404, 'text/plain; charset=utf-8', '文件不存在')
+    return
+  }
+  const filename = rel.split('/').pop() || 'document.md'
+  sendDownload(res, filename, asset.body)
+}
+
 export function createHttpServer(options: HttpOptions): Server {
   const server = createServer((req, res) => {
     void handle(req, res).catch(error => {
@@ -156,6 +238,36 @@ export function createHttpServer(options: HttpOptions): Server {
 
     if (path === '/health') {
       sendJson(res, 200, { ok: true, service: 'docvi' })
+      return
+    }
+
+    /*
+     * 分享页的浏览器端运行时。
+     *
+     * 只认白名单里的文件名：这个前缀是公开的（分享链接本身就公开），不能变成
+     * 任意文件读取入口。`runtime.js` 与 `mermaid.min.js` 都由构建产出。
+     */
+    if (path.startsWith(SHARE_ASSET_PREFIX)) {
+      const name = path.slice(SHARE_ASSET_PREFIX.length)
+      const type = SHARE_RUNTIME_TYPES[name]
+      if (!type) {
+        send(res, 404, 'text/plain; charset=utf-8', '未找到')
+        return
+      }
+      const body = options.readRuntimeAsset(name)
+      if (!body) {
+        // 产物缺失是部署问题，不是「没有这个路由」：给个能看懂的提示
+        send(res, 503, 'text/plain; charset=utf-8', '分享页运行时资源缺失')
+        return
+      }
+      res.writeHead(200, {
+        'Content-Type': type,
+        // 产物文件名稳定（不带哈希），靠 no-cache 让升级后立刻生效
+        'Cache-Control': 'no-cache',
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'no-referrer',
+      })
+      res.end(body)
       return
     }
 
@@ -225,23 +337,35 @@ export function createHttpServer(options: HttpOptions): Server {
         send(res, 404, 'text/plain; charset=utf-8', '分享不存在或已失效')
         return
       }
+
+      /*
+       * 下载源文件：`?download=1` 走附件响应。
+       *
+       * 放在「文件分享 / 目录分享」分叉之前——两种形态的下载语义完全一样
+       * （把当前这篇的原文给出去），分叉里各写一遍会漂。
+       */
+      if (url.includes('download=1')) {
+        await serveDownload(options, share, sharePath.rel.join('/'), res)
+        return
+      }
+
       // 文件分享：根路径直接渲染该文件；子路径一律 404（文件分享没有子资源）
       if (share.kind === 'file') {
         if (sharePath.rel.length) {
           send(res, 404, 'text/plain; charset=utf-8', '分享不存在')
           return
         }
-        const html = await options.renderShareDoc(share, '')
-        if (html === null) {
+        const rendered = await options.renderShareDoc(share, '', options.shareTheme())
+        if (rendered === null) {
           send(res, 404, 'text/plain; charset=utf-8', '文件不存在或不可读')
           return
         }
-        send(res, 200, 'text/html; charset=utf-8', html)
+        send(res, 200, 'text/html; charset=utf-8', rendered.html)
         return
       }
 
       if (sharePath.rel.length === 0) {
-        const index = await options.renderShareIndex(share)
+        const index = await options.renderShareIndex(share, options.shareTheme())
         if (index === null) {
           send(res, 404, 'text/plain; charset=utf-8', '目录为空或不可读')
           return
@@ -255,9 +379,9 @@ export function createHttpServer(options: HttpOptions): Server {
 
       // Markdown 文档：服务端渲染成完整页面；链接可直接省略 .md 扩展名
       if (ext === '.md' || ext === '') {
-        const html = await options.renderShareDoc(share, rel)
-        if (html !== null) {
-          send(res, 200, 'text/html; charset=utf-8', html)
+        const rendered = await options.renderShareDoc(share, rel, options.shareTheme())
+        if (rendered !== null) {
+          send(res, 200, 'text/html; charset=utf-8', rendered.html)
           return
         }
         // 目标不存在 / 目录没有落地页：是「没有这个文档」，不是「不允许访问」

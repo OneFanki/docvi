@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 
+import { pluginThemeId, sanitizeThemeTokens } from '@docvi/shared'
 import type { PluginRecordView, Result } from '@docvi/shared'
 
 /**
@@ -13,8 +14,9 @@ import type { PluginRecordView, Result } from '@docvi/shared'
  * 一套（3×3×3 种组合都要能看），而用户心智里「换主题」就是整窗一起换。
  * 一个主题插件可以包含多套主题（themes 数组），这才是"多套"的正确粒度。
  *
- * 安全边界：token 只接受 `--dv-*` 变量名与颜色值，绝不注入到 DOM 之外的
- * 任意 CSS（防 `position:fixed; inset:0` 之类整页覆盖）。
+ * 安全边界：token 只接受 `--dv-*` 变量名与单一颜色值，绝不注入到 DOM 之外的
+ * 任意 CSS（防 `position:fixed; inset:0` 之类整页覆盖）。净化规则本身住在
+ * `@docvi/shared`：分享页由服务进程渲染，也要用同一份规则——两处各写一条必然漂移。
  */
 
 export interface LoadedTheme {
@@ -24,11 +26,6 @@ export interface LoadedTheme {
   appearance: 'light' | 'dark'
   plugin: string
 }
-
-const VARIABLE_RE = /^--dv-[a-z0-9-]+$/
-/** 颜色值白名单：hex / rgb(a) / hsl(a) / color-mix / var() 引用。挡掉整段 CSS 注入 */
-const VALUE_RE =
-  /^(?:#[0-9a-f]{3,8}|(?:rgb|hsl)a?\([0-9.,%\s/]+\)|color-mix\([^;{}]+\)|var\(--dv-[a-z0-9-]+\))$/i
 
 const themes = ref<LoadedTheme[]>([])
 /** 已注入的样式表（按插件 id），停用时要能撤掉 */
@@ -52,7 +49,7 @@ export function usePluginThemes() {
       for (const theme of declared) {
         const tokens = await readTokens(record.name, theme.tokens)
         if (!tokens) continue
-        const id = `plugin-${record.name}-${theme.id}`
+        const id = pluginThemeId(record.name, theme.id)
         const body = Object.entries(tokens)
           .map(([name, value]) => `  ${name}: ${value};`)
           .join('\n')
@@ -108,15 +105,7 @@ async function readTokens(plugin: string, relPath: string): Promise<Record<strin
     if (!response.ok) return null
     const raw = (await response.json()) as unknown
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-
-    const clean: Record<string, string> = {}
-    for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
-      if (!VARIABLE_RE.test(name)) continue
-      if (typeof value !== 'string') continue
-      if (!VALUE_RE.test(value.trim())) continue
-      clean[name] = value.trim()
-    }
-    return clean
+    return sanitizeThemeTokens(raw)
   } catch {
     return null
   }

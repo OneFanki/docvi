@@ -298,6 +298,10 @@ const zh: Dict = {
   'library.singleFile': '单文件',
   'library.shareDir': '分享目录',
   'reader.share': '分享这篇文档',
+  'reader.shareActive': '这篇文档已分享',
+  'reader.shareCopy': '复制链接',
+  'reader.shareStop': '取消分享',
+  'reader.shareStopDir': '取消目录分享',
   'reader.export': '导出这篇文档',
   'reader.exportMarkdown': 'Markdown 源文件',
   'reader.exportHtml': 'HTML 单文件',
@@ -322,6 +326,10 @@ const zh: Dict = {
   'share.lanEnable': '开启并生成链接',
   'share.lanLocalOnly': '只在本文机看',
   'share.lanOnlyHint': '局域网未开启：这个链接只能在本机打开',
+  'share.stopDirTitle': '取消整个目录的分享',
+  'share.stopDirMessage':
+    '这篇文档是通过目录分享访问的。取消后，该目录下的所有文档都会立刻打不开。只停止分享这一篇，请改为单独分享这篇文档。',
+  'share.stopDirConfirm': '取消整个目录的分享',
 
   'git.cloneTitle': '克隆 Git 仓库',
   'git.url': '仓库地址',
@@ -766,6 +774,10 @@ const en: Dict = {
   'library.singleFile': 'Single file',
   'library.shareDir': 'Share folder',
   'reader.share': 'Share this document',
+  'reader.shareActive': 'This document is shared',
+  'reader.shareCopy': 'Copy link',
+  'reader.shareStop': 'Stop sharing',
+  'reader.shareStopDir': 'Stop sharing the folder',
   'reader.export': 'Export this document',
   'reader.exportMarkdown': 'Markdown source',
   'reader.exportHtml': 'Single-file HTML',
@@ -790,6 +802,10 @@ const en: Dict = {
   'share.lanEnable': 'Turn on and create link',
   'share.lanLocalOnly': 'Just view it here',
   'share.lanOnlyHint': 'LAN access is off: this link only opens on this machine',
+  'share.stopDirTitle': 'Stop sharing the whole folder',
+  'share.stopDirMessage':
+    'This document is served through a folder share. Stopping it makes every document in that folder unreachable immediately. To share just this one, share the document itself instead.',
+  'share.stopDirConfirm': 'Stop sharing the folder',
 
   'git.cloneTitle': 'Clone Git repository',
   'git.url': 'Repository URL',

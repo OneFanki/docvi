@@ -10,13 +10,17 @@ import type {
   ServicePlugin,
   ServiceRuntimeState,
   ServiceWorkspace,
+  ShareTheme,
 } from '@docvi/shared'
+import { DEFAULT_SHARE_THEME } from '@docvi/shared'
 
 import { createCorpus, type Corpus } from '../../../../packages/server/src/corpus.mjs'
 import { createHttpServer } from './http.ts'
 import type { McpDeps } from '../../../../packages/server/src/mcp.mjs'
 import { createServiceMcpDeps } from './plugin-deps.ts'
 import { createShareRenderer } from './share.ts'
+import { shareBaseCss } from './share-css.ts'
+import { createRuntimeAssets } from './share-assets.ts'
 import { createShareStore } from './shares.ts'
 
 /**
@@ -97,6 +101,8 @@ function configFromEnv(): ServiceConfig {
     token: process.env.DOCVI_SERVICE_TOKEN ?? randomBytes(16).toString('hex'),
     workspaces,
     plugins: [],
+    // 独立模式没有设置来源：用默认深色，不猜
+    shareTheme: DEFAULT_SHARE_THEME,
   }
 }
 
@@ -150,11 +156,13 @@ async function main(): Promise<void> {
   let config: ServiceConfig | null = port ? null : configFromEnv()
   let workspaces: ServiceWorkspace[] = config?.workspaces ?? []
   let plugins: ServicePlugin[] = config?.plugins ?? []
+  let shareTheme: ShareTheme = config?.shareTheme ?? DEFAULT_SHARE_THEME
   let shares = createShareStore(join(config?.dataDir ?? process.cwd(), 'shares.json'))
   let server: Server | null = null
   let runtime: Runtime = { port: null, host: null, error: null }
 
-  const renderer = createShareRenderer()
+  const renderer = createShareRenderer(shareBaseCss)
+  const runtimeAssets = createRuntimeAssets()
   // 检索与写入范围 = 已打开工作区（MCP 只认这一层，不碰窗口状态）
   const corpus: Corpus = createCorpus(() =>
     workspaces.map(workspace => ({
@@ -207,8 +215,12 @@ async function main(): Promise<void> {
         find: id => shares.find(id),
       },
       readShareFile: (share, rel) => renderer.readShareFile(share, rel),
-      renderShareDoc: (share, rel) => renderer.renderShareDoc(share, rel),
-      renderShareIndex: share => renderer.renderShareIndex(share),
+      renderShareDoc: (share, rel, theme) => renderer.renderShareDoc(share, rel, theme),
+      renderShareIndex: (share, theme) => renderer.renderShareIndex(share, theme),
+      // 现取：主题是渲染期输入，换了主题下一次请求就用新的，不必重启服务
+      shareTheme: () => shareTheme,
+      resolveShareDocRel: (share, rel) => renderer.resolveDocRel(share, rel),
+      readRuntimeAsset: runtimeAssets,
       log: (level, message) => emit(port, { type: 'log', level, message }),
     })
     server = current
@@ -232,6 +244,7 @@ async function main(): Promise<void> {
     config = next
     workspaces = next.workspaces
     plugins = next.plugins
+    shareTheme = next.shareTheme ?? DEFAULT_SHARE_THEME
     shares = createShareStore(join(next.dataDir, 'shares.json'))
     await startServer()
   }
@@ -296,6 +309,9 @@ async function main(): Promise<void> {
         if (!config) return
         config = { ...config, lan: command.lan }
         void startServer()
+        return
+      case 'set-share-theme':
+        shareTheme = command.theme
         return
       case 'rpc':
         handleRpc(command)

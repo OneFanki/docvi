@@ -42,6 +42,44 @@ export interface MermaidPassOptions {
 const EXPAND_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>'
 
+/**
+ * mermaid 的图类型 → 中文名。
+ *
+ * `aria-roledescription` 是 mermaid 自己写的内部标识（`flowchart-v2`、
+ * `sequence`…），直接当灯箱标题会露出实现名。没收录的类型回落到「图表」，
+ * 不去猜——猜错比笼统更糟。
+ */
+const DIAGRAM_TITLES: Record<string, string> = {
+  'flowchart-v2': '流程图',
+  flowchart: '流程图',
+  sequence: '时序图',
+  class: '类图',
+  classDiagram: '类图',
+  state: '状态图',
+  er: '实体关系图',
+  gantt: '甘特图',
+  pie: '饼图',
+  journey: '旅程图',
+  gitGraph: 'Git 图',
+  mindmap: '思维导图',
+  timeline: '时间线',
+  quadrantChart: '象限图',
+  requirement: '需求图',
+  C4Context: 'C4 图',
+  sankey: '桑基图',
+  xyChart: 'XY 图',
+  block: '块图',
+  packet: '包图',
+  architecture: '架构图',
+  radar: '雷达图',
+}
+
+/** 图类型标识 → 可读标题 */
+export function diagramTitle(label: string | null | undefined): string {
+  if (!label) return '图表'
+  return DIAGRAM_TITLES[label] ?? '图表'
+}
+
 export async function mermaidPass(
   root: HTMLElement,
   options: MermaidPassOptions = {},
@@ -115,7 +153,8 @@ export async function mermaidPass(
               bubbles: true,
               detail: {
                 svg: el.outerHTML,
-                label: el.getAttribute('aria-roledescription') ?? 'mermaid',
+                // 内部标识（flowchart-v2）翻成可读名；灯光标题不该露实现词
+                label: diagramTitle(el.getAttribute('aria-roledescription')),
               },
             }),
           )

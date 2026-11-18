@@ -9,6 +9,7 @@ import type {
   ServiceRuntimeState,
   ServiceWorkspace,
   ShareEntry,
+  ShareTheme,
 } from '@docvi/shared'
 
 /**
@@ -36,6 +37,12 @@ export interface ServiceManager {
   /** 改首选端口并重启（端口被占用时服务仍会顺延，返回的是最终端口） */
   setPort(port: number): Promise<ServiceRuntimeState>
   update(workspaces: ServiceWorkspace[], plugins: ServicePlugin[]): void
+  /**
+   * 换分享页的主题快照。
+   *
+   * 不需要重启：分享页每次请求都现渲染，主题只是下次渲染要用的数据。
+   */
+  setShareTheme(theme: ShareTheme): void
   listShares(): Promise<ShareEntry[]>
   createShare(path: string): Promise<ShareEntry | null>
   removeShare(id: string): Promise<ShareEntry[]>
@@ -221,6 +228,11 @@ export function createServiceManager(entryPath: string): ServiceManager {
       if (!config) return
       config = { ...config, workspaces, plugins }
       send({ type: 'update', workspaces, plugins })
+    },
+    setShareTheme(theme) {
+      if (!config) return
+      config = { ...config, shareTheme: theme }
+      send({ type: 'set-share-theme', theme })
     },
     listShares: () => rpc<ShareEntry[]>('share-list'),
     createShare: path => rpc<ShareEntry | null>('share-create', { path }),

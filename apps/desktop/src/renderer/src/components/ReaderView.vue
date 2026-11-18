@@ -73,6 +73,14 @@ const props = defineProps<{
    * 这个 prop 保留只是为了兼容既有调用点（分屏）；行为上与「始终开启」等价。
    */
   sourceLines?: boolean
+  /**
+   * 当前文档所属的分享；`null` = 未分享。
+   *
+   * 判定（文件分享命中本身、目录分享覆盖祖先目录）在 App 侧用
+   * `lib/share-match.ts` 算好再传下来——阅读视图只负责「显示与操作」，
+   * 不该自己去比较绝对路径。
+   */
+  share?: { id: string; url: string; kind: 'file' | 'dir' } | null
 }>()
 
 const emit = defineEmits<{
@@ -84,6 +92,15 @@ const emit = defineEmits<{
   rendered: [payload: { path: string; title: string }]
   /** 分享当前文档：链接生成、复制都在宿主做（这里只管按钮位置） */
   share: []
+  /**
+   * 取消分享（参数是分享 id）。
+   *
+   * 真正的删除与「目录分享影响整片内容」的确认都在 App 做：这里是阅读视图，
+   * 它不该知道 `shares.json`，也不该自己弹确认框。
+   */
+  unshare: [id: string]
+  /** 复制已分享文档的链接（剪贴板在宿主侧，与其他复制行为同一处） */
+  copyShareLink: [url: string]
   /**
    * 导出当前文档的某种格式。
    *
@@ -128,6 +145,76 @@ function pickExport(format: 'markdown' | 'html' | 'pdf'): void {
   exportOpen.value = false
   emit('export', format)
 }
+
+/*
+ * 分享按钮：未分享时一键生成链接；**已分享时变成下拉**（复制链接 / 取消分享）。
+ *
+ * 为什么已分享要改成菜单而不是再点一次就复制：两种状态下的操作完全不同，
+ * 同一个点击手势承担两种语义最容易误操作（想复制却取消了分享）。做成菜单后
+ * 「当前是什么状态」与「能对它做什么」都写在按钮上。
+ */
+const shareOpen = ref(false)
+const shareButton = ref<HTMLElement | null>(null)
+const shareMenu = ref({ x: 0, y: 0 })
+
+function toggleShare(): void {
+  if (!props.share) {
+    shareOpen.value = false
+    emit('share')
+    return
+  }
+  if (shareOpen.value) {
+    shareOpen.value = false
+    return
+  }
+  const rect = shareButton.value?.getBoundingClientRect()
+  if (!rect) return
+  shareMenu.value = { x: rect.left, y: rect.bottom + 4 }
+  shareOpen.value = true
+}
+
+const shareItems = computed<MenuItem[]>(() => {
+  if (!props.share) return []
+  return [
+    { id: 'share.copy', label: t('reader.shareCopy') },
+    // 目录分享撤销后整片内容都不可访问：措辞要说清楚影响面，别让人以为是「取消这一篇」
+    ...(props.share.kind === 'dir'
+      ? [
+          {
+            id: 'share.unshare',
+            label: t('reader.shareStopDir'),
+            danger: true,
+            separatorBefore: true,
+          },
+        ]
+      : [
+          {
+            id: 'share.unshare',
+            label: t('reader.shareStop'),
+            danger: true,
+            separatorBefore: true,
+          },
+        ]),
+  ]
+})
+
+function pickShareAction(id: string): void {
+  shareOpen.value = false
+  if (!props.share) return
+  if (id === 'share.copy') emit('copyShareLink', props.share.url)
+  else if (id === 'share.unshare') emit('unshare', props.share.id)
+}
+
+/*
+ * 文档切走时收起菜单：菜单的位置是相对那个按钮算的，换了文档还开着会指向
+ * 一篇已经不存在的分享。
+ */
+watch(
+  () => props.share?.id,
+  () => {
+    shareOpen.value = false
+  },
+)
 
 const exportItems = computed<MenuItem[]>(() => [
   { id: 'markdown', label: t('reader.exportMarkdown'), hint: '.md' },
@@ -280,7 +367,8 @@ function onMermaidExpand(event: Event): void {
     open: true,
     src: detail.svg,
     kind: 'svg',
-    title: detail.label === 'mermaid' ? '流程图' : (detail.label ?? ''),
+    // label 已由 renderer-core 把 mermaid 的内部标识（flowchart-v2 等）翻成中文名
+    title: detail.label ?? '图表',
   }
 }
 
@@ -743,7 +831,7 @@ defineExpose({
               v-if="!isReadOnlyHost"
               ref="exportButton"
               v-tooltip="t('reader.export')"
-              class="reader__share"
+              class="reader__iconbtn reader__export"
               type="button"
               :aria-label="t('reader.export')"
               :aria-expanded="exportOpen"
@@ -754,11 +842,15 @@ defineExpose({
             </button>
             <button
               v-if="!isReadOnlyHost"
-              v-tooltip="t('reader.share')"
-              class="reader__share"
+              ref="shareButton"
+              v-tooltip="share ? t('reader.shareActive') : t('reader.share')"
+              class="reader__iconbtn reader__share"
+              :class="{ 'is-shared': share }"
               type="button"
-              :aria-label="t('reader.share')"
-              @click="emit('share')"
+              :aria-label="share ? t('reader.shareActive') : t('reader.share')"
+              :aria-expanded="share ? shareOpen : undefined"
+              :aria-haspopup="share ? 'menu' : undefined"
+              @click="toggleShare"
             >
               <Share2 :size="13" :stroke-width="1.8" />
             </button>
@@ -791,6 +883,17 @@ defineExpose({
       :anchor="exportButton"
       @close="exportOpen = false"
       @select="pickExport($event as 'markdown' | 'html' | 'pdf')"
+    />
+
+    <!-- 已分享时的操作菜单：与导出菜单同一个组件与同样的定位规则 -->
+    <ContextMenu
+      :open="shareOpen"
+      :x="shareMenu.x"
+      :y="shareMenu.y"
+      :items="shareItems"
+      :anchor="shareButton"
+      @close="shareOpen = false"
+      @select="pickShareAction"
     />
 
     <!-- 画布右上角浮层：不参与滚动、不占文档高度 -->
@@ -990,7 +1093,7 @@ defineExpose({
  * 被挤得偏右 2px 多，视觉上就是「歪了」。去掉行盒、改用 flex 居中，
  * 水平与垂直留白才会严格相等。
  */
-.reader__share {
+.reader__iconbtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1008,14 +1111,28 @@ defineExpose({
     border-color var(--dv-dur-1) var(--dv-ease);
 }
 
-.reader__share > svg {
+.reader__iconbtn > svg {
   display: block;
 }
 
-.reader__share:hover {
+.reader__iconbtn:hover {
   border-color: var(--dv-doc-border);
   background: color-mix(in srgb, var(--dv-doc-text-muted) 10%, transparent);
   color: var(--dv-doc-text);
+}
+
+/*
+ * 已分享态：图标转强调色 + 淡强调底色 + 强调描边。
+ *
+ * 不用「图标角上叠一个小圆点」：Share2 本身就有三个小圆点，右上角再压一个
+ * 大小相近的实心点，视觉上直接糊进图标里，读不出「这是一个状态标记」。
+ * 改成整个按钮换底色+描边：状态是**结构性**的（按钮整体被点亮），
+ * 不依赖用户分辨某个像素是图标的一部分还是额外标记。
+ */
+.reader__iconbtn.is-shared {
+  color: var(--dv-doc-accent);
+  border-color: color-mix(in srgb, var(--dv-doc-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--dv-doc-accent) 12%, transparent);
 }
 
 .reader__warn {

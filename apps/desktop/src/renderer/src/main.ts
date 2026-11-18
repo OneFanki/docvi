@@ -11,6 +11,7 @@ import App from './App.vue'
 
 /**
  * 样式加载顺序（有依赖关系，不能乱）：
+ *  0. renderer-core 的 fonts.css：@font-face（引用随包分发的 woff2）
  *  1. renderer-core 的 theme.css：定义全局字号/圆角/动效、文档主题、组件角色 token
  *  2. renderer-core 的 doc.css：正文排版（消费第 1 步的变量）
  *  3. app 的 base.css：窗口级 reset 与滚动条（最后，可覆盖前者）
@@ -18,12 +19,16 @@ import App from './App.vue'
  * ⚠️ 曾经漏掉 1 与 2：界面能显示但所有 `--dv-doc-*` / `--dv-c-*` 都是空值，
  * 表现为「文档主题切换无效果、组件取不到颜色」。样式表必须显式引入——
  * Vite 不会因为源码里写了 `var(--dv-...)` 就去打包对应 CSS。
+ *
+ * 字体单独一份（不在 theme.css 里）：分享页与导出产物要复用主题变量，但不该
+ * 跟着请求一堆它们拿不到的 woff2。见 styles/fonts.css 的说明。
  */
 /**
  * ⚠️ 用相对路径而不是包名：别名把 `@docvi/renderer-core` 精确映射到了
  * `src/index.ts`，`@docvi/renderer-core/theme.css` 会被错误解析成
  * `src/index.ts/theme.css`（构建期 ENOENT）。
  */
+import '../../../../../packages/renderer-core/src/styles/fonts.css'
 import '../../../../../packages/renderer-core/src/styles/theme.css'
 import '../../../../../packages/renderer-core/src/styles/doc.css'
 import './styles/base.css'

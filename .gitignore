@@ -17,6 +17,8 @@ apps/desktop/release-*/
 apps/desktop/out/
 # 打包时组装的内置插件视图（assemble-plugins.mjs 生成，图标是静态资源需入库）
 apps/desktop/build/plugins/
+# 分享页运行时产物（build-share-assets.mjs 生成：esbuild 输出 + mermaid 官方构建）
+apps/desktop/build/share-assets/
 
 # deployer 数据卷与本机环境（凭证不进仓）
 data/

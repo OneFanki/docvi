@@ -6,6 +6,8 @@
  * 因此这里只放纯数据形状，不放函数。
  */
 
+import type { ShareTheme } from './share-theme.ts'
+
 /** 服务已知的工作区（搜索语料的来源） */
 export interface ServiceWorkspace {
   id: string
@@ -57,6 +59,13 @@ export interface ServiceConfig {
   token: string
   workspaces: ServiceWorkspace[]
   plugins: ServicePlugin[]
+  /**
+   * 分享页要跟随的主题（本质应用里当前 `settings.theme` 的解析结果）。
+   *
+   * 分享页由服务进程直出、拿不到渲染进程的 DOM 状态，所以主题只能以数据形式
+   * 下发。缺省时用 `DEFAULT_SHARE_THEME`（深色基底），不会出现「分享页白一下」。
+   */
+  shareTheme?: ShareTheme
 }
 
 /** 主进程 → 服务进程 */
@@ -64,6 +73,8 @@ export type ServiceCommand =
   | { type: 'init'; config: ServiceConfig }
   | { type: 'update'; workspaces: ServiceWorkspace[]; plugins: ServicePlugin[] }
   | { type: 'set-lan'; lan: boolean }
+  /** 主题变了：分享页是实时渲染的，下一次请求就该是新主题 */
+  | { type: 'set-share-theme'; theme: ShareTheme }
   /** 分享管理：分享登记由服务持有（路由要用），主进程只负责选择路径与展示 */
   | {
       type: 'rpc'

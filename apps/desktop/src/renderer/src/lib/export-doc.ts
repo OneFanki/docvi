@@ -1,4 +1,9 @@
 // ?raw 把样式当字符串打进包：导出文件必须自包含，不能引外部 CSS 文件
+//
+// 字体那一份**不打包**：@font-face 指向随应用分发的 woff2，导出文件是拿到
+// 别人机器上打开的，那里没有这些文件。引进来只会让产物每次打开都 404 一遍
+// 再静默回退到系统字体——不如干脆不写，让 --dv-font-sans 的兜底直接生效
+// （与分享页同一条取舍）。
 import themeCss from '../../../../../../packages/renderer-core/src/styles/theme.css?raw'
 import docCss from '../../../../../../packages/renderer-core/src/styles/doc.css?raw'
 

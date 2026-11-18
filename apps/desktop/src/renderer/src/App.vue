@@ -45,6 +45,7 @@ import { useServiceStore } from './stores/service'
 import { useI18n, applyExternalLocale, migrateLegacyLocale } from './lib/i18n'
 import { isReadOnlyHost, isWebHost } from './lib/host'
 import { sameDocumentPath } from './lib/external-change'
+import { findShareForDoc } from './lib/share-match'
 import { affectsDocument, affectsTree } from './lib/workspace-change'
 import {
   ancestorDirs,
@@ -1817,6 +1818,44 @@ function shareCurrentDoc(): void {
   void sharePath(ref.absolutePath)
 }
 
+/**
+ * 当前文档所属的分享（未分享时为 null）。
+ *
+ * 判定规则在 `lib/share-match.ts`：文件分享命中本身、目录分享覆盖祖先目录
+ * 都算「已分享」——后者意味着这篇文档确实能通过那个链接被访问到。
+ */
+const currentDocShare = computed(() => {
+  const ref = activeRef.value
+  if (!ref || isWebHost) return null
+  const hit = findShareForDoc(service.shares, ref.absolutePath)
+  if (!hit) return null
+  return { id: hit.share.id, url: hit.share.url, kind: hit.share.kind }
+})
+
+/**
+ * 取消当前文档的分享。
+ *
+ * 目录分享要单独确认：撤销它会让**整片内容**都不再可访问，而用户点的位置是
+ * 「这一篇文档」，措辞必须说清楚影响面，否则撤销完才发现同事全都打不开了。
+ */
+async function unshareCurrentDoc(id: string): Promise<void> {
+  const share = service.shares.find(item => item.id === id)
+  if (!share) return
+  if (share.kind === 'dir') {
+    const choice = await askConfirm(t('share.stopDirTitle'), t('share.stopDirMessage'), [
+      { id: 'stop', label: t('share.stopDirConfirm'), tone: 'danger' },
+    ])
+    if (choice !== 'stop') return
+  }
+  await service.removeShare(id)
+  // toast 里的链接属于刚取消的那条，留着只会让人以为还能打开
+  if (shareToast.value?.url === share.url) shareToast.value = null
+}
+
+function copySharedLink(url: string): void {
+  void service.copy(url)
+}
+
 function shareWorkspace(id: string): void {
   const workspace = store.workspaces.find(item => item.id === id)
   if (!workspace) return
@@ -2083,7 +2122,6 @@ function consumeAnchor(): void {
 function setDocMode(mode: DocMode): void {
   if (docMode.value === mode) return
   const from = docMode.value
-
   /*
    * 记锚点：从阅读态切走时读阅读视图的顶部源行；从编辑态切走时读编辑器。
    * 分屏的左栏是源码编辑器、右侧是阅读视图——从分屏切出时以左侧（源码）为准，
@@ -3642,10 +3680,13 @@ onBeforeUnmount(() => {
           :show-tree-hint="activeTab?.kind === 'file'"
           :link-prefix="docLinkPrefix"
           :asset-prefix="docAssetPrefix"
+          :share="currentDocShare"
           @outline="outline = $event"
           @error="store.setError($event)"
           @pick-file="openFileDialog"
           @share="shareCurrentDoc"
+          @unshare="unshareCurrentDoc"
+          @copy-share-link="copySharedLink"
           @export="exportDoc"
           @navigate="onContentNavigate"
           @rendered="onRendered"

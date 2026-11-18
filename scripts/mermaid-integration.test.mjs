@@ -320,3 +320,26 @@ test('buildMermaidRelation：节点不足两个 → null（enhance 保持 mermai
   el('path', 'docvi-1-L_A_B_0', 'flowchart-link', root)
   assert.equal(buildMermaidRelation(root), null)
 })
+
+/* ---------- 图类型标签 ---------- */
+
+const { diagramTitle } = await import('../packages/renderer-core/src/mermaid.ts')
+
+test('图类型内部标识翻成可读标题', () => {
+  /*
+   * 灯箱标题曾直接把 `aria-roledescription` 当标题显示——用户看到的是
+   * `flowchart-v2` 这种实现词。这里是那条映射的唯一来源，桌面灯箱与分享页
+   * 都从它取。
+   */
+  assert.equal(diagramTitle('flowchart-v2'), '流程图')
+  assert.equal(diagramTitle('sequence'), '时序图')
+  assert.equal(diagramTitle('er'), '实体关系图')
+})
+
+test('未知 / 缺失的类型回落到「图表」，不露实现词', () => {
+  assert.equal(diagramTitle(null), '图表')
+  assert.equal(diagramTitle(undefined), '图表')
+  assert.equal(diagramTitle(''), '图表')
+  // 未收录的标识也不该原样透出
+  assert.equal(diagramTitle('some-new-diagram-type'), '图表')
+})

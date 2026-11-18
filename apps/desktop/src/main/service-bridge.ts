@@ -1,6 +1,12 @@
 import { randomBytes } from 'node:crypto'
 
-import type { ServicePlugin, ServiceState, ShareEntry, WorkspaceEntry } from '@docvi/shared'
+import type {
+  ServicePlugin,
+  ServiceState,
+  ShareEntry,
+  ShareTheme,
+  WorkspaceEntry,
+} from '@docvi/shared'
 
 import { readJsonFile, writeJsonFile } from './store.ts'
 import { serviceFile } from './paths.ts'
@@ -110,8 +116,10 @@ export interface ServiceBridge {
   createShare(path: string): Promise<ShareEntry | null>
   removeShare(id: string): Promise<ShareEntry[]>
   onState(listener: (state: ServiceState) => void): () => void
-  /** 插件或工作区变化后刷新服务侧快照 */
+  /** 插件或工作区变化后刷新服务侧快照（顺带刷新分享页主题） */
   sync(): void
+  /** 主题 / 字体变了：只推分享页要用的那一份快照 */
+  syncTheme(): void
   /** 应用退出：停掉服务进程，避免后台残留占端口 */
   stop(): void
 }
@@ -123,6 +131,13 @@ export function createServiceBridge(
   dataDir: string,
   /** 默认工作区根（AI 未指定位置时的落笔处）；空/缺省表示没有默认工作区 */
   defaultRoot?: string | null,
+  /**
+   * 分享页主题快照的来源。
+   *
+   * 由主进程注入而不是在桥接里自己算：它要读设置文件与插件清单，这两件事
+   * 分别属于 settings-store 与 plugin-store，桥接只该转发，不该知道它们的形状。
+   */
+  shareTheme?: () => ShareTheme,
 ): ServiceBridge {
   const settings = loadSettings()
   /** 记住的首选端口：改端口后设置页要显示「下次启动用哪个」，不能只看当前实际端口 */
@@ -139,6 +154,7 @@ export function createServiceBridge(
     token: settings.token,
     workspaces: workspaceSnapshot(store, defaultRoot),
     plugins: pluginSnapshot(plugins),
+    ...(shareTheme ? { shareTheme: shareTheme() } : {}),
   })
 
   return {
@@ -161,6 +177,11 @@ export function createServiceBridge(
     onState: listener => manager.onState(listener),
     sync() {
       manager.update(workspaceSnapshot(store, defaultRoot), pluginSnapshot(plugins))
+      // 插件启停会改变可用主题（插件主题可能被停用），主题快照一起刷新
+      if (shareTheme) manager.setShareTheme(shareTheme())
+    },
+    syncTheme() {
+      if (shareTheme) manager.setShareTheme(shareTheme())
     },
     stop: () => manager.stop(),
   }
