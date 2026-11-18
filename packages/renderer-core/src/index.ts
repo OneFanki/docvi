@@ -18,7 +18,12 @@ export { findPluginBlocks } from './plugin-blocks.ts'
 export type { PluginBlockSpan, PluginSyntaxDeclaration } from './plugin-blocks.ts'
 
 export { highlightPass } from './highlight.ts'
-export { mermaidPass, resolveAppearance, diagramTitle } from './mermaid.ts'
+export {
+  mermaidPass,
+  resolveAppearance,
+  diagramTitle,
+  cleanupMermaidFailureArtifacts,
+} from './mermaid.ts'
 export { enhanceMermaidSvg } from './mermaid-hover.ts'
 
 export { ComponentRegistry, mountDeclarativeComponents, mountPluginBlocks } from './components.ts'

@@ -164,6 +164,41 @@ export async function mermaidPass(
     } catch (error) {
       console.warn('[renderer] mermaid 渲染失败（保留原文）:', error)
       pre.dataset.mermaidDone = ''
+      /*
+       * 必须立刻清：失败的错误图会被撑进 body，让整页可滚，
+       * 之后任何 scrollIntoView 都会把顶栏推出视口（见下面函数的说明）。
+       */
+      cleanupMermaidFailureArtifacts(doc)
     }
+  }
+}
+
+/**
+ * 清掉 mermaid 渲染失败时留在 `<body>` 末尾的残留元素。
+ *
+ * ## 为什么必须主动清
+ *
+ * mermaid 11 的 `render()` 在解析失败时会**把错误图插到 document.body 末尾**
+ * （元素 id 是 `<renderId>` 前面多个 `d`，例如 `ddocvi-mermaid-1`），用来在
+ * 页面上显示语法错误。它不会自己删。
+ *
+ * 后果不是「多一个看不见的元素」那么轻：那个错误图有几百像素高，插在 body
+ * 末尾会把 `<body>` 撑得超过视口 → **整个页面变成可滚动**。此时任何一次
+ * `scrollIntoView`（右侧目录跳转、搜索命中定位）都会连带滚动 `<html>`/`<body>`，
+ * 把固定在顶部的标题栏与标签栏推出视口——界面看起来直接坏了。
+ *
+ * 判据用 id 前缀而不是查询所有 div：只删我们自己发起的那些渲染留下的，
+ * 绝不碰页面上其它元素。
+ *
+ * 为什么不做成「失败就删当前 id」而扫全部：并发渲染时（长文档一次几十张图）
+ * 失败的那几个 id 未必是调用方手上那个，扫一遍最省心，数量也只有个位数。
+ */
+export function cleanupMermaidFailureArtifacts(doc: Document = document): void {
+  for (const el of Array.from(
+    doc.querySelectorAll<HTMLElement>('[id^="d"][id*="docvi-mermaid-"]'),
+  )) {
+    // 再确认一次形状：以 d 开头、正文是我们自己的前缀，避免误删用户内容里
+    // 恰好叫这个名字的元素（几乎不可能，但删错的代价是用户内容丢失）
+    if (el.id.startsWith('ddocvi-mermaid-')) el.remove()
   }
 }

@@ -796,8 +796,16 @@ defineExpose({
     return true
   },
   scrollTo: (selector: string) => {
+    const el = scroller.value
     const target = host.value?.querySelector<HTMLElement>(selector)
-    target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (!el || !target) return
+    /*
+     * 同 OutlinePanel.jump 的理由：scrollIntoView 会连带滚动 html/body，
+     * 一旦 body 被撑高（mermaid 失败残留等）就会把顶栏推出视口。
+     * 只动容器自己的 scrollTop。
+     */
+    const delta = target.getBoundingClientRect().top - el.getBoundingClientRect().top
+    el.scrollTo({ top: el.scrollTop + delta, behavior: 'smooth' })
   },
 })
 </script>

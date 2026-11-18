@@ -13,6 +13,19 @@ body,
   margin: 0;
 }
 
+/*
+ * 文档根不可滚：外壳（标题栏 / 标签栏 / 状态栏）是固定布局，整页一旦能滚，
+ * 它们就会被推出视口。
+ *
+ * body 上那条 overflow: hidden 不足以兜住——`scrollIntoView` 与锚点跳转滚的是
+ * **滚动视口（documentElement）**，绕过 body 的 overflow。实测过：mermaid 渲染
+ * 失败会在 body 末尾插一个错误图把它撑高，此后点右侧目录跳转就把整个界面
+ * 滚走了。所以 html 这一层也必须锁住。
+ */
+html {
+  overflow: hidden;
+}
+
 body {
   background: var(--dv-ui-bg);
   color: var(--dv-ui-text);

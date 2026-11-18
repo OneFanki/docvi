@@ -61,10 +61,34 @@ onBeforeUnmount(disconnect)
 
 const hasEntries = computed(() => props.entries.length >= 2)
 
+/**
+ * 跳到某个标题。
+ *
+ * ⚠️ 不能用 `el.scrollIntoView()`：它会滚动**所有**可滚动祖先，包括
+ * `<html>` / `<body>`。平时页面本身不可滚所以看不出问题，但只要 `<body>`
+ * 被任何东西撑高（实测：mermaid 渲染失败留下的错误图会撑到 1000px+），
+ * 这一次点击就会连带把整个页面滚走 —— 固定的标题栏与标签栏直接被推出视口，
+ * 界面看起来彻底坏了（用户报的就是这个现象）。
+ *
+ * 改成只调整阅读容器自己的 scrollTop：容器是 `.reader`（overflow-y: auto），
+ * 换算成「目标相对容器顶」的偏移即可。这样无论 body 高成什么样，都只动容器。
+ */
 function jump(id: string): void {
   const el = document.getElementById(id)
   if (!el) return
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const scroller = document.querySelector<HTMLElement>(props.scrollSelector)
+  if (scroller) {
+    /*
+     * 用 getBoundingClientRect 的差值算，而不是 offsetTop：标题外面裹着
+     * 若干层（.at-doc、section…），offsetTop 是相对最近的定位祖先，
+     * 中间只要有一层 position: relative 就会算错。
+     */
+    const delta = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+    scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: 'smooth' })
+  } else {
+    // 拿不到容器时退回原行为：功能仍可用，只是没这层防护
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
   activeId.value = id
 }
 </script>
