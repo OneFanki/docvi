@@ -1,7 +1,7 @@
 {
   "name": "@docvi/desktop",
   "productName": "docvi",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -14,11 +14,12 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "node scripts/build-share-assets.mjs && electron-vite build",
     "start": "electron-vite preview",
-    "test": "node --test \"../../tests/service/**/*.test.mjs\" \"../../tests/main/**/*.test.mjs\"",
+    "test": "node --test \"../../tests/service/**/*.test.mjs\" \"../../tests/main/**/*.test.mjs\" \"../../tests/renderer/**/*.test.mjs\"",
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
-    "dist": "electron-builder --config electron-builder.yml"
+    "dist": "electron-builder --config electron-builder.yml",
+    "build:share-assets": "node scripts/build-share-assets.mjs"
   },
   "dependencies": {
     "@docvi/renderer-core": "workspace:*",

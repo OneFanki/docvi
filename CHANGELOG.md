@@ -28,6 +28,22 @@
 
 ### English
 
+## [0.8.0] - 2026-11-18
+
+### 中文
+
+- **应用内更新在 Windows 上真的能装成功了**：从 0.3.0 起，更新脚本用 `tasklist | find` 判断本应用是否退出——装了 Git 的机器上 `find` 会被解析成 Unix 版，把 PID 当文件名。结果是本进程还在运行就放行安装器，安装器去覆盖运行中的 exe 只能失败。现在外部命令全部走系统绝对路径，存活判断改读进程列表并与 PID 精确比对。**如果你装的是 0.7.0 或更早版本，需要手动下载这一版**——坏的正是自动更新本身，它没法把自己修好
+- **分享页现在跟你的主题一致，图也能画出来**：局域网分享出去的页面以前配色是猜的、mermaid 只显示源码；现在跟随本机当前主题，图表正常渲染，还能全屏查看、直接下载源文件
+- **文档里就能看到「这篇已分享」，不用再跑去设置里管**：阅读视图的分享按钮会点亮表示已分享，点开可直接复制链接或取消；通过目录分享访问的文档也认得出，取消时会提醒这会影响整个目录
+- **新增性能日志开关（默认关）**：设置 → 关于。只在你真的遇到卡顿时才记录一条，平时不写盘，文件最多 128 KB
+
+### English
+
+- **In-app updates now actually install on Windows**: since 0.3.0 the update script used `tasklist | find` to wait for the app to exit — on machines with Git installed, `find` resolves to the Unix one and treats the PID as a filename. The installer was allowed to run while the app was still alive, so overwriting the running exe could only fail. System commands now use absolute paths, and the liveness check reads the process list and compares the PID exactly. **If you are on 0.7.0 or earlier, download this release manually** — the thing that was broken is the updater itself, so it cannot repair itself
+- **Share pages now match your theme and render diagrams**: LAN share pages used to guess their palette and showed mermaid as source. They now follow the theme you have selected, render diagrams, support full-screen viewing, and offer a source download
+- **See "this document is shared" right where you are reading**: the share button lights up when the open document is shared; click it to copy the link or stop sharing. Documents reachable through a folder share are recognised too, with a warning that stopping it affects the whole folder
+- **New performance log switch (off by default)**: Settings → About. It records only when a stall actually happens, never writes while idle, and is capped at 128 KB
+
 ## [0.7.0] - 2026-11-13
 
 ### 中文
