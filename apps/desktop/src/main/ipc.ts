@@ -13,6 +13,7 @@ import {
   type ImageImportResult,
   type MarketCatalog,
   type MarketEntry,
+  type PerfSample,
   type PluginRecordView,
   type RecentEntry,
   type RuntimeInfo,
@@ -63,6 +64,7 @@ import {
 } from './store.ts'
 import { isRemovableWorkspace } from './default-workspace.ts'
 import { recentFile, workspacesFile } from './paths.ts'
+import { reportPerfSamples } from './perf-log.ts'
 
 /**
  * IPC 注册表：主进程唯一入口。
@@ -932,6 +934,24 @@ export function registerIpc(
       const text = JSON.stringify(value ?? null)
       if (text.length > 1024 * 1024) return fail('E_TOO_LARGE', '会话数据超过 1MB 上限')
       settings.writeSession(value ?? null)
+      return ok(null)
+    } catch (error) {
+      return toFailure(error)
+    }
+  })
+
+  /*
+   * 性能埋点。渲染层只在**真有卡顿时**调用（见 lib/perf.ts），主进程负责
+   * 规范化、上限裁剪与攒批落盘。这里不做限流：调用频率由渲染层的判定控制，
+   * 再加一层限流会让「卡了 30 秒」这种现场被削成几条，失去诊断价值。
+   *
+   * 入参校验只到「是数组」为止——逐条字段的合法性由 reportPerfSamples
+   * 内部的 normalizeSample 兜底（它会削掉非有限数与超长文本）。
+   */
+  ipcMain.handle(IPC.perfReport, (_event, value: unknown) => {
+    try {
+      if (!Array.isArray(value)) return fail('E_INVALID', 'samples 必须是数组')
+      reportPerfSamples(value as PerfSample[])
       return ok(null)
     } catch (error) {
       return toFailure(error)

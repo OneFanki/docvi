@@ -43,3 +43,13 @@ export function sharesFile(): string {
 export function cacheDir(): string {
   return join(dataDir(), 'cache')
 }
+
+/**
+ * 性能埋点文件。
+ *
+ * 放 `cache/` 而不是数据根：这是可随时删除的运行现场，不是需要备份的用户数据。
+ * 用户清缓存不会丢任何有价值的东西，我们也因此不必给埋点做迁移。
+ */
+export function perfFile(): string {
+  return join(cacheDir(), 'perf.json')
+}

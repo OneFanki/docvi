@@ -1,3 +1,4 @@
+import type { PerfSample } from './perf.ts'
 import type { AppSettings } from './settings.ts'
 
 /**
@@ -195,6 +196,13 @@ export const IPC = {
   /** 会话：标签列表 / MRU / 历史（程序自动维护，不进设置导出） */
   sessionRead: 'docvi:session:read',
   sessionWrite: 'docvi:session:write',
+  /**
+   * 性能埋点：渲染层把「值得记录的卡顿」推给主进程，主进程做上限裁剪后落盘。
+   *
+   * 只有一条通道、只做追加：不做读取（用户不需要在应用里看埋点），
+   * 也不做删除（要清就删文件，比提供 UI 更省事）。
+   */
+  perfReport: 'docvi:perf:report',
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
@@ -949,6 +957,14 @@ export interface DocviApi {
   /** 会话状态（标签、MRU、历史）；结构由渲染层定义，主进程只负责存取 */
   sessionRead(): Promise<Result<unknown>>
   sessionWrite(session: unknown): Promise<Result<null>>
+
+  /**
+   * 上报一批性能采样（只在出现卡顿时调用，不是每帧都报）。
+   *
+   * 主进程会做规范化与上限裁剪，所以渲染层不必自己限流——但**也不该滥用**：
+   * 调用点必须自带「这次值得记」的判断（见 `lib/perf.ts`）。
+   */
+  perfReport(samples: PerfSample[]): Promise<Result<null>>
 }
 
 /**

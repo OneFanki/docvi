@@ -45,6 +45,7 @@ import { useServiceStore } from './stores/service'
 import { useI18n, applyExternalLocale, migrateLegacyLocale } from './lib/i18n'
 import { isReadOnlyHost, isWebHost } from './lib/host'
 import { sameDocumentPath } from './lib/external-change'
+import { startPerfTimer, setPerfTracing } from './lib/perf'
 import { findShareForDoc } from './lib/share-match'
 import { affectsDocument, affectsTree } from './lib/workspace-change'
 import {
@@ -182,6 +183,13 @@ const tabBarRef = ref<InstanceType<typeof TabBar> | null>(null)
  */
 type DocMode = 'read' | 'live' | 'source' | 'split'
 const docMode = ref<DocMode>('read')
+/**
+ * 正在进行的视图切换计时器（切到阅读时由 onRendered 收尾）。
+ *
+ * 切到编辑态时直接收尾，切到阅读态时正文还没出来——只有渲染完成回调
+ * 才知道「真的可见了」。所以这里暂存一个收尾函数，两边各自负责调用。
+ */
+let pendingSwitchTimer: (() => void) | null = null
 const editing = computed(() => docMode.value !== 'read')
 /** 分屏时左窗占比（0.3–0.7，拖动分隔条调整） */
 const splitRatio = ref(0.5)
@@ -518,6 +526,14 @@ onMounted(async () => {
   })
   unregisters.push(unsubscribeSettings)
   tabs.setPreferences(window.docvi.bootSettings.tabs)
+  /*
+   * 启动时也要走一遍采集开关。
+   *
+   * 上面只挂载了「外部改动」的监听——启动本身不会触发它。所以之前只有
+   * 「本次会话里点过开关」才生效，重载 / 重启后开关看着是开的、实际不采集。
+   * 这一行是必需的，别因为「applySettings 看起来像外部专用」而删掉。
+   */
+  setPerfTracing(window.docvi.bootSettings.perfTracing === true)
 
   // 标签脏检查：上限策略关闭标签时不能用有未保存修改的（文档模型是真相源）
   tabs.setDirtyCheck(tab => {
@@ -2053,6 +2069,14 @@ function cancelSwitcher(): void {
 function onRendered(payload: { path: string; title: string }): void {
   const tab = activeTab.value
   const ref = activeRef.value
+  /*
+   * 视图切换的埋点收尾。放在这里而不是 setDocMode 里：正文什么时候真的
+   * 出现在屏幕上，只有渲染完成回调知道。取完即清——onRendered 会因高亮 /
+   * Mermaid / 组件挂载被多次触发，不清会把同一个计时结束好几次。
+   */
+  const finishSwitch = pendingSwitchTimer
+  pendingSwitchTimer = null
+  finishSwitch?.()
   logPosition({
     via: 'rendered',
     hasReader: Boolean(readerRef.value),
@@ -2123,6 +2147,13 @@ function setDocMode(mode: DocMode): void {
   if (docMode.value === mode) return
   const from = docMode.value
   /*
+   * 埋点：只在开关打开时计时（startPerfTimer 在关闭时返回空函数，零开销）。
+   * 这条记录的判据是「切完到正文/编辑器落地」——比 longtask 更贴近
+   * 用户感知的「点了没反应」。
+   */
+  const doneSwitch = startPerfTimer('switch', `switch:${from}->${mode}`)
+
+  /*
    * 记锚点：从阅读态切走时读阅读视图的顶部源行；从编辑态切走时读编辑器。
    * 分屏的左栏是源码编辑器、右侧是阅读视图——从分屏切出时以左侧（源码）为准，
    * 因为用户的重心通常在正在编辑的那一侧。
@@ -2149,7 +2180,12 @@ function setDocMode(mode: DocMode): void {
   docMode.value = mode
 
   if (mode === 'read') {
-    // 阅读视图要等正文渲染完成（高度稳定）才落位，由 onRendered 消费锚点
+    /*
+     * 阅读视图要等正文渲染完成（高度稳定）才落位，由 onRendered 消费锚点。
+     * 埋点的收尾也交给它——在那里结束计时才能覆盖「正文真的出来了」的时长，
+     * 而不是只量到「Vue 把组件换掉了」。
+     */
+    pendingSwitchTimer = doneSwitch
     return
   }
   void nextTick(() => {
@@ -2159,6 +2195,7 @@ function setDocMode(mode: DocMode): void {
      * 这里不再消费锚点——`takeAnchor` 只留给阅读侧；编辑器侧重复消费会把
      * 阅读视图下一次正常渲染的锚点也清掉。
      */
+    doneSwitch()
   })
 }
 

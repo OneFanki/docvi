@@ -554,6 +554,15 @@ export function createWebHost(options: WebHostOptions = {}): DocviApi {
       return ok(null)
     },
 
+    /**
+     * 容器版没有本地落盘：埋点写到哪里由服务端的部署者决定，不该由浏览器
+     * 单方面往 localStorage 塞诊断数据（那是别人的服务器，不是本机）。
+     * 静默接受即可——采集开关在容器版也不展示（见 SettingsView 的 readonly 分支）。
+     */
+    async perfReport(): Promise<Result<null>> {
+      return ok(null)
+    },
+
     /** 浏览器里没有窗口按钮需要同步 */
     async setWindowAppearance(): Promise<Result<null>> {
       return ok(null)

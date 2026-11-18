@@ -32,6 +32,7 @@ import { linkToAssetUrl, openHtmlInSandbox } from '../lib/html-sandbox'
 import { usePluginStore } from '../stores/plugins'
 import { useI18n } from '../lib/i18n'
 import { clearMatches, collectMatches, paintMatches, scrollToRange } from '../lib/find-in-doc'
+import { startPerfTimer } from '../lib/perf'
 
 /**
  * 阅读视图：Markdown → HTML → 组件挂载 → 异步高亮/图表。
@@ -450,6 +451,20 @@ watch(
     }
 
     const current = ++generation
+    /*
+     * 渲染耗时埋点（开关关闭时是空函数，零开销）。
+     *
+     * detail 只放**规模**不放路径：文档路径会泄露本机目录结构，而块数与
+     * DOM 规模才是判断「这次 100ms 值不值得优化」的依据。detail 是延迟求值的，
+     * 取的是收尾那一刻已挂载的正文规模。
+     */
+    const finishRender = startPerfTimer('render', 'reader:render', () => {
+      const surface = host.value?.querySelector<HTMLElement>('.at-doc')
+      return {
+        blocks: surface?.querySelectorAll('[data-source-line]').length ?? 0,
+        nodes: surface?.querySelectorAll('*').length ?? 0,
+      }
+    })
     const result = renderMarkdown(doc.text, renderPath.value, {
       // 插件声明的容器语法（::: merged 之类）：渲染成占位块，挂载交给 mountPluginBlocks
       containerSyntax: plugins.syntax.map(item => ({
@@ -488,6 +503,11 @@ watch(
 
     // 查找条开着时，新文档要重新算命中
     if (findQuery.value) runFind()
+    /*
+     * 在这里收尾而不是更早：用户感知的「渲染完成」包含高亮与图表都画出来。
+     * 块数取的是已挂载的正文规模，用来区分「小文档也慢」与「大文档才慢」。
+     */
+    finishRender()
     emit('rendered', { path: doc.path, title: result.h1 ?? doc.path.split('/').pop() ?? doc.path })
   },
   { immediate: true },

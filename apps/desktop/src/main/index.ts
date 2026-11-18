@@ -16,10 +16,12 @@ import { isContentRelPath } from './content.ts'
 import { createPluginStore, resolvePluginAsset, type PluginStore } from './plugin-store.ts'
 import { createServiceManager, serviceEntryPath } from './service.ts'
 import { createServiceBridge } from './service-bridge.ts'
+import { shareThemeFromSettings } from './share-theme.ts'
 import { createSettingsStore, sessionFilePath, settingsFilePath } from './settings-store.ts'
 import { DEV_APP_NAME, devDataDir } from './dev-data.ts'
 import { createTray, focusWindow, markQuitting, shouldHideOnClose } from './tray.ts'
 import { dataDir } from './paths.ts'
+import { flushPerfSamples } from './perf-log.ts'
 
 /**
  * docvi 主进程入口。
@@ -589,6 +591,8 @@ app.whenReady().then(() => {
     plugins,
     dataDir(),
     defaultRoot,
+    // 分享页要跟着本机当前主题：快照在服务进程里只能以数据形式存在
+    () => shareThemeFromSettings(settings.get(), plugins.list()),
   )
   // 服务状态变化 → 渲染层（启动失败、端口顺延、崩溃重启都要能被看见）
   service.onState(state => mainWindow?.webContents.send(IPC.serviceChanged, state))
@@ -719,6 +723,8 @@ app.whenReady().then(() => {
     trayHandle = null
     // 服务是独立进程：不显式停掉的话会留一个后台进程占端口
     service.stop()
+    // 埋点攒批窗口里可能还有没落盘的记录：退出前写掉，否则这次卡顿的现场就丢了
+    flushPerfSamples()
   })
 
   // 「待打开队列」只在主进程有状态，直接在这里挂 handler，避免 ipc.ts 反向依赖入口

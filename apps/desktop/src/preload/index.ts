@@ -216,6 +216,8 @@ const api: DocviApi = {
 
   sessionRead: () => ipcRenderer.invoke(IPC.sessionRead),
   sessionWrite: session => ipcRenderer.invoke(IPC.sessionWrite, session),
+
+  perfReport: samples => ipcRenderer.invoke(IPC.perfReport, samples),
 }
 
 contextBridge.exposeInMainWorld('docvi', api)

@@ -1,6 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 
+import { BUILTIN_APPEARANCE } from '@docvi/shared'
+
+import { setPerfTracing } from '../lib/perf'
 import type {
   AppSettings,
   ContentWidth,
@@ -34,19 +37,6 @@ import type {
 export type ThemeKey = string
 
 const BUILTIN_KEYS = new Set(['graphite', 'paper', 'slate', 'mist'])
-
-/**
- * 内置主题的明暗。插件主题的明暗从插件清单读（见 lib/plugin-themes），
- * 两者合起来决定窗口按钮用深色还是浅色符号。
- *
- * 为什么主进程不自己判断：主题 id 对第三方主题是任意字符串，猜不得。
- */
-export const BUILTIN_APPEARANCE: Record<string, 'light' | 'dark'> = {
-  graphite: 'dark',
-  paper: 'light',
-  slate: 'dark',
-  mist: 'light',
-}
 
 /** 旧版 localStorage 键：只作为一次性迁移来源读取 */
 const LEGACY_KEYS = {
@@ -189,6 +179,8 @@ export const useThemeStore = defineStore('theme', () => {
     theme.value = next.theme
     fontFamily.value = next.fontFamily
     monoLatin.value = next.monoLatin
+    // 埋点开关跟着设置走：外部改了 settings.json 也要立刻生效（含关掉时断开 observer）
+    setPerfTracing(next.perfTracing === true)
     applyingExternal = false
   }
 

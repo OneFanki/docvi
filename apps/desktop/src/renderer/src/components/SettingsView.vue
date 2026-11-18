@@ -23,6 +23,7 @@ import { useServiceStore } from '../stores/service'
 import { useTabsStore } from '../stores/tabs'
 import { useThemeStore } from '../stores/app'
 import { LOCALES, useI18n } from '../lib/i18n'
+import { setPerfTracing } from '../lib/perf'
 import ThemePicker from './ThemePicker.vue'
 
 /**
@@ -340,6 +341,8 @@ let unsubscribe: (() => void) | null = null
 
 onMounted(() => {
   void loadAbout()
+  // 埋点开关只在桌面宿主有意义（容器版没有本地写盘）
+  if (!props.readonly) void loadPerfTracing()
   // 容器版没有服务进程也没有桌面外壳：这两个面板的数据源都不存在
   if (props.readonly) return
   void store.load()
@@ -490,6 +493,38 @@ async function toggleCloseToTray(): Promise<void> {
 async function openLogs(): Promise<void> {
   const result = await window.docvi.serviceOpenLog()
   if (!result.ok) store.error = result.error.message
+}
+
+/*
+ * 性能埋点开关。
+ *
+ * 状态来源是 settings（主进程持久化），不是本地 ref：外部改了 settings.json
+ * 之后设置页要能反映真实值。
+ */
+const perfTracing = ref(false)
+
+async function loadPerfTracing(): Promise<void> {
+  const result = await window.docvi.settingsRead()
+  if (result.ok) perfTracing.value = result.data.perfTracing === true
+}
+
+async function togglePerfTracing(): Promise<void> {
+  const next = !perfTracing.value
+  perfTracing.value = next
+  const result = await window.docvi.settingsWrite({ perfTracing: next })
+  if (!result.ok) {
+    perfTracing.value = !next
+    store.error = result.error.message
+    return
+  }
+  /*
+   * 必须在这里显式切换采集状态。
+   *
+   * `settingsWrite` 只写主进程的设置文件、**不推** `settingsChanged`（那条只用于
+   * 「外部改了 settings.json」）。所以光写设置，渲染层的采集开关不会跟着动——
+   * 用户点了开关看起来是开的，实际什么都没采。这个 bug 端到端探针抓到过。
+   */
+  setPerfTracing(next)
 }
 </script>
 
@@ -1095,6 +1130,28 @@ async function openLogs(): Promise<void> {
               <span class="about__fonts-sep" aria-hidden="true">·</span>
               <span>{{ t('about.fontJetbrains') }}</span>
             </span>
+          </div>
+
+          <!--
+            性能埋点：诊断项，与「字体声明」同属关于页。
+            默认关，且开启后也只在真卡顿时写盘——所以这里不需要「会产生多少
+            磁盘占用」这类解释文案，一行状态说明足够。
+          -->
+          <div class="row">
+            <span class="row__label" :title="t('about.perfTracingHint')">
+              {{ t('about.perfTracing') }}
+            </span>
+            <span class="row__value">{{ t('about.perfTracingState') }}</span>
+            <button
+              class="switch"
+              type="button"
+              :class="{ 'is-on': perfTracing }"
+              :aria-pressed="perfTracing"
+              :aria-label="t('about.perfTracing')"
+              @click="togglePerfTracing"
+            >
+              <span class="switch__knob" />
+            </button>
           </div>
 
           <p

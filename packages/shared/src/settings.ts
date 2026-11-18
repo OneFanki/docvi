@@ -118,6 +118,17 @@ export interface AppSettings {
    * 与「用户主动删了」。
    */
   defaultWorkspaceSeeded: boolean
+  /**
+   * 性能埋点开关（默认关）。
+   *
+   * 默认关是因为它对本功能的用户价值几乎为零：埋点只在**出卡顿时**
+   * 才有用，而绝大多数用户从不需要诊断。开着它意味着后台有一个
+   * PerformanceObserver 常驻，还要在卡顿时写文件——为用户不理解的
+   * 东西付代价，不该是默认行为。
+   *
+   * 开启后也只会在真的卡顿时才写盘（见 `lib/perf.ts`），不会持续产生磁盘活动。
+   */
+  perfTracing: boolean
 }
 
 export const TAB_WIDTH_MIN = 120
@@ -156,6 +167,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   desktop: { autostart: false, closeToTray: true },
   // 首次启动时主进程会播种默认工作区并把这一位翻成 true
   defaultWorkspaceSeeded: false,
+  // 性能埋点默认关：见 AppSettings.perfTracing 的说明
+  perfTracing: false,
 }
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -245,5 +258,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
     },
     // 缺省视为未播种：老用户的 settings.json 里没有这一位，升级后应当补建一次
     defaultWorkspaceSeeded: record.defaultWorkspaceSeeded === true,
+    // 缺省视为关：老用户的设置里没有这一位，升级后不该突然开始采集
+    perfTracing: record.perfTracing === true,
   }
 }
