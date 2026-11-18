@@ -1,6 +1,6 @@
 {
-  "version": "0.8.0",
+  "version": "0.8.1",
   "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
-  "notes": "应用内更新在 Windows 上真的能装成功了：之前在装了 Git 的机器上会误判本应用已退出，安装器覆盖运行中的 exe 只能失败。分享页现在跟随你的主题、能画图、可全屏查看与下载源文件；文档里能直接看到是否已分享并就地取消。",
+  "notes": "点右侧目录跳转不再把整个界面滚走：文档里只要有一张 mermaid 图语法写错，报错残影就会把页面撑高，此时点目录会把标题栏和标签栏一起滚出视口。残影现在会被清掉，跳转也只滚阅读区自己。",
   "homepage": "https://github.com/OneFanki/docvi"
 }

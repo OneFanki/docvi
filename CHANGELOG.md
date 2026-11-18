@@ -28,6 +28,18 @@
 
 ### English
 
+## [0.8.1] - 2026-11-18
+
+### 中文
+
+- **点右侧目录跳转不再把整个界面滚走**：文档里只要有一张 mermaid 图语法写错，图的报错残影就会把页面撑高；这时点目录跳转，固定的标题栏和标签栏会被一起滚出视口，看起来像界面坏了。现在失败残影会被清掉，跳转也只滚阅读区自己，页面本身永远是锁住的
+- **升级提示**：这一版可以直接在应用内更新。修好的安装脚本从 0.8.0 起生效，所以在「关于」里点检查更新就能自动装完并重启；如果你还在 0.7.0 或更早版本，仍需手动下载一次
+
+### English
+
+- **Clicking the outline no longer scrolls the whole window away**: one malformed mermaid diagram was enough — its error artefact at the end of the page stretched the document, so jumping from the outline carried the fixed title and tab bars out of the viewport and the UI looked broken. The artefact is now removed, and jumps only move the reading pane; the page itself stays locked
+- **Upgrade note**: this release can be installed from inside the app. The fixed installer script has been in place since 0.8.0, so "check for updates" in About will install and relaunch on its own; if you are still on 0.7.0 or earlier, you need one manual download
+
 ## [0.8.0] - 2026-11-18
 
 ### 中文
