@@ -378,7 +378,36 @@ const menu = ref<{
   isDir: boolean
   /** 菜单要作用的路径集合：右键选区内行=整个选区；否则单选该行 */
   paths: string[]
-}>({ open: false, x: 0, y: 0, path: '', isDir: false, paths: [] })
+  /** 右键落在树的空白区（不是某一行）：容器为工作区根，只留「新建 / 粘贴」 */
+  blank: boolean
+}>({ open: false, x: 0, y: 0, path: '', isDir: false, paths: [], blank: false })
+
+/**
+ * 树容器上的右键：只处理**落在空白处**的那次。
+ *
+ * 行内的右键由 TreeItem 自己 emit（它已 `preventDefault`，但没 `stopPropagation`，
+ * 事件仍会冒泡到这里），所以这里用「目标是否在某一行内」来区分，不能靠 `.self`
+ * ——空状态的插槽内容是容器的子元素，`.self` 会把它排除在外，正是空工作区的场景。
+ *
+ * 空白处的目标固定是工作区根（路径 `''`），只提供「新建 / 粘贴」这类不指向
+ * 具体条目的动作。
+ */
+function onTreeContextMenu(event: MouseEvent): void {
+  const target = event.target as Element | null
+  if (target?.closest?.('.row')) return
+  event.preventDefault()
+  if (props.readonly) return
+  emit('select', [])
+  menu.value = {
+    open: true,
+    x: event.clientX,
+    y: event.clientY,
+    path: '',
+    isDir: true,
+    paths: [],
+    blank: true,
+  }
+}
 
 function onContextMenu(event: MouseEvent, path: string): void {
   event.preventDefault()
@@ -394,6 +423,7 @@ function onContextMenu(event: MouseEvent, path: string): void {
     path,
     isDir: row?.node.type === 'dir',
     paths: checked.includes(path) ? [...checked] : [path],
+    blank: false,
   }
 }
 
@@ -418,6 +448,24 @@ const menuItems = computed<MenuItem[]>(() => {
     { id: 'tree.revealInFolder', label: t('tree.revealInFolder') },
   ]
   if (props.readonly) return [...openItem, ...pathActions]
+  /*
+   * 空白区右键：不指向任何条目，所以没有「打开 / 重命名 / 剪切 / 删除」可言。
+   * 只留三个落点在工作区根的动作，让空工作区也有完整的右键入口，
+   * 不必依赖空状态里的那个按钮。
+   */
+  if (menu.value.blank) {
+    return [
+      { id: 'tree.newFile', label: t('tree.newFile') },
+      { id: 'tree.newDir', label: t('tree.newDir') },
+      {
+        id: 'tree.paste',
+        label: t('tree.paste'),
+        hint: `${MOD_LABEL}+V`,
+        disabled: !props.canPaste,
+        separatorBefore: true,
+      },
+    ]
+  }
   return [
     ...openItem,
     { id: 'tree.newFile', label: t('tree.newFile'), separatorBefore: !isDir },
@@ -493,6 +541,7 @@ function onMenuSelect(id: string): void {
     :aria-activedescendant="activePath ? `tree-node-${activePath}` : undefined"
     @keydown="onKeydown"
     @focusin="onFocusIn"
+    @contextmenu="onTreeContextMenu"
     @dragover="onTreeDragOver"
     @dragleave="onTreeDragLeave"
     @drop="onTreeDrop"
@@ -517,6 +566,13 @@ function onMenuSelect(id: string): void {
       @drag-over-row="onDragOverRow"
       @drop-row="onDropRow"
     />
+    <!--
+      空工作区的占位内容由宿主给：树不能因此整体不渲染，否则空白区失去右键入口
+      （新建第一篇文档只剩 Host 侧另写一个按钮，菜单逻辑被迫复制第二份）。
+    -->
+    <div v-if="!nodes.length" class="tree__empty">
+      <slot name="empty" />
+    </div>
   </div>
 
   <ContextMenu
@@ -571,8 +627,19 @@ function onMenuSelect(id: string): void {
 }
 
 .tree {
+  /*
+   * 撑满侧栏剩余高度：空白区是本组件的右键落点（新建入口），
+   * 内容少时若只占几行，可右键的区域就只剩那几行，等于没实现。
+   */
+  min-height: 100%;
   padding: 2px 6px 12px;
   user-select: none;
+}
+
+.tree__empty {
+  padding: 18px 10px;
+  font-size: 12px;
+  color: var(--dv-ui-text-dim);
 }
 
 /* 空白区也是落点（移到工作区根）；行内落点由 TreeItem 自己描虚线框 */

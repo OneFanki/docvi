@@ -3564,26 +3564,9 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
         </div>
         <!--
           新建入口只有右键菜单（目标跟随右键节点）；空工作区没有节点可右键，
-          由下方空状态里的按钮兜底。定位 / 展开所选 / 全部收起在 DocTree 头部。
+          由树内空状态里的按钮兜底。定位 / 展开所选 / 全部收起在 DocTree 头部。
         -->
-        <!--
-          空工作区也能新建第一篇文档：树为空时没有节点可右键，新建入口只剩
-          这个空状态按钮（容器版文档只读，不出现）。
-        -->
-        <div v-if="!store.tree.length" class="sidebar__empty">
-          {{ t('empty.tree') }}
-          <button
-            v-if="activeTab?.workspaceId && !isReadOnlyHost"
-            class="sidebar__empty-btn"
-            type="button"
-            @click="newEntry('file')"
-          >
-            <FilePlus2 :size="13" :stroke-width="1.8" />
-            {{ t('tree.newFile') }}
-          </button>
-        </div>
         <DocTree
-          v-else
           :nodes="store.tree"
           :selected-path="activeRef?.relPath ?? null"
           :expanded="activeTab?.expanded ?? []"
@@ -3653,6 +3636,18 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
               @click="collapseAll"
             >
               <ChevronsDownUp :size="13" :stroke-width="1.8" />
+            </button>
+          </template>
+          <template #empty>
+            {{ t('empty.tree') }}
+            <button
+              v-if="activeTab?.workspaceId && !isReadOnlyHost"
+              class="sidebar__empty-btn"
+              type="button"
+              @click="newEntry('file')"
+            >
+              <FilePlus2 :size="13" :stroke-width="1.8" />
+              {{ t('tree.newFile') }}
             </button>
           </template>
         </DocTree>
@@ -3968,19 +3963,15 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
 .sidebar {
   width: var(--dv-ui-sidebar-w);
   flex: none;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--dv-ui-surface-1);
   border-right: 1px solid var(--dv-ui-line-soft);
 }
 
-.sidebar__empty {
-  padding: 18px 16px;
-  font-size: 12px;
-  color: var(--dv-ui-text-dim);
-}
-
-/* 树为空时的新建入口：没有节点可右键，这里是唯一的新建途径 */
+/* 树为空时的新建入口：空状态由 DocTree 的 #empty 插槽渲染，这里只给按钮样式 */
 .sidebar__empty-btn {
   display: flex;
   align-items: center;
