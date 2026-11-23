@@ -62,6 +62,10 @@ export function mermaidThemeVariables(color: MermaidColorGetter): Record<string,
     'actorTextColor',
     'noteTextColor',
     'labelTextColor',
+    // 子图（cluster）标题文字色：必须跟正文同源。曾经误绑到 --dv-mermaid-cluster-bg，
+    // 导致标题与子图背景同色而隐形（mermaid 模板里 .cluster-label 的 fill/color
+    // 都吃 titleColor，且显式传值会覆盖它 textColor 的内置兜底）。
+    'titleColor',
   ])
   bind('--dv-mermaid-text-2', ['labelBoxBorderColor', 'signalTextColor'])
   bind('--dv-mermaid-line', [
@@ -72,7 +76,7 @@ export function mermaidThemeVariables(color: MermaidColorGetter): Record<string,
   ])
   bind('--dv-mermaid-accent', ['activationBkgColor', 'sequenceNumberColor'])
   bind('--dv-mermaid-note-bg', ['noteBkgColor', 'labelBoxBkgColor'])
-  bind('--dv-mermaid-cluster-bg', ['clusterBkg', 'titleColor'])
+  bind('--dv-mermaid-cluster-bg', ['clusterBkg'])
 
   // 分类色：mermaid 的 cScale 有 0..11 十二档，用六个分类色轮换铺满
   const text = color('--dv-mermaid-text')
