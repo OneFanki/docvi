@@ -28,6 +28,22 @@
 
 ### English
 
+## [0.9.0] - 2026-11-23
+
+### 中文
+
+- **发现新版本时会弹窗说明「你会得到什么」**：跨了几个版本就按版本分段列出来，每段只放该版摘要；离当前版本近的排在后面，装完就是最新状态。以前只有一个「有新版本」的提示，用户不知道中间改了什么，只能关掉
+- **侧栏空白处也能右键新建**：工作区是空的时候，以前没有任何地方可以右键——现在整个目录区域的空白处都能右键，新建文档、新建目录、粘贴都在里面，不必再去找空状态里那个按钮
+- **mermaid 子图的标题不再隐形**：流程图里 `subgraph` 的外框标题此前和背景同色，深色浅色主题下都看不见，只能给每个子图手写 `style` 救场；现在标题跟随正文文字色
+- **升级到 Electron 45**：运行时内核更新，并修好了从源码安装时的二进制安装问题——Electron 42 起不再自带安装脚本，`pnpm install` 之后运行会直接报 `Electron uninstall`，现在安装时会自动补齐
+
+### English
+
+- **A dialog now says what you are getting when an update is found**: releases between your version and the latest are listed section by section, each with its own summary, ordered oldest to newest — so the last thing you read is closest to what you will actually run. Previously the app only said "an update is available", which gave no reason to accept it
+- **Right-click anywhere in the sidebar to create files**: an empty workspace had no right-click target at all. The whole directory area is now a right-click surface with new document, new folder, and paste, so the small button in the empty state is no longer the only way in
+- **Mermaid subgraph titles are visible again**: a `subgraph` frame's title was painted in the same colour as its own background and disappeared in both light and dark themes, forcing hand-written `style` lines on every subgraph. Titles now follow body text colour
+- **Electron 45**: the runtime is upgraded, and installing from source no longer breaks — Electron 42 removed the package's install script, so a fresh `pnpm install` was followed by `Electron uninstall` on startup. The binary is now fetched during install
+
 ## [0.8.1] - 2026-11-18
 
 ### 中文

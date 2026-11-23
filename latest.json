@@ -1,6 +1,6 @@
 {
-  "version": "0.8.1",
+  "version": "0.9.0",
   "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
-  "notes": "点右侧目录跳转不再把整个界面滚走：文档里只要有一张 mermaid 图语法写错，报错残影就会把页面撑高，此时点目录会把标题栏和标签栏一起滚出视口。残影现在会被清掉，跳转也只滚阅读区自己。",
+  "notes": "发现新版本时会弹窗说明「你会得到什么」：跨了几个版本就按版本分段列出，每段只放该版摘要，装完就是最新状态。以前只有一个「有新版本」的提示，不知道中间改了什么。",
   "homepage": "https://github.com/OneFanki/docvi"
 }
