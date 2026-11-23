@@ -40,6 +40,11 @@ COPY packages/server/package.json ./packages/server/
 COPY packages/shared/package.json ./packages/shared/
 COPY plugins/audio/package.json ./plugins/audio/
 COPY plugins/base/package.json ./plugins/base/
+# ⚠️ 根 postinstall（scripts/install-electron.mjs）在这里就执行，所以脚本本体
+# 必须先于 pnpm install 拷进来；只拷各包清单时它会因 MODULE_NOT_FOUND 让整个
+# 容器构建失败（2026-11-23 实测）。脚本本身见到 ELECTRON_SKIP_BINARY_DOWNLOAD
+# 会直接退出，容器不需要 Electron 运行时。
+COPY scripts/install-electron.mjs ./scripts/install-electron.mjs
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN corepack enable \
     && corepack prepare "pnpm@${PNPM_VERSION}" --activate \

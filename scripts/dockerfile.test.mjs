@@ -68,3 +68,34 @@ test('Dockerfile 拷了 workspace 声明与锁文件', () => {
 test('容器构建跳过了 Electron 二进制下载', () => {
   assert.match(dockerfile, /ELECTRON_SKIP_BINARY_DOWNLOAD=1/, '容器不需要 Electron 运行时')
 })
+
+/*
+ * 根 postinstall 在 `pnpm install` 时就执行，那时镜像里还只有各包的清单文件。
+ * 它引用的脚本若没提前 COPY，容器构建会以 MODULE_NOT_FOUND 失败——而本地
+ * `pnpm install` 永远是绿的（工作树里脚本一直在），只有 CI 的镜像构建能暴露。
+ * 这条断言把顺序钉住：脚本必须出现在 install 之前。
+ */
+test('postinstall 引用的脚本在 pnpm install 之前就已拷入镜像', () => {
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  const hook = pkg.scripts?.postinstall
+  if (!hook) return
+
+  const scriptPath = hook.match(/(?:node\s+)?([\w./-]+\.mjs)/)?.[1]
+  assert.ok(scriptPath, `postinstall 里找不到脚本路径：${hook}`)
+
+  const copyLine = dockerfile
+    .split('\n')
+    .findIndex(line => line.startsWith('COPY ') && line.includes(scriptPath))
+  // 只认真正的 RUN 指令：注释里也会出现「pnpm install」字样，匹配到注释会让
+  // 顺序判断失去意义（2026-11-23 实测，断言因此误报）。
+  const installLine = dockerfile
+    .split('\n')
+    .findIndex(line => /^\s*(RUN|&&)\s*.*pnpm install/.test(line))
+
+  assert.ok(copyLine >= 0, `Dockerfile 没有 COPY ${scriptPath}（postinstall 会找不到模块）`)
+  assert.ok(installLine >= 0, 'Dockerfile 里找不到 pnpm install')
+  assert.ok(
+    copyLine < installLine,
+    `${scriptPath} 必须在 pnpm install 之前 COPY，否则 postinstall 跑起来时它还不存在`,
+  )
+})
