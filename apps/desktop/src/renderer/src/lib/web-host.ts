@@ -375,6 +375,15 @@ export function createWebHost(options: WebHostOptions = {}): DocviApi {
     onUpdateProgress(): () => void {
       return () => undefined
     },
+    /**
+     * 容器版没有后台检查（也没有可执行的安装动作）：订阅是空操作。
+     *
+     * 保留实现而不是让调用点判断 `hostKind`：渲染层不该为「这个宿主有没有
+     * 某项能力」到处写分支，契约里给了方法就一律能给一个安全的空实现。
+     */
+    onUpdateAvailable(): () => void {
+      return () => undefined
+    },
 
     /**
      * 容器版外链：新标签打开，并立刻切断 opener。

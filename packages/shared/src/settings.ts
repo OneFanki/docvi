@@ -129,6 +129,26 @@ export interface AppSettings {
    * 开启后也只会在真的卡顿时才写盘（见 `lib/perf.ts`），不会持续产生磁盘活动。
    */
   perfTracing: boolean
+  /**
+   * 启动后自动检查更新（默认开）。
+   *
+   * 默认开：更新是**安全问题**的兜底——修好的漏洞能不能送到用户手上，取决于是
+   * 他自己想起来点「检查更新」，还是应用主动说一声。后台检查只在启动 8 秒后
+   * 跑一次、之后每 6 小时一次，单次是一次 HTTP GET（清单）+ 一次 API 查询
+   * （资产），对本地优先的应用是可接受的代价。
+   *
+   * 但必须可关：需要完全离线 / 计量网络 / 不想有任何外联的用户，有权让应用
+   * 闭嘴。关掉之后手动「检查更新」仍然可用。
+   */
+  autoCheckUpdates: boolean
+  /**
+   * 用户点过「以后再说」的那个版本号。
+   *
+   * 存版本号而不是布尔：说了「以后」之后，下次检查应当**继续沉默**，
+   * 但一旦有更新的版本出现就要重新提示——否则用户点了「以后」就等于永久
+   * 放弃了所有后续更新，那是「忽略这一次」被误解成「永不更新」。
+   */
+  dismissedUpdateVersion: string
 }
 
 export const TAB_WIDTH_MIN = 120
@@ -169,6 +189,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultWorkspaceSeeded: false,
   // 性能埋点默认关：见 AppSettings.perfTracing 的说明
   perfTracing: false,
+  // 自动检查更新默认开：见 AppSettings.autoCheckUpdates 的说明
+  autoCheckUpdates: true,
+  dismissedUpdateVersion: '',
 }
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -260,5 +283,12 @@ export function normalizeSettings(raw: unknown): AppSettings {
     defaultWorkspaceSeeded: record.defaultWorkspaceSeeded === true,
     // 缺省视为关：老用户的设置里没有这一位，升级后不该突然开始采集
     perfTracing: record.perfTracing === true,
+    // 缺省视为开：老用户升级后应当开始收到更新提示（这是修复能送达的前提）
+    autoCheckUpdates: bool(record.autoCheckUpdates, DEFAULT_SETTINGS.autoCheckUpdates),
+    dismissedUpdateVersion:
+      typeof record.dismissedUpdateVersion === 'string'
+        ? // 版本号很短，32 足够；截断而不是丢弃，避免脏数据把「忽略」状态整个清掉
+          record.dismissedUpdateVersion.slice(0, 32)
+        : '',
   }
 }

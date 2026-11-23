@@ -23,6 +23,14 @@ export const IPC = {
   appUpdateInstall: 'docvi:app:update-install',
   /** 主进程 → 渲染进程：下载 / 校验 / 安装进度 */
   appUpdateProgress: 'docvi:app:update-progress',
+  /**
+   * 主进程 → 渲染进程：后台检查发现了新版本，弹窗据此打开。
+   *
+   * 与 `appUpdateCheck` 分开：那条是渲染层主动问（用户在「关于」里点按钮），
+   * 这条是主进程主动说（启动后 8 秒 / 之后每 6 小时）。合成一条会让「手动检查
+   * 失败」也触发弹窗，而用户刚点过按钮、错误已经在原地说过了，再弹一次是骚扰。
+   */
+  appUpdateAvailable: 'docvi:app:update-available',
   /** 关于面板需要的运行时与构建信息 */
   appRuntimeInfo: 'docvi:app:runtime-info',
   /** 主进程 → 渲染进程：命令行 / 二次启动 / 文件关联带来的待打开文件 */
@@ -277,6 +285,21 @@ export interface UpdateAsset {
 }
 
 /**
+ * 一段版本的更新说明（用于「跨了多个版本」时的分段展示）。
+ *
+ * 用户可能跳着升级好几版，只讲最新一版等于告诉他「除此之外什么都没变」。
+ * 所以弹窗按版本逐段列出，从旧到新读下来就是「你错过的东西」。
+ */
+export interface UpdateReleaseSection {
+  version: string
+  /** 该版本的原始 Release 正文（含中英双段，渲染层按界面语言抽一段） */
+  notes: string
+  /** 该版本在 GitHub 上的页面（「查看完整说明」用） */
+  url?: string
+  publishedAt?: string
+}
+
+/**
  * 检查更新结果。
  *
  * three 态：latest（最新）/ outdated（有新版）/ unavailable（源不可达或未配置）。
@@ -289,6 +312,20 @@ export interface UpdateCheckResult {
   /** 新版下载页（浏览器打开；应用内下载不可用时的回退） */
   downloadUrl?: string
   notes?: string
+  /**
+   * 从当前版本之后到最新版之间的每一版说明，**按版本从旧到新**排列。
+   *
+   * 只在跨了版本时出现（只差一版时它也可能只有一项，渲染层无需区分）。
+   * 缺省表示拿不到区间（例如只取到单条 Release），此时退回 `notes`。
+   */
+  releases?: UpdateReleaseSection[]
+  /**
+   * 区间里被上限截掉的旧版本数。
+   *
+   * 跨了十几个版本时不铺满整屏，只保留离最新最近的若干版；被折掉的条数
+   * 交给界面说明（「另有 N 个更早版本未展开」），而不是静默丢掉。
+   */
+  omittedReleases?: number
   /** 检查失败 / 未配置时的可读原因 */
   message?: string
   checkedAt: number
@@ -732,6 +769,13 @@ export interface DocviApi {
   appUpdateInstall(): Promise<Result<null>>
   /** 订阅下载 / 校验 / 安装进度；返回取消订阅函数 */
   onUpdateProgress(callback: (progress: UpdateProgress) => void): () => void
+  /**
+   * 订阅「后台检查发现新版本」；返回取消订阅函数。
+   *
+   * 只在主进程的自动检查命中时触发，且已经滤掉了用户点过「以后再说」的版本。
+   * 渲染层收到即弹窗——不需要也不应该再调一次 `appUpdateCheck`。
+   */
+  onUpdateAvailable(callback: (result: UpdateCheckResult) => void): () => void
   /** 取走启动排队的待打开文件（调用即视为渲染进程已就绪） */
   appPendingPaths(): Promise<Result<string[]>>
 

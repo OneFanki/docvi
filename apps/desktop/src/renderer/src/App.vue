@@ -26,6 +26,7 @@ import type {
   PortalWorkspace,
   TreeNode,
   TreeSortMode,
+  UpdateCheckResult,
   WorkspaceEntry,
   WorkspaceFilesChange,
 } from '@docvi/shared'
@@ -105,6 +106,7 @@ import ShortcutsPanel from './components/ShortcutsPanel.vue'
  */
 const EditorView = defineAsyncComponent(() => import('./components/EditorView.vue'))
 import ConfirmDialog, { type ConfirmAction } from './components/ConfirmDialog.vue'
+import UpdateDialog from './components/UpdateDialog.vue'
 import PromptDialog from './components/PromptDialog.vue'
 import ContentRootDialog from './components/ContentRootDialog.vue'
 import CloneRepoDialog from './components/CloneRepoDialog.vue'
@@ -3477,6 +3479,31 @@ onBeforeUnmount(() => {
   window.removeEventListener('keyup', onKeyup)
   window.removeEventListener('blur', onWindowBlur)
 })
+
+/*
+ * 更新提示弹窗。
+ *
+ * 只在**后台检查**命中时出现：用户没问，所以值得打断一次。手动检查（关于页）
+ * 不会走到这里——那条路的错误与结果都就地显示在设置页，刚点过按钮的人不需要
+ * 再被弹一次。
+ *
+ * 点「以后再说」记住的是**版本号**：用户拒绝的是这一版，不是所有未来的更新。
+ */
+const updatePrompt = ref<UpdateCheckResult | null>(null)
+let disposeUpdateAvailable: (() => void) | null = null
+
+function dismissUpdate(version: string): void {
+  if (version) void window.docvi.settingsWrite({ dismissedUpdateVersion: version })
+  updatePrompt.value = null
+}
+
+onMounted(() => {
+  disposeUpdateAvailable = window.docvi.onUpdateAvailable(result => {
+    // 后台检查已经滤过「已忽略的版本」，这里只做形状兜底
+    if (result?.latest) updatePrompt.value = result
+  })
+})
+onBeforeUnmount(() => disposeUpdateAvailable?.())
 </script>
 
 <template>
@@ -3813,6 +3840,13 @@ onBeforeUnmount(() => {
       :actions="confirmState.actions"
       @close="resolveConfirm('cancel')"
       @choose="resolveConfirm"
+    />
+
+    <UpdateDialog
+      v-if="updatePrompt"
+      :result="updatePrompt"
+      @dismissed="dismissUpdate"
+      @close="updatePrompt = null"
     />
 
     <PromptDialog

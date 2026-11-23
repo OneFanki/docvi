@@ -182,7 +182,86 @@ async function main() {
     throw new Error(`文件大小不符：${bytes.length} ≠ ${KNOWN.size}`)
   }
 
-  log('通过：真实资产下载完整、SHA-256 与 GitHub 发布记录一致、进度事件正常')
+  /*
+   * ⚠️ 上面那段用 `JSON.stringify(KNOWN)` 传过去是**字面量**对象，不经过
+   * Vue 的响应式包装。所以 0.8.0 时代这个探针一直绿着，而真实界面点「下载」
+   * 却报 `An object could not be cloned.`：`about.update.asset` 是 ref 里的
+   * Proxy，跨 contextBridge 的第一次克隆就失败。
+   *
+   * 这里改用**真实的界面路径**：打开关于页、点检查更新、点下载按钮，全程
+   * 只走真实事件。Proxy 由 Vue 自己产生，不是探针伪造的。
+   */
+  log('--- 真实界面路径：Vue 响应式对象能否跨过 contextBridge ---')
+  await client.evaluate(`(() => {
+    // 关掉设置页，回到主界面再从标题栏重新打开，确保 state 全新
+    const back = [...document.querySelectorAll('button')]
+      .find(b => (b.getAttribute('aria-label') || '').includes('关闭'))
+    back?.click()
+  })()`)
+  await sleep(600)
+  await client.evaluate(`(() => {
+    const btn = [...document.querySelectorAll('button')]
+      .find(b => (b.getAttribute('aria-label') || '').includes('设置'))
+    btn?.click()
+  })()`)
+  await sleep(800)
+  await client.evaluate(`(() => {
+    const nav = [...document.querySelectorAll('button')]
+      .find(b => (b.textContent || '').trim() === '关于')
+    nav?.click()
+  })()`)
+  await sleep(800)
+  await client.evaluate(`(() => {
+    const btn = [...document.querySelectorAll('button')]
+      .find(b => (b.textContent || '').trim() === '检查更新')
+    btn?.click()
+  })()`)
+
+  // 等检查结果（网络往返）
+  let ready = null
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await sleep(500)
+    ready = await client.evaluate(`(() => {
+      const btn = [...document.querySelectorAll('button')]
+        .find(b => /^下载 \\d/.test((b.textContent || '').trim()))
+      return btn ? { label: btn.textContent.trim() } : null
+    })()`)
+    if (ready) break
+  }
+  log(`关于页检查结果: ${JSON.stringify(ready)}`)
+
+  if (ready) {
+    const uiResult = await client.evaluate(`(async () => {
+      const btn = [...document.querySelectorAll('button')]
+        .find(b => /^下载 \\d/.test((b.textContent || '').trim()))
+      btn.click()
+      // 给 contextBridge 克隆 + IPC 往返 + 主进程发起请求留时间
+      await new Promise(r => setTimeout(r, 3000))
+      const err = document.querySelector('.hint--error')
+      const cancel = [...document.querySelectorAll('button')]
+        .find(b => (b.textContent || '').trim() === '取消下载')
+      return {
+        errorText: err ? err.textContent.trim() : null,
+        downloading: Boolean(cancel),
+      }
+    })()`)
+    log(`真实界面点下载: ${JSON.stringify(uiResult)}`)
+    if (String(uiResult.errorText || '').includes('could not be cloned')) {
+      throw new Error(
+        '真实界面点「下载」仍然报 An object could not be cloned.——' +
+          '渲染层没有把响应式对象剥成纯对象。这正是用户截图里的错。',
+      )
+    }
+    log('通过：真实界面的下载请求能跨过 contextBridge（响应式对象已剥离）')
+    await client.evaluate(`(() => {
+      const cancel = [...document.querySelectorAll('button')]
+        .find(b => (b.textContent || '').trim() === '取消下载')
+      cancel?.click()
+    })()`)
+    await sleep(1200)
+  } else {
+    log('跳过真实界面路径：没取到可下载的新版本（可能已是最新或网络不可达）')
+  }
 
   /*
    * ③ 取消：再下一次，收到字节后中断。

@@ -20,6 +20,7 @@ import {
   buildWindowsInstallScript,
   pickAsset,
   safeUpdateFileName,
+  selectUpdateRange,
   trustedAssetUrl,
 } from './update-plan.ts'
 
@@ -54,6 +55,18 @@ export const REPOSITORY_URL = 'https://github.com/OneFanki/docvi'
 const UPDATE_MANIFEST_URL =
   process.env.DOCVI_UPDATE_MANIFEST_URL?.trim() ||
   'https://raw.githubusercontent.com/OneFanki/docvi/main/latest.json'
+
+/**
+ * Release 列表地址，同样可被环境变量覆盖。
+ *
+ * 覆盖点不是为了内测换源（资产域名白名单只认 GitHub，换源也下不了包），
+ * 而是为了让**探针能验证跨版本摘取的整条链路**：拿真实的 Release 列表
+ * 需要线上真的存在「当前版本之后还有若干版本」，而发版节奏不允许每次
+ * 验证都先连发几版。探针用本地假列表驱动同一段代码。
+ */
+const RELEASES_API_URL =
+  process.env.DOCVI_RELEASES_API_URL?.trim() ||
+  'https://api.github.com/repos/OneFanki/docvi/releases?per_page=100'
 
 /** 检查超时：离线环境下不该让「关于」面板挂在那儿转圈 */
 const CHECK_TIMEOUT_MS = 6000
@@ -120,32 +133,90 @@ function parseAsset(raw: ApiAsset): UpdateAsset | null {
 }
 
 /**
- * 从 GitHub API 取本版本的资产清单。
+ * GitHub Release API 返回的 Release 形状（只取需要的字段）。
  *
- * 为什么不用清单文件带资产列表：那样每次发版都要人工同步一份带 sha256 的清单，
- * 漏一次就变成「有新版但下不了」。Release API 的 digest 是 GitHub 按上传内容
- * 自己算的，天然与资产一致。
+ * 用 `/releases` 列表而不是 `/releases/tags/v<版本>`：一次请求同时解决
+ * 「最新版的资产在哪」与「当前版本到最新版之间还差几版」两个问题。分别查
+ * 会是 1 + N 次请求，跨版本升级时很容易撞上未鉴权 API 的 60 次/小时限额。
  */
-async function fetchReleaseAssets(version: string): Promise<UpdateAsset[]> {
-  if (!/^[0-9A-Za-z.+_-]+$/.test(version)) return []
-  const url = `https://api.github.com/repos/OneFanki/docvi/releases/tags/v${version}`
+interface ApiRelease {
+  tag_name?: unknown
+  name?: unknown
+  body?: unknown
+  html_url?: unknown
+  published_at?: unknown
+  prerelease?: unknown
+  draft?: unknown
+  assets?: unknown
+}
+
+interface ParsedRelease {
+  version: string
+  notes: string
+  url?: string
+  publishedAt?: string
+  prerelease: boolean
+  draft: boolean
+  assets: UpdateAsset[]
+}
+
+/** tag 名 → 版本号：`v0.8.0` / `0.8.0` 都接受，其它形状丢弃 */
+function releaseVersion(tag: unknown): string | null {
+  const value = field(tag)
+  if (!value) return null
+  const stripped = value.replace(/^v/i, '')
+  return /^[0-9A-Za-z.+_-]+$/.test(stripped) ? stripped : null
+}
+
+function parseRelease(raw: ApiRelease): ParsedRelease | null {
+  const version = releaseVersion(raw.tag_name)
+  if (!version) return null
+  const body = field(raw.body) ?? ''
+  const url = trustedHttpsUrl(field(raw.html_url))
+  const publishedAt = field(raw.published_at)
+  const assets = Array.isArray(raw.assets)
+    ? raw.assets
+        .filter((item): item is ApiAsset => Boolean(item) && typeof item === 'object')
+        .map(parseAsset)
+        .filter((item): item is UpdateAsset => item !== null)
+    : []
+  return {
+    version,
+    notes: body,
+    prerelease: raw.prerelease === true,
+    draft: raw.draft === true,
+    assets,
+    ...(url ? { url } : {}),
+    ...(publishedAt ? { publishedAt } : {}),
+  }
+}
+
+/**
+ * 拉取最近若干个 Release（含正文与资产）。
+ *
+ * 为什么是「最近 100 个」而不是按区间精确定位：用户可能几个月没开应用，
+ * 跨几十版很正常；一次取满一页就能覆盖，且只花一次 API 配额。
+ * 取不到时返回空数组——调用方据此退回「只有清单里那一版 notes」的老路径，
+ * 不会因此判定「没有新版本」。
+ */
+async function fetchReleases(): Promise<ParsedRelease[]> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS)
   try {
-    const res = await net.fetch(url, {
+    const res = await net.fetch(RELEASES_API_URL, {
       signal: controller.signal,
       headers: { accept: 'application/vnd.github+json' },
       redirect: 'follow',
     })
     if (!res.ok) return []
-    const body = (await res.json()) as { assets?: unknown }
-    if (!Array.isArray(body.assets)) return []
-    return body.assets
-      .filter((item): item is ApiAsset => Boolean(item) && typeof item === 'object')
-      .map(parseAsset)
-      .filter((item): item is UpdateAsset => item !== null)
+    const body = (await res.json()) as unknown
+    if (!Array.isArray(body)) return []
+    return body
+      .filter((item): item is ApiRelease => Boolean(item) && typeof item === 'object')
+      .map(parseRelease)
+      .filter((item): item is ParsedRelease => item !== null)
   } catch {
-    // 资产解析是「锦上添花」：失败就只给下载页，不影响「有新版本」这个结论
+    // 区间说明是增值信息：拿不到就只给最新一版，不影响「有新版本」这个结论
     return []
   } finally {
     clearTimeout(timer)
@@ -201,8 +272,19 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
     if (compareVersions(latest, current) <= 0) {
       return { status: 'latest', current, latest, checkedAt }
     }
-    const assets = await fetchReleaseAssets(latest)
+    /*
+     * 一次抓列表，同时拿到两样东西：
+     *  - 最新版的资产（下载入口要靠它）；
+     *  - 当前版本之后每一版的说明（跨版本升级时弹窗要逐版列出）。
+     *
+     * 清单（latest.json）只提供版本号、下载页与一句短说明，不带资产也不带历史；
+     * 历史只能从 Release API 来。
+     */
+    const releases = await fetchReleases()
+    const latestRelease = releases.find(item => item.version === latest)
+    const assets = latestRelease?.assets ?? []
     const asset = pickAsset(assets, process.platform, process.arch)
+    const range = selectUpdateRange(current, releases, compareVersions)
     /*
      * 清单说新版本、但抓不到本平台资产时，必须把原因说出来。
      *
@@ -213,7 +295,7 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
      * 去猜为什么。
      */
     const assetMissingReason =
-      assets.length === 0
+      releases.length === 0
         ? '已发布新版本，但取不到发布资产（Release 可能还在构建，或 API 暂时不可达）'
         : `该版本没有适用于 ${process.platform}-${process.arch} 的安装包`
     return {
@@ -225,6 +307,17 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
         ? { downloadUrl: trustedHttpsUrl(field(manifest.downloadUrl)) as string }
         : {}),
       ...(field(manifest.notes) ? { notes: field(manifest.notes) as string } : {}),
+      ...(range.sections.length > 0
+        ? {
+            releases: range.sections.map(item => ({
+              version: item.version,
+              notes: item.notes,
+              ...(item.url ? { url: item.url } : {}),
+              ...(item.publishedAt ? { publishedAt: item.publishedAt } : {}),
+            })),
+          }
+        : {}),
+      ...(range.omitted > 0 ? { omittedReleases: range.omitted } : {}),
       ...(asset ? { asset } : { assetMissingReason }),
     }
   } catch (error) {
@@ -547,4 +640,77 @@ export function pruneUpdateCache(): void {
 export function pendingUpdateName(): string | null {
   const current = pendingUpdate()
   return current ? basename(current.filePath) : null
+}
+
+/* ---------- 后台自动检查 ---------- */
+
+/** 启动后多久做第一次检查：等首屏渲染完，别和窗口创建抢资源 */
+const AUTO_FIRST_CHECK_MS = 8_000
+/** 之后的重复间隔；GitHub 未鉴权 API 限额 60 次/小时，6 小时足够安全 */
+const AUTO_REPEAT_CHECK_MS = 6 * 60 * 60 * 1_000
+
+let autoTimer: ReturnType<typeof setInterval> | null = null
+
+/**
+ * 启动后台检查更新。
+ *
+ * 与「关于」页的手动检查**刻意分开**：这个只在命中新版本时推一条事件让界面
+ * 弹窗，其余情况（离线、源不可达、已是最新）完全静默。后台任务不该在没有
+ * 可执行动作时打断用户。
+ *
+ * 三处过滤，缺一个都会变成骚扰：
+ *  1. `autoCheckUpdates` 关闭 → 整个定时器不起；
+ *  2. 结果不是 `outdated` 或没有本平台资产 → 不弹（弹了也没法装）；
+ *  3. 命中的版本等于用户点过「以后再说」的那个 → 不弹。
+ *
+ * 第 3 条必须比对**版本号**而不是布尔：用户说「以后」是对这一版说的，
+ * 下一版出现时仍要提示。
+ */
+export function startUpdateWatcher(deps: {
+  enabled: () => boolean
+  dismissedVersion: () => string
+  onAvailable: (result: UpdateCheckResult) => void
+  log?: (message: string) => void
+}): void {
+  if (autoTimer) return
+  const log = deps.log ?? (() => {})
+
+  const tick = async (): Promise<void> => {
+    if (!deps.enabled()) return
+    try {
+      const result = await checkForUpdate()
+      /*
+       * 只要有新版本就提示，**不要求**拿到本平台资产。
+       *
+       * 早期写法是 `status !== 'outdated' || !result.asset` 就 return，看起来
+       * 更"严格"，实际会漏掉一整类用户：Release 还在构建（资产没传完）、本平台
+       * 产物缺失、或临时取不到 GitHub API——这些时候用户确实有新版本可用，只是
+       * 得去下载页手动装。不提示等于让他一直停在旧版本。
+       *
+       * 弹窗自己会处理「没有资产」：那种情况下它只给「打开下载页」。
+       */
+      if (result.status !== 'outdated') return
+      if (result.latest && result.latest === deps.dismissedVersion()) {
+        log(`跳过 ${result.latest}：用户已选择以后再说`)
+        return
+      }
+      log(`发现新版本 ${result.latest}${result.asset ? '' : '（无本平台资产，需手动安装）'}`)
+      deps.onAvailable(result)
+    } catch (error) {
+      /*
+       * 自动检查失败必须是哑的：后台任务报错弹给用户，等于为一次网络抖动
+       * 打断他的工作。真正的失败信息在手动检查时才该出现。
+       */
+      log(`自动检查失败（已忽略）：${(error as Error).message}`)
+    }
+  }
+
+  setTimeout(() => void tick(), AUTO_FIRST_CHECK_MS)
+  autoTimer = setInterval(() => void tick(), AUTO_REPEAT_CHECK_MS)
+}
+
+/** 停掉后台检查（退出时用，避免定时器把进程吊住） */
+export function stopUpdateWatcher(): void {
+  if (autoTimer) clearInterval(autoTimer)
+  autoTimer = null
 }

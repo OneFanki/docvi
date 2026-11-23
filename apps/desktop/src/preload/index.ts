@@ -7,6 +7,7 @@ import {
   type GitProgressEvent,
   type MenuAction,
   type ServiceState,
+  type UpdateCheckResult,
   type UpdateProgress,
 } from '@docvi/shared'
 
@@ -16,12 +17,7 @@ import {
  * 只暴露具名方法，不透传 ipcRenderer——渲染进程拿不到任意通道，也无法
  * 伪造 channel 调用主进程未注册的 handler。
  */
-/**
- * 启动设置快照：同步取一次。
- *
- * 为什么允许这一处同步 IPC——主题若等异步返回再应用，首帧会用默认配色渲染
- * 一帧再跳变（实测可见白闪）。只在 preload 加载期发生一次，成本可忽略。
- */
+
 const bootSettings = ipcRenderer.sendSync(IPC.settingsSnapshot) as AppSettings
 
 const api: DocviApi = {
@@ -43,6 +39,18 @@ const api: DocviApi = {
     return () => ipcRenderer.removeListener(IPC.appUpdateProgress, listener)
   },
   appPendingPaths: () => ipcRenderer.invoke(IPC.appPendingPaths),
+  /**
+   * 后台检查发现新版本。
+   *
+   * 与进度通道同一个边界纪律：payload 必须是对象才交给回调，未知形状直接丢弃。
+   */
+  onUpdateAvailable: callback => {
+    const listener = (_event: unknown, payload: unknown): void => {
+      if (payload && typeof payload === 'object') callback(payload as UpdateCheckResult)
+    }
+    ipcRenderer.on(IPC.appUpdateAvailable, listener)
+    return () => ipcRenderer.removeListener(IPC.appUpdateAvailable, listener)
+  },
 
   workspaceList: () => ipcRenderer.invoke(IPC.workspaceList),
   workspaceAdd: () => ipcRenderer.invoke(IPC.workspaceAdd),

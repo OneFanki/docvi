@@ -24,6 +24,7 @@ import { useTabsStore } from '../stores/tabs'
 import { useThemeStore } from '../stores/app'
 import { LOCALES, useI18n } from '../lib/i18n'
 import { setPerfTracing } from '../lib/perf'
+import { toPlain } from '../lib/plain-request'
 import { IS_MAC } from '../lib/shortcuts'
 import ThemePicker from './ThemePicker.vue'
 
@@ -247,8 +248,19 @@ async function downloadUpdate(): Promise<void> {
   updateError.value = null
   updateFlow.value = { ...updateFlow.value, phase: 'downloading', received: 0 }
   try {
+    /*
+     * ⚠️ `update.asset` 是 `about`（ref）里的 Vue 响应式 Proxy，直接塞进 IPC
+     * 会在 **contextBridge 的跨上下文克隆**那一步抛
+     * `An object could not be cloned.`——抛在渲染侧→preload 的边界，preload
+     * 里的任何代码都还没跑，所以那边包一层是没用的（实测过）。
+     * 渲染层只拿到一个 rejected promise，控制台一行不打，界面表现是「点了
+     * 下载没反应」，只剩 updateError 里那句英文原文。
+     *
+     * 剥离必须在这里做。用 JSON 往返而不是 `structuredClone`：后者对 Proxy
+     * 同样抛错，但它抛错不代表参数有问题（普通对象里嵌一个 Proxy 也会抛）。
+     */
     const result = await window.docvi.appUpdateDownload({
-      asset: update.asset,
+      asset: toPlain(update.asset),
       version: update.latest,
     })
     if (result.ok) {
@@ -353,6 +365,7 @@ onMounted(() => {
   void loadAbout()
   // 埋点开关只在桌面宿主有意义（容器版没有本地写盘）
   if (!props.readonly) void loadPerfTracing()
+  if (!props.readonly) void loadAutoCheck()
   // 容器版没有服务进程也没有桌面外壳：这两个面板的数据源都不存在
   if (props.readonly) return
   void store.load()
@@ -535,6 +548,29 @@ async function togglePerfTracing(): Promise<void> {
    * 用户点了开关看起来是开的，实际什么都没采。这个 bug 端到端探针抓到过。
    */
   setPerfTracing(next)
+}
+
+/**
+ * 启动时自动检查更新（默认开）。
+ *
+ * 后台检查由主进程的定时器执行，这里的开关只写设置——主进程每轮 tick 都现读
+ * `settings.get()`，所以改完立即生效，不需要重启，也不需要在这里推任何事件。
+ */
+const autoCheckUpdates = ref(true)
+
+async function loadAutoCheck(): Promise<void> {
+  const result = await window.docvi.settingsRead()
+  if (result.ok) autoCheckUpdates.value = result.data.autoCheckUpdates !== false
+}
+
+async function toggleAutoCheck(): Promise<void> {
+  const next = !autoCheckUpdates.value
+  autoCheckUpdates.value = next
+  const result = await window.docvi.settingsWrite({ autoCheckUpdates: next })
+  if (!result.ok) {
+    autoCheckUpdates.value = !next
+    store.error = result.error.message
+  }
 }
 </script>
 
@@ -1159,6 +1195,20 @@ async function togglePerfTracing(): Promise<void> {
               :aria-pressed="perfTracing"
               :aria-label="t('about.perfTracing')"
               @click="togglePerfTracing"
+            >
+              <span class="switch__knob" />
+            </button>
+          </div>
+
+          <div class="row">
+            <span class="row__label">{{ t('about.autoCheckUpdates') }}</span>
+            <button
+              class="switch"
+              type="button"
+              :class="{ 'is-on': autoCheckUpdates }"
+              :aria-pressed="autoCheckUpdates"
+              :aria-label="t('about.autoCheckUpdates')"
+              @click="toggleAutoCheck"
             >
               <span class="switch__knob" />
             </button>

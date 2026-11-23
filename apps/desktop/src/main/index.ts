@@ -9,7 +9,7 @@ import { registerIpc, createStore, createRecent, type DesktopHostOptions } from 
 import type { WorkspaceStore } from './store.ts'
 import { ensureDefaultWorkspace } from './default-workspace.ts'
 import { createLocalAssetRegistry, type LocalAssetRegistry } from './local-assets.ts'
-import { pruneUpdateCache } from './update.ts'
+import { pruneUpdateCache, startUpdateWatcher, stopUpdateWatcher } from './update.ts'
 import { readAutostart, writeAutostart } from './autostart.ts'
 import { createFileWatcher } from './fs-watch.ts'
 import { isContentRelPath } from './content.ts'
@@ -820,10 +820,30 @@ app.whenReady().then(() => {
     service.stop()
     // 埋点攒批窗口里可能还有没落盘的记录：退出前写掉，否则这次卡顿的现场就丢了
     flushPerfSamples()
+    // 定时器会吊住事件循环，退出前必须清掉
+    stopUpdateWatcher()
   })
 
   // 「待打开队列」只在主进程有状态，直接在这里挂 handler，避免 ipc.ts 反向依赖入口
   ipcMain.handle(IPC.appPendingPaths, () => ({ ok: true, data: takePendingPaths() }))
+
+  /*
+   * 后台检查更新。
+   *
+   * 只在命中新版本时推事件让界面弹窗，其余情况全静默——后台任务没有可执行
+   * 动作时不该打断用户。开关与「以后再说」的版本号都从设置里现读：用户改了
+   * 设置不必重启，下一轮 tick 就按新值走。
+   */
+  startUpdateWatcher({
+    enabled: () => settings.get().autoCheckUpdates,
+    dismissedVersion: () => settings.get().dismissedUpdateVersion,
+    onAvailable: result => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send(IPC.appUpdateAvailable, result)
+      }
+    },
+    log: message => console.log(`[update] ${message}`),
+  })
 
   /*
    * Dock 图标点击。

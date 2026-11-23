@@ -140,3 +140,112 @@ export function buildWindowsInstallScript(input: {
     '',
   ].join('\r\n')
 }
+
+/**
+ * 弹窗最多渲染多少个版本的说明。
+ *
+ * 跨了几十版时全铺出来没人读，但也不能只给最新一版（那等于说「除此之外
+ * 什么都没变」）。10 段是「能扫完」与「不漏掉重要变更」的折中，被截掉的
+ * 条数交给界面说明。
+ */
+export const MAX_UPDATE_RELEASES = 10
+
+export interface ReleaseSectionLike {
+  version: string
+  notes: string
+  url?: string
+  publishedAt?: string
+  /** GitHub 把预发布标出来；它们不该出现在「你会装到的东西」里 */
+  prerelease?: boolean
+  draft?: boolean
+}
+
+/**
+ * 取「当前版本之后」到最新版之间的每一版，按版本从旧到新排列。
+ *
+ * 三条规则，每一条都有实际后果：
+ *  1. **严格大于当前版本**。等于当前版本的不能出现——用户已经装着了，
+ *     再列一遍会让人以为自己装的是旧的。
+ *  2. **跳过预发布与草稿**。草稿不该泄露，预发布也不该被提示（用户装的是
+ *     稳定版；把 `1.0.0-beta` 列进「你会得到什么」是错的）。
+ *  3. **超上限时砍最旧的**，不是砍最新的。用户马上要装的是最新那版，
+ *     离它近的说明才是他真正关心的；砍掉的条数如实报出去。
+ *
+ * 排序按版本号数值而不是数组顺序：GitHub 的 `/releases` 通常已按时间倒序，
+ * 但「通常」不是契约，且版本号与发布时间并不总是一一对应（补发旧版本时）。
+ */
+export function selectUpdateRange<T extends ReleaseSectionLike>(
+  current: string,
+  releases: readonly T[],
+  compareVersions: (a: string, b: string) => number,
+  limit: number = MAX_UPDATE_RELEASES,
+): { sections: T[]; omitted: number } {
+  const newer = releases
+    .filter(item => !item.draft && !item.prerelease)
+    .filter(item => compareVersions(item.version, current) > 0)
+    .sort((a, b) => compareVersions(a.version, b.version))
+  const kept = newer.slice(Math.max(0, newer.length - limit))
+  return { sections: kept, omitted: newer.length - kept.length }
+}
+
+/**
+ * 从 Release 正文里抽出某一种语言的摘要段。
+ *
+ * Release 正文来自 `CHANGELOG.md` 的这个结构：
+ *
+ * ```
+ * ### 中文
+ * - 一条摘要
+ * #### 完整变更
+ * - 明细…
+ * ### English
+ * ```
+ *
+ * 弹窗只要「摘要」——明细属于 Release 页面。所以：
+ *  - 找到目标语言的标题（层级从标题本身推断，`##` / `###` 都接受：
+ *    同一个正文在 CHANGELOG 里是 `###`，在 GitHub 页面上会因为多了版本标题
+ *    而显得更深，两种形态都要能吃）；
+ *  - 收集到下一个**同级或更浅**的标题、或「完整变更」标题为止。
+ *
+ * 没有语言标题的正文原样返回：手写的 Release 说明不该被吞掉。
+ */
+export function pickLanguageNotes(notes: string | undefined, locale: 'zh' | 'en'): string {
+  if (!notes) return ''
+  const alias = locale === 'zh' ? /^(中文|chinese|zh)$/i : /^(english|en)$/i
+  const lines = notes.split(/\r?\n/)
+  let level = 0
+  let collecting = false
+  const picked: string[] = []
+  for (const line of lines) {
+    const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(line)
+    if (heading) {
+      const depth = heading[1]?.length ?? 0
+      const title = heading[2] ?? ''
+      if (depth <= 3 && alias.test(title)) {
+        // 第一个语言标题决定这一段的层级基准
+        if (level === 0) level = depth
+        if (depth === level) {
+          collecting = true
+          continue
+        }
+      }
+      if (collecting) {
+        /*
+         * 「完整变更」不管在哪一层都表示摘要结束。
+         *
+         * 不能只靠层级判：docvi 的 CHANGELOG 里语言标题是 `### 中文`、
+         * 明细标题是 `#### 完整变更`——明细比语言段**更深**，只按「同级或更浅」
+         * 截断会把它连同下面的明细一起收进摘要，弹窗里就冒出几十条明细。
+         * （这个缺陷是先写单测才发现的，靠人眼看长文档很难注意到。）
+         */
+        if (/完整变更|full changelog|full changes/i.test(title)) break
+        // 同级/更浅：进入下一个语言段或下一个版本，摘要到此为止
+        if (depth <= level) break
+      }
+      continue
+    }
+    if (collecting) picked.push(line)
+  }
+  const body = picked.join('\n').trim()
+  return body.length > 0 ? body : notes.trim()
+}
