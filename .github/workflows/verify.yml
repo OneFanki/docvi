@@ -28,6 +28,10 @@ jobs:
           cache: pnpm
 
       - name: 安装依赖
+        # 门禁不需要 Electron 运行时（构建与单测都不碰它），跳过 250MB 下载。
+        # 与 release.yml 的 build 步骤同一口径：只有真出安装包才需要二进制。
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
         run: pnpm install --frozen-lockfile
 
       # verify 是非 fail-fast 的：一次跑完 15 项再统一报，失败时日志里能直接看到全部欠账
