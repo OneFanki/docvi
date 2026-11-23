@@ -16,6 +16,10 @@ pnpm docvi:dev     # Electron + Vite 热更新
 pnpm verify        # 提交前必须全绿
 ```
 
+`pnpm install` 的 `postinstall` 会补齐 Electron 二进制。Electron 42 起不再自带安装脚本，
+而 `electron-vite` 不会自己下载（只会报 `Electron uninstall`），所以这一步是必需的。
+网络需要代理时先设好 `HTTPS_PROXY`，钩子会自动接上。
+
 ## 提交前
 
 `pnpm verify` 是一个非 fail-fast 的全量门禁，一次跑完 15 项并统一报告。它包含格式、lint、

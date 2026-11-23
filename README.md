@@ -230,21 +230,21 @@ pnpm screenshots      # 重新生成 README 截图（需先 docvi:build）
 pnpm docvi:build:web  # 容器版前端产物 → apps/desktop/dist-web
 ```
 
-首次安装 Electron 需要访问外网。如果你的网络需要代理，先按代理客户端显示的端口设置：
+`pnpm install` 会自动补齐 Electron 二进制（根 `package.json` 的 `postinstall` 钩子）。
+这一步不能省：Electron 42 起移除了包内 `postinstall`，而 `electron-vite` 只读现成的
+`path.txt`、读不到就直接报 `Electron uninstall`，不会自己下载。
 
-```bash
-export HTTPS_PROXY=http://127.0.0.1:<port>
-export HTTP_PROXY=http://127.0.0.1:<port>
-pnpm install
-```
+配了代理时，钩子会自动补 `ELECTRON_GET_USE_PROXY=true`——`@electron/get` 走 Node 原生
+fetch，不设这个变量时它**不认** `HTTP(S)_PROXY`，只会抛一句看不出原因的 `fetch failed`。
 
-端口由你使用的代理软件决定，以它界面上显示的本地监听端口为准。
-
-如果 `node_modules/electron/dist` 不存在，单独重试下载脚本：
+如果仍然失败，单独重试下载脚本（同样需要代理变量）：
 
 ```bash
 node node_modules/electron/install.js
 ```
+
+容器与 CI 不需要这套：设 `ELECTRON_SKIP_BINARY_DOWNLOAD=1` 时钩子直接跳过，
+不下载用不上的 158MB。
 
 `screenshots` 用的是无头模式（`DOCVI_HEADLESS=1`）：窗口停到屏幕之外、不建托盘、
 每张图一个独立的临时数据目录，跑完即删。所以它可以在你正在用电脑的时候跑，

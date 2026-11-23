@@ -14,6 +14,7 @@
   },
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/install-electron.mjs",
     "build:plugins": "node scripts/build-plugins.mjs",
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "docs:check": "node scripts/check-docs.mjs",

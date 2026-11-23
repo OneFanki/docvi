@@ -27,8 +27,9 @@ ARG PNPM_VERSION=12.10.1
 # 会缺该包的依赖。
 #
 # ELECTRON_SKIP_BINARY_DOWNLOAD：apps/desktop 的 devDependencies 声明了 electron
-# （桌面宿主），容器只需要其中的 vite / vue 来构建 web 产物。不跳过的话 postinstall
-# 会去下载 100MB+ 的 Electron 运行时，容器里永远用不上，还容易在受限网络下超时。
+# （桌面宿主），容器只需要其中的 vite / vue 来构建 web 产物。根 postinstall 钩子
+# （scripts/install-electron.mjs）见到这个变量会直接跳过，不下载 250MB 的 Electron
+# 运行时——容器里永远用不上，还会在受限网络下超时。
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/desktop/package.json ./apps/desktop/
 COPY packages/editor/package.json ./packages/editor/
