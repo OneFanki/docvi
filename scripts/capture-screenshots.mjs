@@ -358,9 +358,10 @@ async function capture(shot) {
       if (current !== ${JSON.stringify(DEMO_WORKSPACE)}) {
         btn.click()
         await new Promise(r => setTimeout(r, 500))
-        const items = [...document.querySelectorAll('.menu__item, [role="menuitem"]')]
-        const hit = items.find(el => (el.textContent || '').trim() === ${JSON.stringify(DEMO_WORKSPACE)})
-        if (!hit) return { error: '切换器菜单里没有演示工作区', current, items: items.map(el => (el.textContent || '').trim()) }
+        // 弹窗里的工作区行：按 .wsrow__name 匹配（整行还含 root 路径）
+        const rows = [...document.querySelectorAll('.wsrow')]
+        const hit = rows.find(el => (el.querySelector('.wsrow__name')?.textContent ?? '').trim() === ${JSON.stringify(DEMO_WORKSPACE)})
+        if (!hit) return { error: '工作区弹窗里没有演示工作区', current, rows: rows.map(el => (el.querySelector('.wsrow__name')?.textContent ?? '').trim()) }
         hit.click()
       }
       return { ok: true, current }

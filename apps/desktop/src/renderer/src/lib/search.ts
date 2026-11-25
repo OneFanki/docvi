@@ -29,6 +29,13 @@ export interface SearchState {
   error: string | null
   /** 超过全文预算、只索引了文件名与路径的工作区 id */
   filenameOnly: string[]
+  /**
+   * 当前检索范围：`null` = 全部工作区，否则只搜这一个。
+   *
+   * 记在 state 里而不是只存在面板的局部变量：查询结果与范围必须一起变，
+   * 否则「切了范围但结果还是上一次的」会持续到用户再敲一个字。
+   */
+  scope: string | null
 }
 
 interface CorpusDoc {
@@ -48,6 +55,7 @@ export function useSearchIndex() {
     hits: [],
     error: null,
     filenameOnly: [],
+    scope: null,
   })
 
   let worker: Worker | null = null
@@ -216,15 +224,34 @@ export function useSearchIndex() {
     setTimeout(run, 300)
   }
 
-  function search(text: string): void {
+  /**
+   * 查询。
+   *
+   * `scope` 是工作区 id（只搜它）或 null（全部）。范围作为参数而不是模块状态：
+   * 一次查询用哪个范围必须由调用方当次决定——存成全局状态后，切换范围的那一刻
+   * 与「结果回来」的那一刻可能落在不同的范围上，那就是一份对不上号的命中列表。
+   */
+  function search(text: string, scope: string | null = state.scope): void {
     state.query = text
+    state.scope = scope
     if (!text.trim()) {
       state.hits = []
       return
     }
     seq += 1
     awaited = seq
-    ensureWorker().postMessage({ type: 'query', id: seq, text })
+    ensureWorker().postMessage({
+      type: 'query',
+      id: seq,
+      text,
+      ...(scope ? { scope: { workspaceId: scope } } : {}),
+    })
+  }
+
+  /** 切换检索范围：立刻用新范围重跑当前查询（不重跑会让结果停在旧范围上） */
+  function setScope(scope: string | null): void {
+    if (state.scope === scope) return
+    search(state.query, scope)
   }
 
   function clear(): void {
@@ -238,6 +265,7 @@ export function useSearchIndex() {
     state.totalWorkspaces = 0
     state.hits = []
     state.filenameOnly = []
+    state.scope = null
     worker?.postMessage({ type: 'clear' })
   }
 
@@ -323,6 +351,7 @@ export function useSearchIndex() {
     index,
     indexRest,
     search,
+    setScope,
     clear,
     invalidate,
     invalidateSoon,

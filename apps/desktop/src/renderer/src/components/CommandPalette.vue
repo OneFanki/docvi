@@ -17,14 +17,19 @@ import { useI18n } from '../lib/i18n'
  * **为什么合并而不是分两个面板**：用户按 Ctrl+K 时脑子里只有一个念头——
  * 「我要去某处」。让他先选「找文件还是执行命令」是多余的一步。
  *
- * **搜索范围怎么区分**：不做「当前/全部」切换，靠结果分组 + 工作区徽标。
- * 命中先按「当前标签的工作区」分组，其余工作区归到「其他工作区」；打开行为
- * 也跟着范围走——当前工作区在当前标签内替换，其他工作区新开标签。
- * 这比任何开关都少一步决策，而且不会让用户疑惑「我现在到底在搜哪里」。
+ * **搜索范围**：默认只搜**当前工作区**，输入框右侧一个切换按钮可切到「全部工作区」。
+ * 理由有三条：
+ *  1. 绝大多数时候用户找的是自己正在看的那个库里的东西，全库搜索是少数场景；
+ *  2. 全库搜索要给每个工作区建索引，而大库读盘 + 建索引很贵——默认不搜就不必
+ *     在启动时替「可能永远不会打开的库」付这笔钱；
+ *  3. 「当前 / 全部」是一个**看得见的状态**。此前靠分组表达范围，用户看不出
+ *     「我现在到底搜没搜别的库」，也无法主动缩小范围去避免噪音。
+ *
+ * 切到「全部」才会去补建其他工作区的索引（面板底部显示进度）。
  */
 const props = defineProps<{
   open: boolean
-  /** 当前标签所属工作区（决定分组与打开方式） */
+  /** 当前标签所属工作区（决定默认范围与分组） */
   activeWorkspaceId: string | null
   /** 工作区 id → 显示名 */
   workspaceNames: Map<string, string>
@@ -36,6 +41,8 @@ const emit = defineEmits<{
   openDoc: [path: string]
   /** 在新标签打开其他工作区的文档 */
   openDocInWorkspace: [payload: { workspaceId: string; path: string }]
+  /** 切到「全部工作区」时请求补建其余工作区的索引 */
+  indexAll: []
 }>()
 
 const { commands } = useCommands()
@@ -45,28 +52,51 @@ const query = ref('')
 const cursor = ref(0)
 const input = ref<HTMLInputElement | null>(null)
 
+/**
+ * 检索范围：`workspace` = 只搜当前工作区，`all` = 全部。
+ *
+ * 面板是单例、跨开关存活的组件，所以范围在这里而不是在 search store 里——
+ * 关闭再打开应该回到默认（当前工作区），而不是记住上次的「全部」。
+ */
+const scopeMode = ref<'workspace' | 'all'>('workspace')
+
+/** 实际传给索引的工作区 id：范围是「当前」但没有当前工作区时退化为全部 */
+const effectiveScope = computed(() =>
+  scopeMode.value === 'workspace' ? props.activeWorkspaceId : null,
+)
+
 const terms = computed(() => query.value.trim().split(/\s+/).filter(Boolean))
 
 const commandHits = computed(() =>
   commands.value.filter(command => matchCommand(command, terms.value)).slice(0, 5),
 )
 
-/* ---------- 文档命中：按工作区分组，当前工作区在前 ---------- */
+/* ---------- 文档命中：按范围决定怎么取 ---------- */
+
+/**
+ * 命中列表。
+ *
+ * 范围是「当前工作区」时索引已经只返回这一个库的结果，这里不再筛——
+ * 双重过滤会让「当前范围里明明没有却显示 0 条」这类问题无从判断是哪一层错了。
+ * 范围是「全部」时前端仍按工作区分一次组：这是**展示**上的区分（让用户知道
+ * 这条结果来自别的库），与检索阶段的范围是两件事。
+ */
+const scopedHits = computed(() => (terms.value.length ? searchIndex.state.hits : []))
 
 const localHits = computed(() =>
-  terms.value.length
-    ? searchIndex.state.hits
+  effectiveScope.value
+    ? scopedHits.value
+    : scopedHits.value
         .filter(
           hit => props.activeWorkspaceId !== null && hit.workspaceId === props.activeWorkspaceId,
         )
-        .slice(0, 12)
-    : [],
+        .slice(0, 12),
 )
 
 const otherHits = computed(() =>
-  terms.value.length
-    ? searchIndex.state.hits.filter(hit => hit.workspaceId !== props.activeWorkspaceId).slice(0, 8)
-    : [],
+  effectiveScope.value
+    ? []
+    : scopedHits.value.filter(hit => hit.workspaceId !== props.activeWorkspaceId).slice(0, 8),
 )
 
 /** 展平后的可选项顺序，与渲染顺序严格一致（键盘上下移动靠它） */
@@ -88,6 +118,9 @@ watch(
     if (!open) return
     query.value = ''
     cursor.value = 0
+    // 每次打开都回到默认范围：上次的「全部」不该被继承（那会让默认重新变贵）
+    scopeMode.value = props.activeWorkspaceId ? 'workspace' : 'all'
+    searchIndex.setScope(props.activeWorkspaceId)
     await nextTick()
     input.value?.focus()
   },
@@ -95,8 +128,18 @@ watch(
 
 watch(query, value => {
   cursor.value = 0
-  searchIndex.search(value)
+  searchIndex.search(value, effectiveScope.value)
 })
+
+/** 切换范围：重跑当前查询；切到「全部」时顺带请求补建其余工作区的索引 */
+function toggleScope(): void {
+  const next = scopeMode.value === 'workspace' ? 'all' : 'workspace'
+  // 没有当前工作区（只开了单文件）时「当前」这个范围无从谈起，不允许切过去
+  if (next === 'workspace' && !props.activeWorkspaceId) return
+  scopeMode.value = next
+  searchIndex.setScope(effectiveScope.value)
+  if (next === 'all') emit('indexAll')
+}
 
 function move(delta: number): void {
   if (!total.value) return
@@ -217,6 +260,25 @@ const localLabel = computed(() => workspaceName(props.activeWorkspaceId))
           :aria-activedescendant="total ? `palette-item-${cursor}` : undefined"
           @keydown="onKeydown"
         />
+        <!--
+          范围切换：一个按钮轮流切「当前工作区 / 全部工作区」。
+          不做两个并列的单选——面板只有一行位置，两个按钮会把输入框挤窄，
+          而这两个状态本来就是互斥的一对。
+        -->
+        <button
+          v-tooltip="{ text: t('palette.scopeHint'), placement: 'bottom' }"
+          class="palette__scope"
+          :class="{ 'is-all': scopeMode === 'all' }"
+          type="button"
+          :disabled="!activeWorkspaceId"
+          @click="toggleScope"
+        >
+          {{
+            scopeMode === 'all'
+              ? t('palette.scopeAll')
+              : t('palette.scopeCurrent', { name: localLabel })
+          }}
+        </button>
         <kbd class="palette__esc">Esc</kbd>
       </div>
 
@@ -405,6 +467,38 @@ const localLabel = computed(() => workspaceName(props.activeWorkspaceId))
 
 .palette__input::placeholder {
   color: var(--dv-ui-text-dim);
+}
+
+.palette__scope {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 8px;
+  border: 1px solid var(--dv-ui-line-soft);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dv-ui-text-muted);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.palette__scope:hover:not(:disabled) {
+  border-color: var(--dv-ui-line);
+  color: var(--dv-ui-text);
+}
+
+/* 「全部工作区」是更贵的范围：点亮它，让用户一眼看出当前在哪一档 */
+.palette__scope.is-all {
+  border-color: var(--dv-ui-accent);
+  color: var(--dv-ui-accent);
+}
+
+.palette__scope:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .palette__esc {

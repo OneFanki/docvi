@@ -47,10 +47,18 @@
 ### 中文
 
 - **支持数学公式**：`$E = mc^2$` 行内、行首 `$$` 成块，TeX 语法。用 KaTeX 解析但输出 MathML，所以分享页不用加载任何脚本、导出 HTML 与 PDF 也不用带字体；解析失败的公式标红并保留源码，不会白屏。`$5 到 $10` 这类货币写法不会被误认成公式
+- **左栏是一整列，标签不再压过目录树**：侧栏从标题栏底下一直到底，标签条只在右侧工作区里。关掉全部标签后树还在原处，不用再「重新打开工作区」
+- **点左栏顶部的工作区名改成居中弹窗**：列出所有工作区并标出当前这个，打开文件夹 / 打开文件 / 分享目录 / 移除都在里面。下拉框贴在按钮边上，工作区一多就被窗口边缘裁掉
+- **搜索默认只搜当前工作区**：输入框右边一个按钮可切「全部工作区」。只搜当前时不光结果更准，也不用在启动时替其它库读一遍整库正文；切到「全部」才开始建它们的索引
+- **搜到别的库的文档，打开后左栏跟着切过去**：人到了那篇文档，树也在那个库里，不会出现「正文是 B 的、左栏还是 A 的」
 
 ### English
 
 - **Math formulas are supported**: `$E = mc^2$` inline, `$$` at line start for a block, TeX syntax. It parses with KaTeX but emits MathML, so shared pages need no extra script and exported HTML/PDF carry no font files; a formula that fails to parse is shown in red with its source kept instead of blanking the page. Money like `$5 to $10` is never mistaken for a formula
+- **The sidebar is one full-height column and tabs no longer run over the tree**: the tree spans from below the title bar to the bottom, with the tab strip only inside the right-hand area. Closing every tab leaves the tree where it was
+- **Clicking the workspace name opens a centered dialog** instead of a dropdown: it lists every workspace with the current one marked, plus open folder / open file / share folder / remove. A dropdown anchored to the button gets clipped by the window edge once there are a few workspaces
+- **Search is scoped to the current workspace by default**: a button next to the input switches to all workspaces. Staying local is both more accurate and avoids reading every other library's full text at startup; their indexes are only built after you switch
+- **Opening a result from another workspace brings the sidebar along**: you land on the document with the tree switched to its library, never "content from B, tree from A"
 
 ## [0.9.0] - 2026-11-23
 

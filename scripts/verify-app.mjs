@@ -171,13 +171,19 @@ try {
     })()`)
     if (!opened) return { error: '左栏没有工作区切换器' }
     await wait(400)
+    /*
+     * 弹窗里的工作区行：按名字匹配 `.wsrow__name`。
+     *
+     * 不能拿整行文字比——行里还有 root 路径；也不能按 `.menu__item` 找，
+     * 那套是旧下拉框的选择器（改成居中弹窗后已经不存）。
+     */
     const picked = await ev(`(async () => {
-      const items = [...document.querySelectorAll('.menu__item, [role="menuitem"]')]
-      const hit = items.find(el => (el.textContent || '').trim() === ${JSON.stringify(name)})
-      if (!hit) return { error: '菜单里没有 ' + ${JSON.stringify(name)}, items: items.map(el => (el.textContent || '').trim()) }
+      const rows = [...document.querySelectorAll('.wsrow')]
+      const hit = rows.find(el => (el.querySelector('.wsrow__name')?.textContent || '').trim() === ${JSON.stringify(name)})
+      if (!hit) return { error: '弹窗里没有 ' + ${JSON.stringify(name)}, rows: rows.map(el => (el.querySelector('.wsrow__name')?.textContent || '').trim()) }
       hit.click()
       await new Promise(r => setTimeout(r, 900))
-      return { ok: true }
+      return { ok: true, dialogClosed: !document.querySelector('.wsdialog') }
     })()`)
     return picked
   }
@@ -186,10 +192,24 @@ try {
   report.sidebarSwitch = await switchTo('ws-a')
   report.sidebar = await ev(`(() => {
     const name = document.querySelector('.sidebar__ws-name')?.textContent ?? ''
-    // 树里的一级行：工作区不该再以一级根的形式出现在树里
-    const roots = [...document.querySelectorAll('.tree > [role="treeitem"]')]
-      .map(el => (el.textContent || '').trim().slice(0, 16))
-    return { switcher: name.trim(), roots }
+    const tree = document.querySelector('.sidebar__tree')
+    const tabbar = document.querySelector('.tabbar')
+    /*
+     * 布局不变量（VSCode 形状）：标签条必须整个落在侧栏右边，不与树横向重叠。
+     * 这是用户提的那条「标签页不该穿过目录树」的机器判据。
+     */
+    const treeBox = tree?.getBoundingClientRect()
+    const tabBox = tabbar?.getBoundingClientRect()
+    return {
+      switcher: name.trim(),
+      // 树里的一级行：工作区不该再以一级根的形式出现在树里
+      roots: [...document.querySelectorAll('.tree > [role="treeitem"]')]
+        .map(el => (el.textContent || '').trim().slice(0, 16)),
+      tabbarLeft: tabBox ? Math.round(tabBox.left) : null,
+      treeRight: treeBox ? Math.round(treeBox.right) : null,
+      tabbarOverlapsTree:
+        Boolean(treeBox && tabBox) && tabBox.left < treeBox.right - 1,
+    }
   })()`)
 
   // 先在 ws-a 开一个标签，再切到 ws-b：标签必须原封不动（核心新契约）
@@ -424,6 +444,89 @@ try {
     }
   }
 
+  // ---- 2.5 搜索范围：默认只搜当前工作区，切「全部」才跨库 ----
+  //
+  // ⚠️ 必须放在滚动/编辑段**之后**：这段会点开跨库结果，左栏因此切到 ws-b，
+  // 后面再按 ws-a 的文档名找树节点就找不到了（踩过：滚动与编辑段整片红）。
+  //
+  // 断言四件事，每条都对应一个会静默出错的地方：
+  //  a. 默认范围下搜不到别的库的文档（否则「默认省索引」只是口头说说）；
+  //  b. 范围按钮上写的是当前工作区名（用户要能看出自己在搜哪里）；
+  //  c. 切到「全部」后能搜到别的库（否则跨库搜索等于坏了）；
+  //  d. 打开那条跨库结果后，左栏跟着切到那个工作区（否则人到了文件却不知道自己在哪）。
+  report.search = await ev(`(async () => {
+    const openPalette = () => {
+      const input = document.querySelector('.palette__input')
+      return Boolean(input)
+    }
+    // 走真实的 Ctrl+K 路径：直接置 ref 会绕过快捷键接线
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))
+    await new Promise(r => setTimeout(r, 500))
+    const paletteOpen = openPalette()
+    const input = document.querySelector('.palette__input')
+    const scopeBtn = document.querySelector('.palette__scope')
+    if (!paletteOpen || !input || !scopeBtn) {
+      return { error: '搜索面板没打开或没有范围按钮', paletteOpen }
+    }
+    const scopeText = (scopeBtn.textContent || '').trim()
+
+    const type = async text => {
+      input.value = text
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await new Promise(r => setTimeout(r, 900))
+    }
+    const docTitles = () =>
+      [...document.querySelectorAll('.palette__doc-title')].map(el => (el.textContent || '').trim())
+    const badges = () =>
+      [...document.querySelectorAll('.palette__badge')].map(el => (el.textContent || '').trim())
+
+    // 关键词只出现在 ws-b 的首页里（B 内容）
+    await type('内容')
+    const localHits = docTitles()
+    const localBadges = badges()
+
+    // 切到全部工作区
+    scopeBtn.click()
+    await new Promise(r => setTimeout(r, 1800))
+    const allHits = docTitles()
+    const allBadges = badges()
+    const allScopeText = (document.querySelector('.palette__scope')?.textContent || '').trim()
+
+    /*
+     * 跨库命中用**徽标**认：ws-b 的结果会带一个写着 ws-b 的 badge。
+     * 不能用标题文字判——标题来自文件名（index），两个库都有 index.md。
+     */
+    const crossIndex = allBadges.findIndex(b => b === 'ws-b')
+    let openedSwitcher = null
+    let visited = null
+    if (crossIndex >= 0) {
+      const target = [...document.querySelectorAll('.palette__badge')][crossIndex]?.closest(
+        '.palette__item',
+      )
+      target?.click()
+      await new Promise(r => setTimeout(r, 1800))
+      openedSwitcher = (document.querySelector('.sidebar__ws-name')?.textContent || '').trim()
+      visited = (document.querySelector('.tab.is-active .tab__doc')?.textContent || '').trim()
+    }
+    return {
+      paletteOpen,
+      scopeText,
+      localHits,
+      localBadges,
+      allScopeText,
+      allHits,
+      allBadges,
+      openedSwitcher,
+      visited,
+      // 不变量
+      defaultIsScoped: localBadges.length === 0 && !localHits.includes('index'),
+      scopeShowsWorkspace: scopeText.includes('ws-a'),
+      allFindsOther: crossIndex >= 0,
+      allScopeShowsAll: allScopeText.length > 0,
+      sidebarFollowed: openedSwitcher === 'ws-b',
+    }
+  })()`)
+
   // ---- 5. 临时分享 ----
   // 创建在渲染层做，取内容用 Node 侧 fetch（渲染层对 127.0.0.1 的分享端口受
   // CSP `connect-src` 限制，跨源会被拦——那是设计如此，不是缺陷）。
@@ -488,11 +591,17 @@ try {
 
   const sidebar = report.sidebar ?? {}
   expect(!report.sidebarSwitch?.error, '应能用左栏切换器切到 ws-a', report.sidebarSwitch)
+  expect(report.sidebarSwitch?.dialogClosed, '选完工作区后弹窗应关闭', report.sidebarSwitch)
   expect(sidebar.switcher === 'ws-a', '切换器上应显示当前工作区名', sidebar)
   expect(
     Array.isArray(sidebar.roots) && sidebar.roots.length > 0 && !sidebar.roots.includes('ws-b'),
     '树里只应有当前工作区的内容，不并列其它工作区',
     sidebar.roots,
+  )
+  expect(
+    sidebar.tabbarOverlapsTree === false,
+    '标签条不能压在目录树上：侧栏占满全高，标签条只在它右边',
+    { tabbarLeft: sidebar.tabbarLeft, treeRight: sidebar.treeRight },
   )
 
   const wsTabs = report.wsTabs ?? {}
@@ -521,6 +630,20 @@ try {
   expect(tabs.noNewTabOnDbl, '双击升格不应多出标签', {
     before: tabs.countSecond,
     after: tabs.countDbl,
+  })
+
+  const search = report.search ?? {}
+  expect(!search.error, '搜索范围探针应能跑通', search.error ?? search)
+  expect(search.defaultIsScoped, '默认范围下不该搜到其它工作区的文档', {
+    hits: search.localHits,
+  })
+  expect(search.scopeShowsWorkspace, '范围按钮应显示当前工作区名', search.scopeText)
+  expect(search.allFindsOther, '切到「全部工作区」后应能搜到别的库', {
+    hits: search.allHits,
+  })
+  expect(search.sidebarFollowed, '打开跨库搜索结果后左栏应跟着切过去', {
+    switcher: search.openedSwitcher,
+    visited: search.visited,
   })
 
   const scroll = report.scroll ?? {}
@@ -567,7 +690,7 @@ try {
     process.exitCode = 1
   } else {
     console.log(
-      '[verify:app] 通过：左栏单工作区导航 / 标签预览固定 / 滚动恢复 / 编辑保存 / 临时分享 / 本地服务',
+      '[verify:app] 通过：左栏单工作区导航（含标签条不压树）/ 标签预览固定 / 滚动恢复 / 编辑保存 / 搜索范围 / 临时分享 / 本地服务',
     )
   }
 } finally {

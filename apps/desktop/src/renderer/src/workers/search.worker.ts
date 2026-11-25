@@ -45,7 +45,14 @@ export type SearchRequest =
   | { type: 'replace'; workspaceId: string; docs: Array<{ path: string; text: string }> }
   /** 整库作废（clear 或工作区被移除） */
   | { type: 'drop'; workspaceId: string }
-  | { type: 'query'; id: number; text: string }
+  /**
+   * 查询。
+   *
+   * `scope` 让 worker 在**检索阶段**就限定范围，而不是把全库结果传回前端再筛：
+   * 面板默认只搜当前工作区，全库命中传过去既浪费序列化，也会让「当前工作区」
+   * 这个默认范围名存实亡（前端筛掉的那部分一样跑了打分与摘要）。
+   */
+  | { type: 'query'; id: number; text: string; scope?: { workspaceId: string } }
   | { type: 'clear' }
 
 export type SearchResponse =
@@ -158,7 +165,17 @@ self.onmessage = (event: MessageEvent<SearchRequest>) => {
     self.postMessage(response)
     return
   }
-  const results = mini.search(request.text).slice(0, 60)
+  /*
+   * 范围过滤：MiniSearch 的 filter 参数在打分**之前**生效，被排除的文档不参与
+   * 评分与排序——这正是「只搜当前工作区」该有的成本。
+   */
+  const results = mini
+    .search(request.text, {
+      ...(request.scope
+        ? { filter: result => result.workspaceId === request.scope?.workspaceId }
+        : {}),
+    })
+    .slice(0, 60)
   const hits: SearchHit[] = results.map(result => {
     const fields = mini?.getStoredFields(result.id) as
       { path: string; title: string; workspaceId: string | null } | undefined
