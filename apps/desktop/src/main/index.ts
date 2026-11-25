@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, net, protocol, screen, shell } from 'electron'
-import { realpathSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import { join, normalize, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -20,7 +20,7 @@ import { shareThemeFromSettings } from './share-theme.ts'
 import { createSettingsStore, sessionFilePath, settingsFilePath } from './settings-store.ts'
 import { DEV_APP_NAME, devDataDir } from './dev-data.ts'
 import { createTray, focusWindow, markQuitting, shouldHideOnClose } from './tray.ts'
-import { dataDir } from './paths.ts'
+import { dataDir, documentsDir } from './paths.ts'
 import { flushPerfSamples } from './perf-log.ts'
 import { installApplicationMenu } from './menu.ts'
 import { installNativeContextMenu } from './context-menu.ts'
@@ -464,15 +464,53 @@ function handlePluginRequest(url: URL, plugins: PluginStore): Promise<Response> 
 }
 
 /**
+ * 把「根目录 + 包内相对路径」解析成一个可以安全伺服的绝对路径。
+ *
+ * 三道判定，缺一不可：
+ *  1. 规范化后必须仍在根内（挡住 `..`）；
+ *  2. `realpath` 后再判一次（挡住「根内放一个软链接指向根外」——字符串前缀
+ *     检查对软链接完全无效，这是唯一能拦住它的地方）；
+ *  3. 真实路径必须是普通文件（目录与设备文件不伺服）。
+ *
+ * 三个自定义协议（asset / local / plugin）都走这一个函数：早先 asset 只做了
+ * 第 1 步、local 三步齐全，同一个逃逸手法在两个入口下表现不同。
+ *
+ * 返回 null 表示拒绝，调用方按 403/404 回应（不区分，避免泄露存在性）。
+ */
+function resolveServableFile(root: string, rel: string): string | null {
+  if (!rel) return null
+  let realRoot: string
+  try {
+    realRoot = realpathSync(root)
+  } catch {
+    return null
+  }
+  const target = resolve(realRoot, rel)
+  if (target !== realRoot && !target.startsWith(realRoot + sep)) return null
+  let real: string
+  try {
+    real = realpathSync(target)
+  } catch {
+    return null
+  }
+  if (real !== realRoot && !real.startsWith(realRoot + sep)) return null
+  try {
+    if (!statSync(real).isFile()) return null
+  } catch {
+    return null
+  }
+  return real
+}
+
+/**
  * 正文资产协议：`docvi://asset/<工作区 id>/<内容根内路径>`。
  *
  * 文档里的 `![](img/a.png)` 被渲染管线归一成**根相对**路径（`/img/a.png`），
- * 这是「从内容根伺服资产」的约定。容器版内容根就是 URL 前缀，浏览器直接取；
- * 桌面版没有这样的 URL 空间，若不对接，图片会落到 `docvi://app/img/a.png`
- * ——那是渲染产物目录，必然 404（用户看到的是一张破图）。
+ * 这是「从内容根伺服资产」的约定。桌面版没有 URL 空间，若不对接，图片会落到
+ * `docvi://app/img/a.png`——那是渲染产物目录，必然 404（用户看到的是一张破图）。
  *
  * 只按**登记过的工作区 id** 取根，绝不接受绝对路径：URL 里没有磁盘路径可注入。
- * 解析后再做一次 containment，挡住 `..` 与符号链接逃逸。
+ * 解析后统一走 resolveServableFile（含 realpath 判定）。
  */
 async function handleAssetRequest(url: URL, workspaces: WorkspaceStore): Promise<Response> {
   const segments = url.pathname.split('/').filter(Boolean)
@@ -482,13 +520,9 @@ async function handleAssetRequest(url: URL, workspaces: WorkspaceStore): Promise
   if (!entry) return new Response('Not Found', { status: 404 })
 
   const rel = segments.map(segment => decodeURIComponent(segment)).join('/')
-  if (!rel) return new Response('Not Found', { status: 404 })
-  const root = resolve(entry.root)
-  const target = resolve(root, rel)
-  if (target !== root && !target.startsWith(root + sep)) {
-    return new Response('Forbidden', { status: 403 })
-  }
-  return net.fetch(pathToFileURL(target).toString())
+  const real = resolveServableFile(entry.root, rel)
+  if (!real) return new Response('Forbidden', { status: 403 })
+  return net.fetch(pathToFileURL(real).toString())
 }
 
 /**
@@ -509,27 +543,8 @@ async function handleLocalAssetRequest(
   if (!root) return new Response('Not Found', { status: 404 })
 
   const rel = segments.map(segment => decodeURIComponent(segment)).join('/')
-  if (!rel) return new Response('Not Found', { status: 404 })
-  const target = resolve(root, rel)
-  if (target !== root && !target.startsWith(root + sep)) {
-    return new Response('Forbidden', { status: 403 })
-  }
-  // 解析真实路径再判一次：拦住「符号链接指到资产根外」这类逃逸
-  let real: string
-  try {
-    real = realpathSync(target)
-  } catch {
-    return new Response('Not Found', { status: 404 })
-  }
-  let realRoot: string
-  try {
-    realRoot = realpathSync(root)
-  } catch {
-    return new Response('Not Found', { status: 404 })
-  }
-  if (real !== realRoot && !real.startsWith(realRoot + sep)) {
-    return new Response('Forbidden', { status: 403 })
-  }
+  const real = resolveServableFile(root, rel)
+  if (!real) return new Response('Forbidden', { status: 403 })
   return net.fetch(pathToFileURL(real).toString())
 }
 
@@ -589,7 +604,8 @@ app.whenReady().then(() => {
   pruneUpdateCache()
 
   const plugins = createPluginStore({
-    // dev：仓库 plugins/；打包后：resources/plugins
+    // 内置插件包不再随安装包分发（2026-11-24 组件系统退役）：打包态该目录不存在，
+    // 扫描器拿到空列表即可。用户安装的插件走 userDir，与这里无关。
     builtinDir: app.isPackaged
       ? join(process.resourcesPath, 'plugins')
       : join(__dirname, '../../../../plugins'),
@@ -664,7 +680,7 @@ app.whenReady().then(() => {
    */
   const defaultRoot = ensureDefaultWorkspace({
     store: workspaces,
-    documentsDir: app.getPath('documents'),
+    documentsDir: documentsDir(),
     isSeeded: () => settings.get().defaultWorkspaceSeeded,
     markSeeded: () => settings.update({ defaultWorkspaceSeeded: true }),
     log: message => console.log(`[default-workspace] ${message}`),
@@ -778,12 +794,6 @@ app.whenReady().then(() => {
         autostartCommand: (await readAutostart()).command,
         closeToTray: enabled,
         error: null,
-      }
-    },
-    pushGitProgress(event) {
-      // 广播给所有窗口：克隆可能从任一窗口发起，进度不该只回给发起者
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.webContents.send(IPC.gitProgress, event)
       }
     },
     setWindowTheme(appearance) {

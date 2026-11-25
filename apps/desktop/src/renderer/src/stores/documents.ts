@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 
 import type { DocPayload } from '@docvi/shared'
 
@@ -63,12 +63,6 @@ function keyOf(absolutePath: string): string {
 
 export const useDocumentStore = defineStore('documents', () => {
   const records = ref<Map<string, DocumentRecord>>(new Map())
-
-  const dirtyPaths = computed(() =>
-    [...records.value.values()]
-      .filter(item => item.text !== item.savedText)
-      .map(item => item.absolutePath),
-  )
 
   function get(absolutePath: string): DocumentRecord | null {
     return records.value.get(keyOf(absolutePath)) ?? null
@@ -193,18 +187,8 @@ export const useDocumentStore = defineStore('documents', () => {
     record.conflict = false
   }
 
-  /** 关闭标签后：没有别的标签引用且不脏时可以释放 */
-  function release(absolutePath: string): void {
-    const key = keyOf(absolutePath)
-    const record = records.value.get(key)
-    if (!record) return
-    if (record.text !== record.savedText) return
-    records.value.delete(key)
-  }
-
   return {
     records,
-    dirtyPaths,
     get,
     isDirty,
     load,
@@ -212,6 +196,5 @@ export const useDocumentStore = defineStore('documents', () => {
     markSaved,
     applyExternal,
     reloadFromDisk,
-    release,
   }
 })

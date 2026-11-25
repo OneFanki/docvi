@@ -5,11 +5,10 @@ allowBuilds:
 # pnpm workspace（设计见 docs/architecture/adr/0002-packages-monorepo.md）
 #
 # packages/*：平台包（server / shared / renderer-core / editor / plugin-api / plugin-runtime）；
-# plugins/*：预设插件包（协议 v1：plugin.json + src/ + docs/，产物 dist/）；
-# apps/*：应用（desktop = 唯一渲染层，同时产出桌面与容器两个宿主变体）。
+# apps/*：应用（desktop = 唯一渲染层 + 唯一宿主）。
+# 1.0 起 `plugins/` 不再是 workspace（只剩市场清单 market.json，无 package.json）。
 packages:
   - packages/*
-  - plugins/*
   - apps/*
 # pnpm workspace + 构建脚本审批（pnpm ≥10.8 的配置家在这里）
 #
@@ -20,7 +19,7 @@ onlyBuiltDependencies:
   - esbuild
   - electron
   - electron-winstaller
-# 组件包与 mermaid 全家由渲染层的 vite 消费；pnpm 默认不提升传递依赖时，
+# mermaid 全家与 shiki 分片由渲染层的 vite 消费；pnpm 默认不提升传递依赖时，
 # 解析链可能取不到 CJS 包（dayjs 等被原样 @fs 伺服会报 default 导出缺失而白屏）。
 # 全部提升到顶层解决；随包化收敛后再评估是否可去掉。
 shamefullyHoist: true

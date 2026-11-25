@@ -96,11 +96,8 @@ export function usePluginThemes() {
 
 async function readTokens(plugin: string, relPath: string): Promise<Record<string, string> | null> {
   try {
-    // 资源的真实位置由宿主决定：Electron 走 docvi:// 自定义协议，容器里是
-    // HTTP（/plugins/<name>/<version>/…）。渲染层不自己拼 URL。
-    const url =
-      window.docvi.pluginAssetUrl?.(plugin, relPath) ??
-      `docvi://plugin/${encodeURIComponent(plugin)}/${relPath}`
+    // 插件资源走自定义协议（主进程按登记的插件目录伺服，含路径穿越防护）
+    const url = `docvi://plugin/${encodeURIComponent(plugin)}/${relPath}`
     const response = await fetch(url)
     if (!response.ok) return null
     const raw = (await response.json()) as unknown
@@ -115,8 +112,5 @@ async function readTokens(plugin: string, relPath: string): Promise<Record<strin
 export const pluginThemes = usePluginThemes()
 
 /** 供测试与诊断：按插件 id 直接拉一次 token（不注入） */
-export async function dryRunTokens(plugin: string, relPath: string) {
-  return readTokens(plugin, relPath)
-}
 
 export type { Result }

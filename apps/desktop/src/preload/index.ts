@@ -4,7 +4,6 @@ import {
   IPC,
   type AppSettings,
   type DocviApi,
-  type GitProgressEvent,
   type MenuAction,
   type ServiceState,
   type UpdateCheckResult,
@@ -23,7 +22,6 @@ const bootSettings = ipcRenderer.sendSync(IPC.settingsSnapshot) as AppSettings
 const api: DocviApi = {
   bootSettings,
 
-  appInfo: () => ipcRenderer.invoke(IPC.appInfo),
   appOpenExternal: url => ipcRenderer.invoke(IPC.appOpenExternal, url),
   appRuntimeInfo: () => ipcRenderer.invoke(IPC.appRuntimeInfo),
   appUpdateCheck: () => ipcRenderer.invoke(IPC.appUpdateCheck),
@@ -58,19 +56,6 @@ const api: DocviApi = {
   workspaceAddAt: root => ipcRenderer.invoke(IPC.workspaceAddAt, root),
   workspaceProbe: root => ipcRenderer.invoke(IPC.workspaceProbe, root),
 
-  gitState: () => ipcRenderer.invoke(IPC.gitState),
-  gitClone: input => ipcRenderer.invoke(IPC.gitClone, input),
-  gitPull: id => ipcRenderer.invoke(IPC.gitPull, id),
-  gitBranches: id => ipcRenderer.invoke(IPC.gitBranches, id),
-  gitSwitchBranch: (id, branch) => ipcRenderer.invoke(IPC.gitSwitchBranch, id, branch),
-  onGitProgress: callback => {
-    const listener = (_event: Electron.IpcRendererEvent, progress: GitProgressEvent): void =>
-      callback(progress)
-    ipcRenderer.on(IPC.gitProgress, listener)
-    return () => {
-      ipcRenderer.removeListener(IPC.gitProgress, listener)
-    }
-  },
   workspaceRemove: id => ipcRenderer.invoke(IPC.workspaceRemove, id),
   workspaceTouch: id => ipcRenderer.invoke(IPC.workspaceTouch, id),
   workspaceSetTreeSort: (id, mode) => ipcRenderer.invoke(IPC.workspaceSetTreeSort, id, mode),
@@ -93,13 +78,6 @@ const api: DocviApi = {
 
   filePick: () => ipcRenderer.invoke(IPC.filePick),
   fileRead: absolutePath => ipcRenderer.invoke(IPC.fileRead, absolutePath),
-
-  /**
-   * 本地预览是容器读者面的能力（浏览器 File API 读文件进内存）。
-   * 桌面端有真实磁盘与工作区，这个入口不该出现；给 null 而不是报错，
-   * 是为了契约两端形状一致。
-   */
-  localPreview: async () => ({ ok: true, data: null }),
 
   searchCorpus: workspaceId => ipcRenderer.invoke(IPC.searchCorpus, workspaceId),
 
@@ -188,8 +166,6 @@ const api: DocviApi = {
   pluginInstall: () => ipcRenderer.invoke(IPC.pluginInstall),
   pluginUninstall: id => ipcRenderer.invoke(IPC.pluginUninstall, id),
   pluginSetEnabled: (id, enabled) => ipcRenderer.invoke(IPC.pluginSetEnabled, id, enabled),
-  pluginSetComponentEnabled: (id, kind, enabled) =>
-    ipcRenderer.invoke(IPC.pluginSetComponentEnabled, id, kind, enabled),
 
   serviceState: () => ipcRenderer.invoke(IPC.serviceState),
   serviceRestart: () => ipcRenderer.invoke(IPC.serviceRestart),

@@ -48,18 +48,6 @@ function makeDeps(overrides = {}) {
         },
       ]
     },
-    listComponents: () => {
-      calls.push('listComponents')
-      return [
-        {
-          kind: 'flow-diagram',
-          title: { zh: '流程图', en: 'Flow' },
-          description: { zh: '有序流程', en: 'Ordered flow' },
-          plugin: 'demo',
-        },
-      ]
-    },
-    componentDocs: kind => (kind === 'flow-diagram' ? '# 用法' : null),
     pluginDocs: name => (name === 'demo' ? '# 包用法' : null),
     searchDocs: (query, limit) => {
       calls.push({ search: query, limit })
@@ -178,23 +166,14 @@ test('未知方法与未知工具：-32601 / -32602', async () => {
   assert.equal(unknownTool.body.error.code, -32602)
 })
 
-test('tools/list：全量八个工具、都有 inputSchema，处理器不进输出', async () => {
+test('tools/list：全量六个工具、都有 inputSchema，处理器不进输出', async () => {
   const { deps } = makeDeps()
   const { body } = await call(deps, { jsonrpc: '2.0', id: 5, method: 'tools/list' })
   assert.deepEqual(
     body.result.tools.map(tool => tool.name),
-    [
-      'list_plugins',
-      'list_components',
-      'get_component_docs',
-      'get_plugin_docs',
-      'search_docs',
-      'read_doc',
-      'list_workspaces',
-      'write_doc',
-    ],
+    ['list_plugins', 'get_plugin_docs', 'search_docs', 'read_doc', 'list_workspaces', 'write_doc'],
   )
-  assert.equal(toolNames().length, 8)
+  assert.equal(toolNames().length, 6)
   for (const tool of body.result.tools) {
     assert.equal(tool.inputSchema.type, 'object')
     assert.ok(tool.description.length > 10, `${tool.name} 需要可读描述`)
@@ -209,7 +188,7 @@ test('tools/list：全量八个工具、都有 inputSchema，处理器不进输�
   assert.deepEqual(write.inputSchema.properties.mode.enum, ['create', 'overwrite', 'append'])
 })
 
-test('工具面 = 宿主能力：检索依赖缺席时只列四个插件工具', async () => {
+test('工具面 = 宿主能力：检索依赖缺席时只列插件工具', async () => {
   const { deps } = makeDeps()
   delete deps.searchDocs
   delete deps.readDoc
@@ -218,7 +197,7 @@ test('工具面 = 宿主能力：检索依赖缺席时只列四个插件工具',
   const { body } = await call(deps, { jsonrpc: '2.0', id: 6, method: 'tools/list' })
   assert.deepEqual(
     body.result.tools.map(tool => tool.name),
-    ['list_plugins', 'list_components', 'get_component_docs', 'get_plugin_docs'],
+    ['list_plugins', 'get_plugin_docs'],
   )
 
   const init = await call(deps, { jsonrpc: '2.0', id: 7, method: 'initialize' })
@@ -263,12 +242,10 @@ test('工具面：有 writeDoc 但没有 listWorkspaces 时也不声明 write_do
   assert.ok(!body.result.tools.some(tool => tool.name === 'write_doc'))
 })
 
-test('tools/call：八个工具返回文本内容且 isError=false', async () => {
+test('tools/call：六个工具返回文本内容且 isError=false', async () => {
   const { deps } = makeDeps()
   const cases = [
     { name: 'list_plugins', arguments: {}, expect: '示例包' },
-    { name: 'list_components', arguments: {}, expect: 'flow-diagram' },
-    { name: 'get_component_docs', arguments: { kind: 'flow-diagram' }, expect: '# 用法' },
     { name: 'get_plugin_docs', arguments: { name: 'demo' }, expect: '# 包用法' },
     { name: 'search_docs', arguments: { query: '流程' }, expect: 'guides/a.md' },
     { name: 'read_doc', arguments: { path: 'guides/a.md' }, expect: '# A' },
@@ -442,42 +419,28 @@ test('list_workspaces：无工作区时给可操作提示，不是空字符串',
   assert.match(res.body.result.content[0].text, /没有可用的工作区/)
 })
 
-test('活查询：插件停用后 list_plugins 与 list_components 立即反映', async () => {
+test('活查询：插件停用后 list_plugins 立即反映', async () => {
   let enabled = true
   const { deps } = makeDeps({
     listPlugins: () =>
       enabled ? [{ name: 'demo', displayName: '示例', version: '1.0.0', builtin: false }] : [],
-    listComponents: () =>
-      enabled ? [{ kind: 'flow-diagram', title: '流程', description: 'x', plugin: 'demo' }] : [],
   })
-  const before = await call(deps, {
+  const first = await call(deps, {
     jsonrpc: '2.0',
     id: 11,
     method: 'tools/call',
-    params: { name: 'list_components', arguments: {} },
+    params: { name: 'list_plugins', arguments: {} },
   })
-  assert.ok(before.body.result.content[0].text.includes('flow-diagram'))
+  assert.ok(first.body.result.content[0].text.includes('demo'))
 
   enabled = false
   const after = await call(deps, {
     jsonrpc: '2.0',
     id: 12,
     method: 'tools/call',
-    params: { name: 'list_components', arguments: {} },
+    params: { name: 'list_plugins', arguments: {} },
   })
-  assert.ok(after.body.result.content[0].text.includes('没有活跃组件'))
-})
-
-test('kind 永不翻译：请求不存在 kind 时提示先 list_components', async () => {
-  const { deps } = makeDeps()
-  const { body } = await call(deps, {
-    jsonrpc: '2.0',
-    id: 13,
-    method: 'tools/call',
-    params: { name: 'get_component_docs', arguments: { kind: '不存在' } },
-  })
-  assert.ok(body.result.content[0].text.includes('不存在'))
-  assert.ok(body.result.content[0].text.includes('list_components'))
+  assert.ok(after.body.result.content[0].text.includes('没有已启用的插件包'))
 })
 
 test('缺必填参数：-32602', async () => {
@@ -486,14 +449,14 @@ test('缺必填参数：-32602', async () => {
     jsonrpc: '2.0',
     id: 14,
     method: 'tools/call',
-    params: { name: 'get_component_docs', arguments: {} },
+    params: { name: 'get_plugin_docs', arguments: {} },
   })
   assert.equal(body.error.code, -32602)
 })
 
 test('内部异常：-32603', async () => {
   const { deps } = makeDeps({
-    listComponents: () => {
+    listPlugins: () => {
       throw new Error('炸了')
     },
   })
@@ -501,7 +464,7 @@ test('内部异常：-32603', async () => {
     jsonrpc: '2.0',
     id: 15,
     method: 'tools/call',
-    params: { name: 'list_components', arguments: {} },
+    params: { name: 'list_plugins', arguments: {} },
   })
   assert.equal(body.error.code, -32603)
   assert.ok(body.error.message.includes('炸了'))
@@ -526,12 +489,12 @@ test('instructions：默认工作区被描述成兜底，优先级在明确指�
   )
 })
 
-test('instructions：标准 Markdown 排在最前，自定义组件带可移植性限制', async () => {
+test('instructions：只推标准 Markdown，不再提自定义组件', async () => {
   /*
-   * 防「AI 写任何文档都先套组件」（ADR-0006）。
-   * 这里钉住的是**顺序**与**限制声明**两件事，不是具体措辞：
-   *  - 标准 Markdown 必须出现在组件之前——第一条指令决定行为惯性；
-   *  - 提组件时必须同时说明「只有本平台能渲染」，否则 AI 会把它当成 GFM 同级别能力。
+   * 组件系统已于 v1.0.0 删除。这条断言钉住两件事：
+   *  - 推荐的表达通道必须写明（标准 Markdown / mermaid）；
+   *  - instructions 里不能再出现组件与新工具名的任何暗示——AI 读到的第一段话
+   *    会变成行为惯性，提一句「可选组件」都足以让它去翻组件清单。
    */
   const { deps } = makeDeps()
   const init = await call(deps, { jsonrpc: '2.0', id: 40, method: 'initialize' })
@@ -539,46 +502,8 @@ test('instructions：标准 Markdown 排在最前，自定义组件带可移植�
 
   assert.match(text, /标准 Markdown/, '必须明确把标准 Markdown 作为默认写法')
   assert.match(text, /mermaid/, '必须指出 mermaid 是推荐通道')
-
-  const markdownAt = text.indexOf('标准 Markdown')
-  const componentsAt = text.indexOf('list_components')
-  assert.ok(componentsAt > 0, '组件能力仍须暴露，不能藏起来')
-  assert.ok(markdownAt < componentsAt, '标准 Markdown 必须排在组件之前（措辞顺序即优先级）')
-
-  assert.match(text, /只有 docvi/, '必须说明组件只在 docvi/本平台渲染')
-  assert.match(text, /裸标签|语义丢失/, '必须说明离开平台后的退化形态')
-  assert.match(text, /默认不要用/, '必须给出默认取舍，而不是让 AI 自己猜')
-})
-
-test('list_components：返回文本自带可移植性限制，不只列清单', async () => {
-  /*
-   * AI 可能跳过 instructions 直接调工具，所以清单本身也必须带限制声明。
-   * 断言「限制声明」而非「与 instructions 用同一串字」——两处文案可以各自演化。
-   */
-  const { deps } = makeDeps()
-  const { body } = await call(deps, {
-    jsonrpc: '2.0',
-    id: 41,
-    method: 'tools/call',
-    params: { name: 'list_components', arguments: {} },
-  })
-  const text = body.result.content[0].text
-  assert.match(text, /不是通用 Markdown|不属于通用 Markdown/)
-  assert.match(text, /只有.*docvi|只有.*本平台/)
-  assert.ok(text.includes('flow-diagram'), '清单内容本身不能被限制声明挤掉')
-})
-
-test('get_component_docs：用法文档头部也带可移植性限制', async () => {
-  const { deps } = makeDeps()
-  const { body } = await call(deps, {
-    jsonrpc: '2.0',
-    id: 42,
-    method: 'tools/call',
-    params: { name: 'get_component_docs', arguments: { kind: 'flow-diagram' } },
-  })
-  const text = body.result.content[0].text
-  assert.match(text, /不是通用 Markdown|不属于通用 Markdown/)
-  assert.ok(text.includes('# 用法'), '原始用法文档必须原样保留')
+  assert.doesNotMatch(text, /list_components|get_component_docs/, '不能再指向已删除的组件工具')
+  assert.doesNotMatch(text, /<at-/, '不能再宣传 at- 标签')
 })
 
 test('list_workspaces：标出默认落笔处，并复述优先级', async () => {

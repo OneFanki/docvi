@@ -3,14 +3,13 @@
  * 包依赖方向校验：把 AGENTS.md 的架构边界变成可执行检查。
  *
  * 规则（依赖只能单向）：
- *  - server   不得 import 桌面应用或 electron（它与宿主解耦，容器与 app 共用）
+ *  - server   不得 import 桌面应用或 electron（它与宿主解耦，只做协议与内容模型）
  *  - renderer 只经 preload 白名单访问宿主，禁止 Node 与 electron
  *  - main     可用 Node，但不得 import preload 与渲染层
  *  - preload  只做桥接
  *  - service  可读 Node 与渲染核心的文本管线，不得 import 窗口层
  *  - shared   是纯契约层，零运行时依赖
  *  - plugins  只允许 vue
- *  - deployer 可 import packages/server 与 scripts/lib（复用），不得反向被依赖
  *
  * 只检查存在的目录：某个层被整体删除时规则自动失效，不需要同步改脚本。
  *
@@ -38,17 +37,10 @@ const RULES = [
     ],
   },
   {
-    // 容器部署器：允许复用服务层与内容模型（ADR-0003），不得依赖桌面应用
-    layer: 'deployer',
-    root: 'deployer',
-    exclude: [/\/test\//],
-    forbidden: [{ pattern: /apps\/desktop/, why: '部署器是服务端，禁止依赖桌面应用' }],
-  },
-  {
     layer: 'plugins',
     root: 'plugins',
     forbidden: [
-      { pattern: /packages\/|scripts\/|deployer\//, why: '插件包只允许依赖 vue' },
+      { pattern: /packages\/|scripts\//, why: '插件包只允许依赖 vue' },
       { pattern: /^(node:|electron$)/, why: '插件包只允许依赖 vue' },
     ],
   },

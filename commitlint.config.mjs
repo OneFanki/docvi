@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
  * 提交作用域自动发现。
  *
  * 包目录名即 scope：`packages/server` → `server`，`apps/desktop` → `desktop`。
- * 另登记固定 scope：root（跨包 / 仓库级配置）、deployer（容器编排服务）、
+ * 另登记固定 scope：root（跨包 / 仓库级配置）、
  * plugins（插件包目录）、scripts、docs、courses、tests、ci（工作流）。
  *
  * 为什么自动发现而不是硬编码白名单：新增包时无需改本文件——硬编码清单一旦忘记
@@ -23,16 +23,7 @@ function listDirectories(dir) {
 }
 
 function discoverScopes() {
-  const scopes = new Set([
-    'root',
-    'deployer',
-    'plugins',
-    'scripts',
-    'courses',
-    'docs',
-    'tests',
-    'ci',
-  ])
+  const scopes = new Set(['root', 'plugins', 'scripts', 'courses', 'docs', 'tests', 'ci'])
   // packages/* 与 apps/* 的目录名都算合法 scope（apps/desktop → desktop）
   for (const workspace of ['packages', 'apps']) {
     for (const name of listDirectories(join(repositoryRoot, workspace))) scopes.add(name)

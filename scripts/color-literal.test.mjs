@@ -1,10 +1,10 @@
 /**
- * 颜色字面量识别单测（scripts/lib/color-literal.mjs 直接跑）。
+ * 颜色字面量识别单测（直接跑生产实现 packages/renderer-core/src/color-literal.ts）。
  * 口径：hex 3/4/6/8 位 + rgb/rgba/hsl/hsla 函数式命中；named 颜色与单位写法不认。
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { colorLiteral } from './lib/color-literal.mjs'
+import { colorLiteral } from '../packages/renderer-core/src/color-literal.ts'
 
 test('hex 三/四/六/八位命中（含大写与前后空白）', () => {
   assert.equal(colorLiteral('#23845d'), '#23845d')

@@ -11,7 +11,6 @@ import type {
   DocPayload,
   FontFamily,
   MonoForLatin,
-  GitState,
   RecentEntry,
   TreeNode,
   WorkspaceEntry,
@@ -251,7 +250,18 @@ export const useAppStore = defineStore('app', () => {
    * 已经是 A」与「A 的树已加载」是两件事——只看前者会让首个工作区打开后树是空的。
    */
   const treeWorkspaceId = ref<string | null>(null)
-  const currentDoc = ref<DocPayload | null>(null)
+  /**
+   * 每个工作区的目录展开态（ADR-0008）。
+   *
+   * 树是**工作区的属性**，不是标签的：切标签时不该重排目录。存成按工作区
+   * 分组的映射，切回去还能看见原来展开的分支；工作区被移除时随手清掉。
+   *
+   * 只在内存里活：重启后回到「顶层目录展开」。持久化要处理「目录已删除 /
+   * 工作区已移除」的失效清理，等有实际抱怨再加（见 ADR-0008 的代价段）。
+   */
+  const treeExpanded = ref<Record<string, string[]>>({})
+  /** 已给哪个工作区播种过「顶层目录默认展开」（用户手动折叠后不再重置） */
+  const treeExpandedSeeded = ref<Set<string>>(new Set())
   const recent = ref<RecentEntry[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -307,14 +317,8 @@ export const useAppStore = defineStore('app', () => {
   async function adoptWorkspace(entry: WorkspaceEntry): Promise<WorkspaceEntry> {
     workspaces.value = [entry, ...workspaces.value.filter(w => w.id !== entry.id)]
     activeWorkspaceId.value = entry.id
-    currentDoc.value = null
     await loadTree(entry.id)
     return entry
-  }
-
-  async function addWorkspace(): Promise<WorkspaceEntry | null> {
-    const entry = unwrap(await window.docvi.workspaceAdd())
-    return entry ? adoptWorkspace(entry) : null
   }
 
   /** 只弹目录框、返回路径；添加前的探测流程从这里开始 */
@@ -333,47 +337,6 @@ export const useAppStore = defineStore('app', () => {
     return unwrap(await window.docvi.workspaceProbe(root))
   }
 
-  /* ---------- git 托管工作区 ---------- */
-
-  /** git 能力面：只在进入文档库时探测一次（版本不会在运行中变） */
-  const gitState = ref<GitState | null>(null)
-
-  async function loadGitState(): Promise<GitState | null> {
-    const state = unwrap(await window.docvi.gitState())
-    if (state) gitState.value = state
-    return state
-  }
-
-  /** 克隆远端仓库为托管工作区；进度事件由调用方订阅 */
-  async function cloneRepo(input: {
-    url: string
-    name: string
-    branch?: string
-  }): Promise<WorkspaceEntry | null> {
-    const entry = unwrap(await window.docvi.gitClone(input))
-    return entry ? adoptWorkspace(entry) : null
-  }
-
-  async function listBranches(id: string): Promise<string[] | null> {
-    return unwrap(await window.docvi.gitBranches(id))
-  }
-
-  /** 拉取更新（云端为准）；成功后重扫目录树，磁盘变了界面必须跟着变 */
-  async function pullWorkspace(
-    id: string,
-  ): Promise<{ branch: string; commits: number; changed: boolean } | null> {
-    const result = unwrap(await window.docvi.gitPull(id))
-    if (!result) return null
-    if (id === activeWorkspaceId.value) await loadTree(id)
-    return result
-  }
-
-  /**
-   * 切换分支。
-   *
-   * 切分支会换一棵工作树，工作区 id 随之变化（id 由路径派生）：这里按位置替换
-   * 条目而不是重新排序，用户的卡片顺序不该因为切分支而跳动。
-   */
   /**
    * 原地替换一条工作区记录（不重新排序）。
    *
@@ -386,17 +349,6 @@ export const useAppStore = defineStore('app', () => {
     else workspaces.value = [entry, ...workspaces.value]
   }
 
-  async function switchBranch(id: string, branch: string): Promise<WorkspaceEntry | null> {
-    const entry = unwrap(await window.docvi.gitSwitchBranch(id, branch))
-    if (!entry) return null
-    applyWorkspace(entry)
-    if (activeWorkspaceId.value === id) {
-      activeWorkspaceId.value = entry.id
-      await loadTree(entry.id)
-    }
-    return entry
-  }
-
   async function removeWorkspace(id: string): Promise<boolean> {
     const result = await window.docvi.workspaceRemove(id)
     if (!result.ok) {
@@ -404,13 +356,71 @@ export const useAppStore = defineStore('app', () => {
       return false
     }
     workspaces.value = workspaces.value.filter(w => w.id !== id)
+    // 树的状态跟着工作区走：移除就一起清，否则同名 id 复用时会出现幽灵展开态
+    delete treeExpanded.value[id]
+    treeExpandedSeeded.value.delete(id)
     if (activeWorkspaceId.value === id) {
       activeWorkspaceId.value = workspaces.value[0]?.id ?? null
       tree.value = []
-      currentDoc.value = null
       if (activeWorkspaceId.value) await loadTree(activeWorkspaceId.value)
     }
     return true
+  }
+
+  /** 当前工作区里哪些目录是展开的 */
+  const currentExpanded = computed(() => {
+    const id = activeWorkspaceId.value
+    return id ? (treeExpanded.value[id] ?? []) : []
+  })
+
+  /**
+   * 直接设定当前工作区的展开集合（DocTree 每次变化都调）。
+   *
+   * 首次调用时顺带播种「顶层目录默认展开」：树刚扫出来时用户还没做过任何操作，
+   * 全部收起等于「树是空的」。播种只做一次，之后用户的折叠意图说了算。
+   */
+  function setTreeExpanded(expanded: string[]): void {
+    const id = activeWorkspaceId.value
+    if (!id) return
+    if (!treeExpandedSeeded.value.has(id)) {
+      treeExpandedSeeded.value.add(id)
+      treeExpanded.value[id] = expanded.length
+        ? expanded
+        : tree.value.filter(node => node.type === 'dir').map(node => node.path)
+      return
+    }
+    treeExpanded.value[id] = expanded
+  }
+
+  /** 手动折叠前先确保已播种，避免「用户折叠了却被默认展开覆盖」 */
+  function ensureTreeExpandedSeeded(): void {
+    const id = activeWorkspaceId.value
+    if (!id || treeExpandedSeeded.value.has(id)) return
+    treeExpandedSeeded.value.add(id)
+    treeExpanded.value[id] = tree.value.filter(node => node.type === 'dir').map(node => node.path)
+  }
+
+  /**
+   * 把一组目录并进当前展开集合（只加不减）。
+   *
+   * 「定位当前文档」「展开所选」「移动后展开目标目录」都走这条：折叠会打乱用户
+   * 的浏览现场，这些入口只负责把要看的行露出来。
+   */
+  function expandTreePaths(paths: string[]): void {
+    if (!paths.length) return
+    ensureTreeExpandedSeeded()
+    const id = activeWorkspaceId.value
+    if (!id) return
+    const current = treeExpanded.value[id] ?? []
+    const merged = new Set([...current, ...paths])
+    if (merged.size !== current.length) treeExpanded.value[id] = [...merged]
+  }
+
+  /** 全部收起：顶层行保留在树里，其余折叠 */
+  function collapseTree(): void {
+    ensureTreeExpandedSeeded()
+    const id = activeWorkspaceId.value
+    if (id) treeExpanded.value[id] = []
   }
 
   async function openWorkspace(id: string): Promise<void> {
@@ -572,23 +582,20 @@ export const useAppStore = defineStore('app', () => {
     activeWorkspace,
     tree,
     treeWorkspaceId,
-    currentDoc,
+    currentExpanded,
+    setTreeExpanded,
+    ensureTreeExpandedSeeded,
+    expandTreePaths,
+    collapseTree,
     recent,
     loading,
     error,
     loadWorkspaces,
     loadRecent,
     adoptWorkspace,
-    addWorkspace,
     pickWorkspace,
     addWorkspaceAt,
     probeWorkspace,
-    gitState,
-    loadGitState,
-    cloneRepo,
-    listBranches,
-    pullWorkspace,
-    switchBranch,
     applyWorkspace,
     removeWorkspace,
     openWorkspace,

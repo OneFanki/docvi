@@ -15,14 +15,6 @@ export interface McpPlugin {
   trust?: string
 }
 
-/** 活跃组件（每 kind 至多一条——与宿主注册表同口径） */
-export interface McpComponent {
-  kind: string
-  title: unknown
-  description: unknown
-  plugin: string
-}
-
 export interface SearchHit {
   /** 展示用范围名：桌面 = 工作区名；容器 = `<仓库名>@<分支>` */
   workspace: string
@@ -73,9 +65,7 @@ export interface McpDeps {
   /** serverInfo.name，缺省 docvi */
   serverName?: string
   listPlugins(): McpPlugin[]
-  listComponents(): McpComponent[]
-  /** 读所属插件 docs/SKILL.md；缺失 / 越界返回 null */
-  componentDocs(kind: string): string | null | undefined
+  /** 读插件 docs/SKILL.md；缺失 / 越界返回 null */
   pluginDocs(name: string): string | null | undefined
   /** 提供后 search_docs 出现在工具面；缺省则整个工具不列出 */
   searchDocs?(query: string, limit: number): SearchHit[]

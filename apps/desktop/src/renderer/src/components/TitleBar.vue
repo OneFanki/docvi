@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { Blocks, PanelLeft, PanelRight, Search, Server, Settings } from 'lucide-vue-next'
+import { Blocks, PanelLeft, PanelRight, Search, Settings } from 'lucide-vue-next'
 import { onMounted, ref } from 'vue'
 
 import { useI18n } from '../lib/i18n'
-import { isWebHost } from '../lib/host'
 import { IS_MAC, MOD_LABEL } from '../lib/shortcuts'
 
 /**
@@ -52,14 +51,13 @@ const { t } = useI18n()
  */
 const devBuild = ref(false)
 onMounted(async () => {
-  if (isWebHost) return
   const info = await window.docvi.appRuntimeInfo()
   if (info.ok) devBuild.value = !info.data.packaged
 })
 </script>
 
 <template>
-  <header class="titlebar" :class="{ 'is-web': isWebHost, 'is-mac': IS_MAC }">
+  <header class="titlebar" :class="{ 'is-mac': IS_MAC }">
     <div class="titlebar__brand no-drag">
       <!--
         与应用图标同一套几何与配色（scripts/lib/logo.mjs 的 LOGO_MARK）：三张错位的
@@ -174,12 +172,11 @@ onMounted(async () => {
       </button>
 
       <!--
-        插件中心：桌面端有插件安装与启停，容器读者面没有（安装是运维的活）。
+        插件中心：桌面端有插件安装与启停。
         常驻在标题栏而不是塞进设置——插件会新增组件与主题，是「扩展能力」的
         一级入口，藏进设置等于没人知道它能扩展。
       -->
       <button
-        v-if="!isWebHost"
         v-tooltip="{ text: t('app.plugins'), placement: 'bottom' }"
         class="titlebar__icon"
         type="button"
@@ -188,22 +185,6 @@ onMounted(async () => {
       >
         <Blocks :size="15" :stroke-width="1.7" />
       </button>
-
-      <!--
-        平台运维：只有容器读者面有（运维页由部署器伺服）。放在标题栏右侧，
-        与其余图标同一条视觉行——此前它被绝对定位浮在标签栏上，位置是错的。
-      -->
-      <a
-        v-if="isWebHost"
-        v-tooltip="{ text: t('portal.opsHint'), placement: 'bottom' }"
-        class="titlebar__icon"
-        :aria-label="t('portal.ops')"
-        href="/_/admin"
-        target="_blank"
-        rel="noreferrer"
-      >
-        <Server :size="15" :stroke-width="1.7" />
-      </a>
     </div>
   </header>
 </template>
@@ -220,26 +201,16 @@ onMounted(async () => {
   background: var(--dv-ui-bg);
   border-bottom: 1px solid var(--dv-ui-line-soft);
   -webkit-app-region: drag;
-  /* 为 Windows 原生窗口按钮留出空间（titleBarOverlay 宽度）。
-     容器版没有原生窗口按钮，见模板上的 is-web 覆盖。 */
+  /* 为 Windows 原生窗口按钮留出空间（titleBarOverlay 宽度） */
   padding-right: 148px;
-}
-
-/* 容器读者面：没有原生窗口按钮，右侧图标直接贴边。
-   留 148px 会把设置/运维图标白白推离右边缘（用户实测「应该靠最右侧」）。 */
-.titlebar.is-web {
-  padding-right: 12px;
 }
 
 /*
  * macOS：窗口控制按钮（红绿灯）在**左侧**，主进程把三个按钮放在 x=12。
  * 左边必须让出约 78px，否则品牌标记会被压在红绿灯下面；右侧没有原生按钮，
  * Windows 的 148px overlay 占位必须收回，否则四个入口离右边缘差出一大截。
- *
- * 容器版（is-web）没有 traffic lights，`:not(.is-web)` 保证在浏览器里打开时
- * 仍按容器布局走。
  */
-.titlebar.is-mac:not(.is-web) {
+.titlebar.is-mac {
   padding-left: 78px;
   padding-right: 12px;
 }

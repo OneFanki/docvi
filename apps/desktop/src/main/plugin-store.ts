@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -31,15 +32,6 @@ const MANIFEST_NAMES = ['plugin.json', 'manifest.json']
 export interface PluginState {
   /** 插件 id → 是否启用；未记录的按默认（启用） */
   enabled: Record<string, boolean>
-  /**
-   * 插件 id → 已停用的组件 kind 列表。
-   *
-   * 为什么需要逐组件粒度：两个包声明同一个 kind 时，用户想要的是「换个实现」
-   * 而不是把整个包关掉（包里通常还有别的组件在用）。停用某个 kind 后该 kind
-   * 从活跃清单消失；若另有包声明同名 kind，那个实现自动顶上来——这就是
-   * 「同名切换」，不需要单独的切换 UI。
-   */
-  disabledComponents: Record<string, string[]>
 }
 
 export interface PluginStoreOptions {
@@ -59,8 +51,6 @@ export interface PluginStore {
   install(sourceDir: string): PluginRecord
   uninstall(id: string): void
   setEnabled(id: string, enabled: boolean): PluginRecord[]
-  /** 逐组件启停（kind 级）：停用后该 kind 不再活跃 */
-  setComponentEnabled(id: string, kind: string, enabled: boolean): PluginRecord[]
 }
 
 function fail(code: ErrorCode, message: string): Error {
@@ -108,7 +98,6 @@ function loadRecord(dir: string, origin: 'builtin' | 'user'): PluginRecord | nul
       enabled: false,
       dir,
       error: `${found.file} 不是合法 JSON`,
-      disabledComponents: [],
     }
   }
 
@@ -127,7 +116,6 @@ function loadRecord(dir: string, origin: 'builtin' | 'user'): PluginRecord | nul
       enabled: false,
       dir,
       error: result.errors.join('；'),
-      disabledComponents: [],
     }
   }
 
@@ -137,7 +125,6 @@ function loadRecord(dir: string, origin: 'builtin' | 'user'): PluginRecord | nul
     enabled: true,
     dir,
     error: null,
-    disabledComponents: [],
   }
 }
 
@@ -146,18 +133,9 @@ function readState(file: string): PluginState {
     const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<PluginState>
     return {
       enabled: raw.enabled && typeof raw.enabled === 'object' ? raw.enabled : {},
-      disabledComponents:
-        raw.disabledComponents && typeof raw.disabledComponents === 'object'
-          ? Object.fromEntries(
-              Object.entries(raw.disabledComponents).map(([name, kinds]) => [
-                name,
-                Array.isArray(kinds) ? kinds.filter(kind => typeof kind === 'string') : [],
-              ]),
-            )
-          : {},
     }
   } catch {
-    return { enabled: {}, disabledComponents: {} }
+    return { enabled: {} }
   }
 }
 
@@ -199,8 +177,7 @@ function compareVersions(a: string, b: string): number {
  *
  * 两种布局都要支持：
  *  - 扁平（开发态仓库 `plugins/<pack>/plugin.json`）；
- *  - 带版本层（打包产物 `resources/plugins/<pack>/<version>/plugin.json`，
- *    由 assemble-plugins.mjs 生成，与用户插件目录约定一致）。
+ *  - 带版本层（安装后的用户插件 `plugins/<pack>/<version>/plugin.json`）。
  * 有版本层时取版本号最大的，避免同包多版本被重复收录。
  */
 function resolvePackDir(dir: string): string | null {
@@ -259,7 +236,6 @@ export function createPluginStore(options: PluginStoreOptions): PluginStore {
       const override = state.enabled[record.manifest.name]
       record.enabled = record.error ? false : (override ?? true)
       // 逐组件停用：保留清单原样（面板要能列出并重新启用），另挂一份停用列表
-      record.disabledComponents = [...(state.disabledComponents[record.manifest.name] ?? [])]
     }
     return records.sort((a, b) => a.manifest.name.localeCompare(b.manifest.name))
   }
@@ -297,22 +273,6 @@ export function createPluginStore(options: PluginStoreOptions): PluginStore {
       persist()
       return scanAll()
     },
-    setComponentEnabled(id, kind, enabled) {
-      const record = scanAll().find(item => item.manifest.name === id)
-      if (!record) throw fail('E_NOT_FOUND', '插件不存在')
-      const declared = record.manifest.contributes?.components ?? []
-      if (!declared.some(item => item.kind === kind)) {
-        throw fail('E_INVALID', `插件 ${id} 没有声明组件 ${kind}`)
-      }
-      const next = new Set(state.disabledComponents[id] ?? [])
-      if (enabled) next.delete(kind)
-      else next.add(kind)
-      // 空列表不落盘：状态文件里只留真正被停用的项，读起来才不像噪音
-      if (next.size) state.disabledComponents[id] = [...next].sort()
-      else delete state.disabledComponents[id]
-      persist()
-      return scanAll()
-    },
   }
 }
 
@@ -321,14 +281,34 @@ export function createPluginStore(options: PluginStoreOptions): PluginStore {
  *
  * 协议处理器用它服务 `docvi://plugin/<id>/<file>`：
  * 插件可以在自己的 dist 里引用任意资源，但绝不能读到包外。
+ *
+ * 两道判定：规范化后仍在包内（挡 `..`），以及 **realpath 后再判一次**
+ * （挡住「包内放一个软链接指向包外」——字符串前缀对软链接无效）。
+ * 只返回普通文件；目录与设备文件不伺服。
  */
 export function resolvePluginAsset(pluginDir: string, relPath: string): string | null {
   if (!relPath || relPath.includes('\0')) return null
-  const base = resolve(pluginDir)
-  const target = resolve(base, relPath)
-  if (target !== base && !target.startsWith(base.endsWith(sep) ? base : `${base}${sep}`))
+  let base: string
+  try {
+    base = realpathSync(resolve(pluginDir))
+  } catch {
     return null
-  return target
+  }
+  const target = resolve(base, relPath)
+  if (target !== base && !target.startsWith(base + sep)) return null
+  let real: string
+  try {
+    real = realpathSync(target)
+  } catch {
+    return null
+  }
+  if (real !== base && !real.startsWith(base + sep)) return null
+  try {
+    if (!statSync(real).isFile()) return null
+  } catch {
+    return null
+  }
+  return real
 }
 
 /**
@@ -354,7 +334,6 @@ export function toView(record: PluginRecord): PluginRecordView {
     enabled: record.enabled,
     dir: record.dir,
     error: record.error,
-    disabledComponents: record.disabledComponents,
   }
 }
 

@@ -19,7 +19,6 @@
       "@docvi/shared": ["../../packages/shared/src/index.ts"],
       "@docvi/renderer-core": ["../../packages/renderer-core/src/index.ts"],
       "@docvi/editor": ["../../packages/editor/src/index.ts"],
-      "@plugins/*": ["../../plugins/*"],
       "@renderer/*": ["./src/renderer/src/*"]
     }
   },

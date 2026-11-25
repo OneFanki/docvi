@@ -1,12 +1,5 @@
-export {
-  renderMarkdown,
-  resolveLink,
-  extractPluginBlocks,
-  readFrontmatter,
-  toRootRelative,
-} from './markdown.ts'
+export { renderMarkdown, resolveLink, readFrontmatter, toRootRelative } from './markdown.ts'
 export type {
-  ContainerSyntax,
   Frontmatter,
   FrontmatterSnapshot,
   OutlineEntry,
@@ -14,19 +7,9 @@ export type {
   RenderResult,
 } from './markdown.ts'
 
-export { findPluginBlocks } from './plugin-blocks.ts'
-export type { PluginBlockSpan, PluginSyntaxDeclaration } from './plugin-blocks.ts'
-
 export { highlightPass } from './highlight.ts'
-export {
-  mermaidPass,
-  resolveAppearance,
-  diagramTitle,
-  cleanupMermaidFailureArtifacts,
-} from './mermaid.ts'
+export { mermaidPass, diagramTitle, cleanupMermaidFailureArtifacts } from './mermaid.ts'
 export { enhanceMermaidSvg } from './mermaid-hover.ts'
-
-export { ComponentRegistry, mountDeclarativeComponents, mountPluginBlocks } from './components.ts'
-export type { ComponentMeta, DeclarativeMount, MountOptions, RegistryEntry } from './components.ts'
+export { renderTex, registerMath } from './math.ts'
 
 export { colorLiteral } from './color-literal.ts'

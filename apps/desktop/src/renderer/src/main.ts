@@ -1,9 +1,3 @@
-/*
- * 宿主注入必须在 App 之前求值（见 lib/boot-host.ts 的说明）：
- * ESM 按 import 声明顺序求值，所以这条要放在所有界面模块之前。
- */
-import './lib/boot-host'
-
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 

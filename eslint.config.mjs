@@ -8,10 +8,10 @@ import globals from 'globals'
  * 仓库级 lint 口径：只拦真实缺陷与硬约束，风格归 prettier。
  *
  * 分层：
- * - scripts/ deployer/ 与构建配置：Node 环境
+ * - scripts/ 与构建配置：Node 环境
  * - apps/desktop/src/renderer/：浏览器环境（禁止 Node 与 electron，禁止反向依赖主进程）
  * - apps/desktop/src/service/：Node 环境，只复用 Markdown 文本管线
- * - plugins/：浏览器环境，Vue SFC，只允许依赖 vue
+ * - 第三方插件包（不在本仓）：浏览器环境，Vue SFC，只允许依赖 vue
  *
  * 存量债：`no-explicit-any` 在渲染层为 warn，由 scripts/lint.mjs 的基线棘轮
  * 控制——新增 any 会让 lint 失败，存量只能减不能增。
@@ -31,7 +31,6 @@ const IGNORES = [
   'courses/**',
   '.temp/**',
   'data/**',
-  'deployer/data/**',
 ]
 
 export default tseslint.config(
@@ -73,7 +72,7 @@ export default tseslint.config(
   },
   {
     // 构建配置与 Node 侧脚本可以自由使用 Node 内置模块与 any（配置对象形态多变）
-    files: ['**/*.config.ts', '**/*.config.mjs', 'scripts/**/*.ts', 'deployer/**/*.ts'],
+    files: ['**/*.config.ts', '**/*.config.mjs', 'scripts/**/*.ts'],
     languageOptions: { globals: { ...globals.node } },
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },

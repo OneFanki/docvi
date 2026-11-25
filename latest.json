@@ -1,6 +1,6 @@
 {
-  "version": "0.9.0",
+  "version": "1.0.0",
   "downloadUrl": "https://github.com/OneFanki/docvi/releases/latest",
-  "notes": "发现新版本时会弹窗说明「你会得到什么」：跨了几个版本就按版本分段列出，每段只放该版摘要，装完就是最新状态。以前只有一个「有新版本」的提示，不知道中间改了什么。",
+  "notes": "专注做通用 Markdown 编辑器：组件系统退役，文档改用 mermaid / 表格 / 原生 HTML 等标准写法，换个编辑器也读得懂；切标签不再闪、标签改成预览与固定、左侧树可直接换工作区。",
   "homepage": "https://github.com/OneFanki/docvi"
 }

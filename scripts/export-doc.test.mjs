@@ -165,21 +165,6 @@ test('阅读视图每个实例都接上了导出的三种格式', () => {
   )
 })
 
-test('只读宿主不显示导出入口', () => {
-  /*
-   * 容器读者面（`isReadOnlyHost`）没有主进程，导出要走 IPC 落盘——那里既没有
-   * IPC 也不该让读者下载整站文档。按钮必须与分享按钮同样受这个条件约束。
-   */
-  const reader = readFileSync(
-    new URL('../apps/desktop/src/renderer/src/components/ReaderView.vue', import.meta.url),
-    'utf8',
-  )
-  const buttonAt = reader.indexOf('ref="exportButton"')
-  assert.ok(buttonAt > 0, '找不到导出按钮')
-  const before = reader.slice(Math.max(0, buttonAt - 300), buttonAt)
-  assert.match(before, /v-if="!isReadOnlyHost"/, '导出按钮必须受 isReadOnlyHost 约束')
-})
-
 /* ---------- 打开所在文件夹 ---------- */
 
 test('「打开所在文件夹」不接受路径参数（不给任意路径唤起能力）', () => {

@@ -39,13 +39,6 @@ import ThemePicker from './ThemePicker.vue'
 const props = defineProps<{
   /** 深链分区：右键标签「标签页设置」直接跳到这里 */
   section?: 'general' | 'tabs' | 'service' | 'about'
-  /**
-   * 只读宿主（容器版）：本地服务、临时分享、桌面外壳都不存在。
-   *
-   * 服务分区整块隐藏，剩下「外观 / 标签页」——那两项是纯前端偏好，
-   * 容器里同样有（存在 localStorage）。
-   */
-  readonly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -148,17 +141,14 @@ function patchTabs(patch: Partial<typeof tabs.preferences>): void {
 }
 
 const activeSection = computed(() => {
-  // 容器版没有服务分区：深链指过来（旧书签 / 命令）时落回外观
-  if (props.readonly && props.section === 'service') return 'general'
-  if (props.readonly && props.section === 'about') return 'about'
   return props.section ?? 'general'
 })
 
-/** 分区列表：服务分区只在桌面宿主出现 */
+/** 分区列表 */
 const sections = computed(() => [
   { id: 'general' as const, label: t('settings.appearance') },
   { id: 'tabs' as const, label: t('tabs.section') },
-  ...(props.readonly ? [] : [{ id: 'service' as const, label: t('settings.exposure') }]),
+  { id: 'service' as const, label: t('settings.exposure') },
   { id: 'about' as const, label: t('settings.about') },
 ])
 
@@ -235,10 +225,10 @@ async function checkUpdate(): Promise<void> {
   }
 }
 
-/** 可以走应用内自动更新：有资产、有校验值、不是容器版 */
+/** 可以走应用内自动更新：有资产且有校验值 */
 const canAutoUpdate = computed(() => {
   const asset = about.value.update?.asset
-  return Boolean(asset?.sha256) && !props.readonly
+  return Boolean(asset?.sha256)
 })
 
 /** 下载 → 校验 → 就绪。进度由主进程推送，这里只更新本地状态 */
@@ -363,11 +353,8 @@ let unsubscribe: (() => void) | null = null
 
 onMounted(() => {
   void loadAbout()
-  // 埋点开关只在桌面宿主有意义（容器版没有本地写盘）
-  if (!props.readonly) void loadPerfTracing()
-  if (!props.readonly) void loadAutoCheck()
-  // 容器版没有服务进程也没有桌面外壳：这两个面板的数据源都不存在
-  if (props.readonly) return
+  void loadPerfTracing()
+  void loadAutoCheck()
   void store.load()
   void loadDesktop()
   // 服务自己推状态（崩溃重启 / 端口顺延），这里不再轮询
@@ -591,7 +578,7 @@ async function toggleAutoCheck(): Promise<void> {
         </button>
       </nav>
 
-      <template v-if="activeSection === 'service' && !readonly">
+      <template v-if="activeSection === 'service'">
         <section class="panel">
           <div class="panel__head">
             <h2 class="panel__title">
@@ -1301,11 +1288,7 @@ async function toggleAutoCheck(): Promise<void> {
               </button>
               <!-- 没有可用资产时说明具体原因，别让用户对着「未提供校验值」猜 -->
               <span v-if="!canAutoUpdate" class="hint hint--inline">
-                {{
-                  props.readonly
-                    ? t('about.webCannotUpdate')
-                    : (about.update.assetMissingReason ?? t('about.noChecksum'))
-                }}
+                {{ about.update.assetMissingReason ?? t('about.noChecksum') }}
               </span>
             </template>
           </div>

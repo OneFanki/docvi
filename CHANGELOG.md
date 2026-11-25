@@ -22,11 +22,35 @@
 `latest.json` 的 `notes` 是应用「关于」面板显示的那一行，取该版本摘要里最靠前的一条
 （太长会被截断显示）。改版本号时一起更新。
 
+## [1.0.0] - 2026-11-24
+
+### 中文
+
+- **专注做通用 Markdown 编辑器**：定制组件系统退役，文档改用标准写法——mermaid 画流程与状态机、Markdown 表格列字段、原生 `<details>` 做折叠、`<iframe sandbox>` 嵌交互图解。这些换成 Obsidian、Typora 或 GitHub 打开都看得见，不再只有 docvi 能读
+- **切标签不再闪一下**：以前切换标签会把整个阅读视图销毁重建，滚动位置要等代码高亮和图表都跑完才恢复，中间会短暂回到顶部再跳回原处。现在阅读视图跨标签复用，切换后位置立刻就在原处
+- **标签改成「预览 / 固定」**：单击文档只在斜体预览标签里打开，再点别的就替换它；双击（或开始编辑）才固定成正式标签。连看十篇文档不会再攒出十个标签
+- **左栏变成常驻的单工作区导航**：删掉文档库首屏，左栏顶部一个切换器决定显示哪个工作区，下面就是它的目录树。切换工作区**不会重置标签**——多个工作区的标签可以同时开着，切回来还是原处。开设置页时左栏照样在，和 VSCode 一样
+- **容器版与 git 功能移除**：本地服务（MCP 与局域网临时分享）完全保留；克隆仓库、切分支、拉取这些 git 操作已去掉，工作区管理不受影响
+- **旧文档不用改，但会被提醒**：含旧组件写法的文档照常打开（`<at-*>` 标签渲染为空白，数据仍在 frontmatter），导出 Markdown 时会提示有几处应当迁移
+
+### English
+
+- **Focused as a plain Markdown editor**: the custom component system is retired and documents use standard syntax — mermaid for flows and state machines, Markdown tables for fields, native `<details>` for collapsing, `<iframe sandbox>` for interactive diagrams. All of it is readable in Obsidian, Typora or on GitHub, not only in docvi
+- **Switching tabs no longer flashes**: tab switches used to tear down and rebuild the whole reading view, so the scroll position could only be restored after syntax highlighting and diagrams finished — leaving a brief jump back to the top. The reading view is now reused across tabs and lands in place immediately
+- **Tabs are now preview/pinned**: a single click opens a document in an italic preview tab, and the next click replaces it; double-clicking (or starting to edit) pins it for real. Ten documents in a row no longer leave ten tabs behind
+- **The sidebar is a permanent single-workspace navigator**: the library start screen is gone. A switcher at the top of the sidebar decides which workspace is shown, with its tree right below. Switching workspaces **never resets tabs** — tabs from several workspaces can stay open side by side and come back exactly as they were. The sidebar stays visible on the settings page too, just like VSCode
+- **Container build and git features removed**: the local service (MCP and LAN temporary sharing) is fully intact; cloning, branch switching and pulling are gone, while workspace management is unaffected
+- **Old documents still open, with a heads-up**: files using the retired component syntax load fine (the `<at-*>` tags render blank; their data stays in frontmatter), and exporting Markdown reports how many spots are worth migrating
+
 ## [未发布]
 
 ### 中文
 
+- **支持数学公式**：`$E = mc^2$` 行内、行首 `$$` 成块，TeX 语法。用 KaTeX 解析但输出 MathML，所以分享页不用加载任何脚本、导出 HTML 与 PDF 也不用带字体；解析失败的公式标红并保留源码，不会白屏。`$5 到 $10` 这类货币写法不会被误认成公式
+
 ### English
+
+- **Math formulas are supported**: `$E = mc^2$` inline, `$$` at line start for a block, TeX syntax. It parses with KaTeX but emits MathML, so shared pages need no extra script and exported HTML/PDF carry no font files; a formula that fails to parse is shown in red with its source kept instead of blanking the page. Money like `$5 to $10` is never mistaken for a formula
 
 ## [0.9.0] - 2026-11-23
 

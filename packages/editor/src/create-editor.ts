@@ -13,8 +13,6 @@ import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 
-import type { ComponentRegistry } from '@docvi/renderer-core'
-
 import { createLivePreview, refreshDecorations } from './live-preview.ts'
 import { headingBadge } from './heading-badge.ts'
 import { contextReporter, type ContextCallbacks } from './context.ts'
@@ -206,13 +204,6 @@ export interface CreateEditorOptions {
   parent: HTMLElement
   /** live = 实时预览（光标行展开源码），source = 纯源码 */
   mode: 'live' | 'source'
-  /** 组件注册表：块级组件卡片与阅读态共用 */
-  registry: ComponentRegistry
-  /**
-   * 插件声明的容器语法（`::: merged` 之类），与阅读视图同一份。
-   * 缺省时容器块按普通文本显示——不会假装渲染一个没注册的语法。
-   */
-  containerSyntax?: Array<{ name: string; component: string; form?: 'container' | 'fence' }>
   /** 文档在内容根内的相对路径：块内图片按它解析相对引用 */
   docPath?: string
   /** 图片前缀（桌面端 `docvi://asset/<工作区>`，容器 `/<仓库>`），与阅读视图同一份 */
@@ -421,8 +412,6 @@ export function createEditor(options: CreateEditorOptions): EditorHandle {
   // 两个模式的装饰层都提前构造：切换时只替换隔间内容，不重建文档
   const liveExtension: Extension = [
     createLivePreview({
-      registry: options.registry,
-      containerSyntax: options.containerSyntax ?? [],
       ...(options.docPath ? { docPath: options.docPath } : {}),
       ...(options.assetPrefix ? { assetPrefix: options.assetPrefix } : {}),
       ...(options.onEditTable ? { onEditTable: options.onEditTable } : {}),

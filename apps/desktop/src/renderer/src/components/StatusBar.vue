@@ -44,8 +44,6 @@ const props = defineProps<{
   contentWidth?: 'full' | 'measure'
   /** 源码折行：wrap / nowrap */
   editorWrap?: 'wrap' | 'nowrap'
-  /** 只读宿主（容器版）：隐藏编辑模式与服务芯片——两者在那里都不存在 */
-  readonly?: boolean
   /** 正在按磁盘重读当前文档（按钮转起来，避免重复点击） */
   reloading?: boolean
 }>()
@@ -299,7 +297,7 @@ onMounted(() => {
 
 /** 控件数量变化（模式按钮 / 折行开关显隐）后重新判断是否需要滚动 */
 watch(
-  () => [props.mode, props.doc, props.readonly, props.editorWrap, taskLabel.value] as const,
+  () => [props.mode, props.doc, props.editorWrap, taskLabel.value] as const,
   () => void nextTick(syncControlsOverflow),
 )
 
@@ -377,14 +375,14 @@ onBeforeUnmount(() => {
           </button>
         </span>
 
-        <span v-if="dirty && !readonly" class="status__dirty">{{ t('status.dirty') }}</span>
+        <span v-if="dirty" class="status__dirty">{{ t('status.dirty') }}</span>
 
         <!--
         折行开关：只在源码/分屏下有意义（实时预览不显示原始换行、阅读态没有源码）。
         它是唯一会凭空出现/消失的控件，所以必须排在模式按钮**左边**。
       -->
         <button
-          v-if="doc && !readonly && (mode === 'source' || mode === 'split')"
+          v-if="doc && (mode === 'source' || mode === 'split')"
           v-tooltip="t('status.editorWrap')"
           class="status__btn status__btn--fixed"
           :class="{ 'is-on': editorWrap === 'nowrap' }"
@@ -396,7 +394,7 @@ onBeforeUnmount(() => {
           <span>{{ editorWrap === 'nowrap' ? t('status.wrapOff') : t('status.wrapOn') }}</span>
         </button>
 
-        <template v-if="doc && !readonly">
+        <template v-if="doc">
           <button
             v-tooltip="t('status.mode.read')"
             class="status__btn"
@@ -512,7 +510,6 @@ onBeforeUnmount(() => {
         服务是独立进程，用户需要一眼看到「对外那条通道开着没」，而不是进设置才发现它挂了。
       -->
         <button
-          v-if="!readonly"
           v-tooltip="serviceTitle"
           class="status__service status__btn--fixed"
           type="button"

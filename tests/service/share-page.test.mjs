@@ -268,3 +268,58 @@ test('分享页带图表放大层的样式', async () => {
     '正文的 max-width 会把放大后的 SVG 压回去，必须显式解除',
   )
 })
+
+/*
+ * CSP：分享页在**读者的普通浏览器**里打开，不享受 Electron 渲染进程那套策略。
+ * 正文是用户 Markdown 经 `html: true` 渲染出来的，作者写下的 <script> /
+ * onerror= / javascript: 链接默认都会执行。没有 CSP 时，一篇被分享的文档
+ * 就能在同源下拿到脚本执行权——那等于拿到全部分享路径与 /share-assets/ 的读写面。
+ */
+test('分享页带 CSP，禁止内联脚本与事件属性', async () => {
+  const root = tempDir('csp')
+  writeFile(root, 'index.md', '# x')
+  const out = await createShareRenderer().renderShareDoc(shareOf(root, 'dir'), '', {
+    theme: 'graphite',
+    appearance: 'dark',
+    tokens: {},
+  })
+  assert.ok(out)
+
+  const meta = /<meta http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(out.html)
+  assert.ok(meta, '分享页必须带 CSP meta')
+
+  const policy = meta[1]
+  assert.match(policy, /script-src 'self'/, '脚本只允许同源（拦内联 <script> 与 on* 属性）')
+  assert.doesNotMatch(policy, /script-src[^;]*'unsafe-inline'/, '脚本绝不能放开 unsafe-inline')
+  assert.doesNotMatch(policy, /script-src[^;]*'unsafe-eval'/, '脚本绝不能放开 unsafe-eval')
+  assert.match(policy, /object-src 'none'/, '插件（object/embed）必须封死')
+  assert.match(policy, /base-uri 'none'/, '<base> 劫持必须封死')
+  /*
+   * 样式必须允许内联：主题令牌与正文样式都以 <style> 内联下发，
+   * 收紧到这里会让分享页完全失去配色。这条是**有意为之**，不是遗漏。
+   */
+  assert.match(policy, /style-src[^;]*'unsafe-inline'/, '内联样式是分享页的既定形态')
+})
+
+test('正文里的 <script> 不会被当作可执行内容（转义或留在不可执行位置）', async () => {
+  const root = tempDir('inline-script')
+  writeFile(
+    root,
+    'index.md',
+    '# x\n\n<script>window.__pwned = 1</script>\n\n<img src=x onerror="window.__pwned=2">\n',
+  )
+  const out = await createShareRenderer().renderShareDoc(shareOf(root, 'dir'), '', {
+    theme: 'graphite',
+    appearance: 'dark',
+    tokens: {},
+  })
+  assert.ok(out)
+  /*
+   * `html: true` 会让这类标签原样进页面，所以**不能**断言「页面里没有这串字符」
+   * ——那会与既定渲染策略冲突。真正拦住它的是上面那条 CSP：`script-src 'self'`
+   * 下内联脚本不执行、on* 属性不执行。这里只钉住 CSP 存在且脚本面未放开。
+   */
+  const meta = /<meta http-equiv="Content-Security-Policy" content="([^"]*)"/.exec(out.html)
+  assert.ok(meta, '没有 CSP 时这类正文就是可执行的')
+  assert.match(meta[1], /script-src 'self'/)
+})

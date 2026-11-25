@@ -7,8 +7,6 @@ import {
   isErrorCode,
   type DesktopPrefsState,
   type ErrorCode,
-  type GitProgressEvent,
-  type GitState,
   type ImageImportRequest,
   type ImageImportResult,
   type MarketCatalog,
@@ -35,7 +33,6 @@ import {
   scanTree,
 } from './content.ts'
 import { copyFilesToClipboard } from './fs-clipboard.ts'
-import { createGitService } from './git.mjs'
 import { exportDocument, revealLastExport } from './export-doc.ts'
 import { clearDraft, readDraft, writeDoc, writeDraft } from './fs-write.ts'
 import { copyEntry, createEntry, moveEntry, renameEntry, resolveForTrash } from './fs-ops.ts'
@@ -58,7 +55,6 @@ import {
   createRecentStore,
   createWorkspaceEntry,
   createWorkspaceStore,
-  workspaceIdFor,
   type RecentStore,
   type WorkspaceStore,
 } from './store.ts'
@@ -98,7 +94,6 @@ export interface DesktopHostOptions {
   setAutostart: (enabled: boolean) => Promise<DesktopPrefsState>
   setCloseToTray: (enabled: boolean) => Promise<DesktopPrefsState>
   /** 推送克隆进度到所有窗口（克隆可能要几十秒，没有进度就是假死） */
-  pushGitProgress: (event: GitProgressEvent) => void
   /** 主题切换时同步窗口按钮配色（Windows 原生 overlay 不读页面 CSS） */
   setWindowTheme: (theme: string) => void
 }
@@ -123,9 +118,6 @@ export function registerIpc(
   const desktopPrefs = desktop.desktopPrefs
   const setAutostart = desktop.setAutostart
   const setCloseToTray = desktop.setCloseToTray
-  /** git 服务：副本与工作树全部落在数据目录内，绝不触碰用户目录 */
-  const git = createGitService(app.getPath('userData'))
-
   /** 工作区列表 → 对外形状：标出内建默认工作区（派生字段，不落盘） */
   const listWorkspaces = (): WorkspaceEntry[] =>
     store
@@ -136,21 +128,6 @@ export function registerIpc(
           : entry,
       )
 
-  ipcMain.handle(IPC.appInfo, () =>
-    ok({
-      name: 'docvi',
-      version: app.getVersion(),
-      platform: process.platform,
-      dataDir: app.getPath('userData'),
-    }),
-  )
-
-  /**
-   * 外链交给系统浏览器。
-   *
-   * 只放行三种协议：链接来自内容作者，`file:` / 自定义协议都可能被拿来启动
-   * 本机程序；放行等于把「点一下链接」变成任意命令执行入口。
-   */
   ipcMain.handle(IPC.appOpenExternal, async (_event, url: unknown): Promise<Result<null>> => {
     const target = typeof url === 'string' ? url.trim() : ''
     if (!/^(https?:\/\/|mailto:)/i.test(target)) {
@@ -315,113 +292,6 @@ export function registerIpc(
         ? { ...updated, default: true }
         : updated
     return ok(marked)
-  })
-
-  /* ---------- git（平台自持副本 + 分支工作树） ---------- */
-
-  /**
-   * 取一个 git 托管工作区并校验它是托管形态。
-   *
-   * 三个 git 操作都只接受 id（不接受渲染层传来的 repo 名/路径）：副本名与工作树
-   * 路径全部由主进程从工作区表反查，渲染层无法构造出指向任意目录的调用。
-   */
-  const gitWorkspace = (id: unknown): WorkspaceEntry => {
-    if (typeof id !== 'string' || !id) throw fail('E_INVALID', '工作区 id 必须是非空字符串')
-    const entry = store.find(id)
-    if (!entry) throw fail('E_NOT_FOUND', '工作区不存在')
-    if (!entry.git) throw fail('E_INVALID', '该工作区不是 git 托管的工作区')
-    return entry
-  }
-
-  ipcMain.handle(IPC.gitState, async (): Promise<Result<GitState>> => {
-    try {
-      const version = (await git.gitAvailable()).trim()
-      return ok({ available: true, version, reason: null })
-    } catch (error) {
-      return ok({
-        available: false,
-        version: null,
-        reason: error instanceof Error ? error.message : '未检测到 git',
-      })
-    }
-  })
-
-  ipcMain.handle(IPC.gitClone, async (_event, input: unknown): Promise<Result<WorkspaceEntry>> => {
-    try {
-      if (!input || typeof input !== 'object') return fail('E_INVALID', '参数应为对象')
-      const raw = input as { url?: unknown; name?: unknown; branch?: unknown }
-      if (typeof raw.url !== 'string' || !raw.url.trim()) return fail('E_INVALID', '仓库地址必填')
-      if (typeof raw.name !== 'string' || !raw.name.trim()) return fail('E_INVALID', '名称必填')
-      if (raw.branch !== undefined && typeof raw.branch !== 'string') {
-        return fail('E_INVALID', 'branch 必须是字符串')
-      }
-      const name = raw.name.trim()
-      const result = await git.clone({
-        url: raw.url.trim(),
-        name,
-        branch: raw.branch ?? null,
-        onProgress: progress => desktop.pushGitProgress({ workspaceName: name, ...progress }),
-      })
-      const entry: WorkspaceEntry = {
-        id: workspaceIdFor(result.path),
-        name,
-        root: result.path,
-        addedAt: Date.now(),
-        lastOpenedAt: Date.now(),
-        git: { repo: result.repo, url: raw.url.trim(), branch: result.branch },
-      }
-      const added = store.add(entry)
-      service.sync()
-      return ok(added)
-    } catch (error) {
-      return toFailure(error)
-    }
-  })
-
-  ipcMain.handle(IPC.gitPull, async (_event, id: unknown) => {
-    try {
-      const entry = gitWorkspace(id)
-      const result = await git.pull({ repo: entry.git!.repo, branch: entry.git!.branch })
-      return ok(result)
-    } catch (error) {
-      return toFailure(error)
-    }
-  })
-
-  ipcMain.handle(IPC.gitBranches, async (_event, id: unknown) => {
-    try {
-      const entry = gitWorkspace(id)
-      const result = await git.branches({ repo: entry.git!.repo })
-      return ok(result.branches)
-    } catch (error) {
-      return toFailure(error)
-    }
-  })
-
-  ipcMain.handle(IPC.gitSwitchBranch, async (_event, id: unknown, branch: unknown) => {
-    try {
-      const entry = gitWorkspace(id)
-      if (typeof branch !== 'string' || !branch.trim()) return fail('E_INVALID', '分支名必填')
-      const result = await git.switchBranch({ repo: entry.git!.repo, branch: branch.trim() })
-      /*
-       * root 换成新工作树后工作区 id 也要跟着换（id 由路径派生）：否则同一份副本的
-       * 两个分支会共用一个 id，标签与会话恢复会互相覆盖。旧条目先移出，再按新路径
-       * 重新入表——等于「切分支 = 换一个工作区」，语义最直白。
-       */
-      store.remove(entry.id)
-      const next: WorkspaceEntry = {
-        ...entry,
-        id: workspaceIdFor(result.path),
-        root: result.path,
-        lastOpenedAt: Date.now(),
-        git: { ...entry.git!, branch: result.branch },
-      }
-      const added = store.add(next)
-      service.sync()
-      return ok(added)
-    } catch (error) {
-      return toFailure(error)
-    }
   })
 
   ipcMain.handle(IPC.workspaceTouch, (_event, id: unknown): Result<null> => {
@@ -1065,32 +935,13 @@ export function registerIpc(
       if (typeof id !== 'string' || !id) return fail('E_INVALID', 'id 必须是非空字符串')
       if (typeof enabled !== 'boolean') return fail('E_INVALID', 'enabled 必须是布尔值')
       const next = plugins.setEnabled(id, enabled)
-      // 插件集变了：服务侧的组件清单跟着变（MCP 的 list_components 直接反映）
+      // 插件集变了：服务侧的插件清单跟着变（MCP 的 list_plugins 直接反映）
       service.sync()
       return ok(next.map(toView))
     } catch (error) {
       return toFailure(error)
     }
   })
-
-  ipcMain.handle(
-    IPC.pluginSetComponentEnabled,
-    (_event, id: unknown, kind: unknown, enabled: unknown) => {
-      try {
-        if (typeof id !== 'string' || !id) return fail('E_INVALID', 'id 必须是非空字符串')
-        if (typeof kind !== 'string' || !kind) return fail('E_INVALID', 'kind 必须是非空字符串')
-        if (typeof enabled !== 'boolean') return fail('E_INVALID', 'enabled 必须是布尔值')
-        const next = plugins.setComponentEnabled(id, kind, enabled)
-        // 活跃组件集变了：MCP 的 list_components 也要立刻反映
-        service.sync()
-        return ok(next.map(toView))
-      } catch (error) {
-        return toFailure(error)
-      }
-    },
-  )
-
-  /* ---------- 本地服务 ---------- */
 
   ipcMain.handle(IPC.serviceState, () => ok(service.state()))
 

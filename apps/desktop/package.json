@@ -1,7 +1,7 @@
 {
   "name": "@docvi/desktop",
   "productName": "docvi",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -22,6 +22,9 @@
     "build:share-assets": "node scripts/build-share-assets.mjs"
   },
   "dependencies": {
+    "@docvi/editor": "workspace:*",
+    "@docvi/plugin-api": "workspace:*",
+    "@docvi/plugin-runtime": "workspace:*",
     "@docvi/renderer-core": "workspace:*",
     "@docvi/shared": "workspace:*",
     "lucide-vue-next": "1.0.0",

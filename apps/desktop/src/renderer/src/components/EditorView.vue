@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { ComponentRegistry, toRootRelative, type OutlineEntry } from '@docvi/renderer-core'
+import { toRootRelative, type OutlineEntry } from '@docvi/renderer-core'
 import {
   createEditor,
   parseImage,
@@ -16,9 +16,7 @@ import {
   type TableModel,
 } from '@docvi/editor'
 
-import { BUILTIN_KINDS } from '../plugins/builtin'
 import { useDocumentStore } from '../stores/documents'
-import { usePluginStore } from '../stores/plugins'
 import { useI18n } from '../lib/i18n'
 import { MOD_LABEL } from '../lib/shortcuts'
 import { buildInsertPlan, filterItems, type InsertItem } from '../lib/insert-menu'
@@ -86,7 +84,6 @@ const emit = defineEmits<{
 }>()
 
 const documents = useDocumentStore()
-const plugins = usePluginStore()
 const { t } = useI18n()
 const host = ref<HTMLElement | null>(null)
 const saving = ref(false)
@@ -98,16 +95,6 @@ const dirty = computed(() => (record.value ? record.value.text !== record.value.
 const displayName = computed(
   () => record.value?.name ?? props.absolutePath.split(/[/\\]/).pop() ?? props.absolutePath,
 )
-
-/** 组件注册表：与阅读视图同一份（块级组件卡片复用同一条渲染管线） */
-const registry = new ComponentRegistry()
-for (const item of BUILTIN_KINDS) {
-  registry.register(item.kind, item.component, {
-    title: item.title,
-    description: item.description,
-    packageName: 'docs-plugin-base',
-  })
-}
 
 let editor: EditorHandle | null = null
 let draftTimer: number | null = null
@@ -473,13 +460,6 @@ function mountEditor(): void {
     parent: host.value,
     mode: props.mode,
     wrap: props.wrap,
-    registry,
-    // 容器语法（::: merged）必须和阅读视图同一份，否则同一块两处长得不一样
-    containerSyntax: plugins.syntax.map(item => ({
-      name: item.name,
-      component: item.component,
-      form: item.form,
-    })),
     // 块内图片的解析基准：写死文件名会让子目录文档的图像全部取错
     docPath: props.docPath ?? current.relPath ?? current.name,
     ...(props.assetPrefix ? { assetPrefix: props.assetPrefix } : {}),

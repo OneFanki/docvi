@@ -28,7 +28,14 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  open: [path: string]
+  /**
+   * 打开文档。第二个参数区分单击与双击：
+   *  - false（单击）→ 在预览标签里打开，下一次单击会替换它；
+   *  - true（双击）→ 固定成正式标签。
+   *
+   * 目录行恒传 false：点目录是「进去看看」，本来就不该占一个固定标签。
+   */
+  open: [path: string, pin: boolean]
   toggle: [path: string]
   /** 右键：交给 DocTree 弹菜单（需要节点路径与是否目录） */
   context: [event: MouseEvent, path: string]
@@ -101,15 +108,26 @@ function onRowClick(event: MouseEvent): void {
     // 折叠与进入绑在一起会出现「刚打开的目录自己收起来，子页全部消失」，
     // 用户想点下一层还得再展开一次。折叠只由箭头负责。
     if (canEnter.value) {
-      emit('open', props.node.landing as string)
+      emit('open', props.node.landing as string, false)
       if (!isOpen.value) emit('toggle', props.node.path)
     } else {
       emit('toggle', props.node.path)
     }
   } else {
-    emit('open', props.node.path)
+    emit('open', props.node.path, false)
   }
   emit('select', 'single', props.node.path)
+}
+
+/**
+ * 双击文档 = 固定标签（VSCode 语义）。
+ *
+ * 只在文档行生效：双击目录的常见意图是「展开/折叠」，改成固定标签会让
+ * 目录树失去它最基本的手感。目录的展开入口是箭头与单击，双击不加行为。
+ */
+function onRowDoubleClick(): void {
+  if (isDir.value) return
+  emit('open', props.node.path, true)
 }
 
 /* ---------- 拖拽 ---------- */
@@ -165,6 +183,7 @@ function onDrop(event: DragEvent): void {
     :style="{ '--depth': depth }"
     :draggable="draggable ?? false"
     @click="onRowClick"
+    @dblclick="onRowDoubleClick"
     @contextmenu="emit('context', $event, node.path)"
     @dragstart="onDragStart"
     @dragend="emit('dragEnd', $event)"
@@ -206,7 +225,7 @@ function onDrop(event: DragEvent): void {
       :focused-path="focusedPath"
       :drop-target="dropTarget"
       :draggable="draggable"
-      @open="emit('open', $event)"
+      @open="(path, pin) => emit('open', path, pin)"
       @toggle="emit('toggle', $event)"
       @context="(event, path) => emit('context', event, path)"
       @select="(mode, path) => emit('select', mode, path)"

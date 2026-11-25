@@ -117,16 +117,51 @@ test('UI 尺度与动效别名有定义（缺了会让圆角/过渡静默失效�
 })
 
 test('插件主题覆盖三层：只声明部分层的主题会拼出半截外观', () => {
-  const sea = JSON.parse(
-    readFileSync(new URL('../plugins/base/themes/sea.json', import.meta.url), 'utf8'),
-  )
+  /*
+   * 用合成数据而不是读某个插件包的文件：这条断言守的是「三层都要覆盖」这个
+   * 契约，不是某个具体主题的配色。内置组件包已随组件系统退役，插件作者仍可
+   * 交主题，所以样例数据留在这里即可。
+   */
+  const sample = {
+    '--dv-ui-bg': '#0b161c',
+    '--dv-ui-surface-1': '#0f1e26',
+    '--dv-ui-surface-2': '#12252f',
+    '--dv-ui-surface-3': '#17303c',
+    '--dv-ui-line': '#1e3a47',
+    '--dv-ui-line-soft': '#162c36',
+    '--dv-ui-text': '#e4f0f4',
+    '--dv-ui-text-2': '#c2d8e0',
+    '--dv-ui-text-muted': '#8aa6b2',
+    '--dv-ui-text-dim': '#6b8794',
+    '--dv-ui-accent': '#5cb3c9',
+    '--dv-doc-bg': '#0e1b22',
+    '--dv-doc-surface': '#122530',
+    '--dv-doc-surface-2': '#17303d',
+    '--dv-doc-border': '#23414f',
+    '--dv-doc-border-strong': '#2f5567',
+    '--dv-doc-text': '#e4f0f4',
+    '--dv-doc-text-2': '#c2d8e0',
+    '--dv-doc-text-muted': '#8aa6b2',
+    '--dv-doc-text-body': '#d4e6ec',
+    '--dv-doc-accent': '#5cb3c9',
+    '--dv-ed-bg': '#0b161c',
+    '--dv-ed-text': '#c2d8e0',
+    '--dv-ed-caret': '#5cb3c9',
+    '--dv-ed-selection': 'rgb(92 179 201 / 28%)',
+    '--dv-ed-gutter-bg': '#081116',
+    '--dv-ed-panel': '#0f1e26',
+    '--dv-ed-syntax-keyword': '#a99be0',
+    '--dv-ed-syntax-string': '#8fc9a0',
+    '--dv-ed-md-heading': '#e8f4f8',
+    '--dv-ed-md-link': '#6fc3d9',
+  }
   const prefixes = ['--dv-ui-', '--dv-doc-', '--dv-ed-']
   for (const prefix of prefixes) {
-    const count = Object.keys(sea).filter(key => key.startsWith(prefix)).length
+    const count = Object.keys(sample).filter(key => key.startsWith(prefix)).length
     assert.ok(count >= 10, `${prefix}* 只有 ${count} 个变量，不足以构成一套完整主题`)
   }
   // UI 层必须覆盖到「会直接显示在窗口上」的那几项，缺一项就会出现拼色
   for (const key of ['--dv-ui-bg', '--dv-ui-surface-1', '--dv-ui-text', '--dv-ui-accent']) {
-    assert.ok(key in sea, `缺少 ${key}`)
+    assert.ok(key in sample, `缺少 ${key}`)
   }
 })

@@ -91,8 +91,3 @@ export function startTask(
 }
 
 /** 手动结束（异常路径，不显示完成提示） */
-export function clearTask(key: string): void {
-  if (taskState.current?.key !== key) return
-  taskState.current = null
-  taskState.cancel = null
-}

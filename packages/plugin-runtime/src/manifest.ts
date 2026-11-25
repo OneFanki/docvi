@@ -135,53 +135,6 @@ export function validateManifest(raw: unknown, hostApiVersion = '1'): Validation
 
   /* ---- 贡献点 ---- */
   const contributesRaw = isRecord(raw.contributes) ? raw.contributes : {}
-  // 旧 manifest：components 直接挂在顶层。归一化进 contributes，并提示迁移。
-  const legacyComponents = raw.components
-  if (legacyComponents !== undefined && contributesRaw.components === undefined) {
-    notices.push('顶层 components 已废弃，请迁移到 contributes.components')
-  }
-  const componentsRaw = contributesRaw.components ?? legacyComponents
-
-  const components: NonNullable<PluginManifest['contributes']>['components'] = []
-  if (componentsRaw !== undefined) {
-    if (!Array.isArray(componentsRaw)) errors.push('contributes.components 必须是数组')
-    else {
-      const seen = new Set<string>()
-      for (const [index, item] of componentsRaw.entries()) {
-        if (!isRecord(item)) {
-          errors.push(`components[${index}] 不是对象`)
-          continue
-        }
-        const kind = typeof item.kind === 'string' ? item.kind.trim() : ''
-        if (!kind) {
-          errors.push(`components[${index}].kind 缺失`)
-          continue
-        }
-        if (seen.has(kind)) {
-          errors.push(`components 内 kind 重复：${kind}`)
-          continue
-        }
-        seen.add(kind)
-        const title = localized(item.title)
-        const itemDescription = localized(item.description)
-        if (!title) errors.push(`components[${index}].title.zh 缺失`)
-        if (!itemDescription) errors.push(`components[${index}].description.zh 缺失`)
-        const example = item.example === undefined ? undefined : safePath(item.example)
-        if (item.example !== undefined && !example) {
-          errors.push(`components[${index}].example 非法路径`)
-        }
-        if (title && itemDescription) {
-          components.push({
-            kind,
-            title,
-            description: itemDescription,
-            ...(example ? { example } : {}),
-          })
-        }
-      }
-    }
-  }
-
   const themes: NonNullable<PluginManifest['contributes']>['themes'] = []
   if (contributesRaw.themes !== undefined) {
     if (!Array.isArray(contributesRaw.themes)) errors.push('contributes.themes 必须是数组')
@@ -203,39 +156,6 @@ export function validateManifest(raw: unknown, hostApiVersion = '1'): Validation
 
         if (id && title && appearance && tokens) {
           themes.push({ id, title, appearance, tokens })
-        }
-      }
-    }
-  }
-
-  const markdownSyntax: NonNullable<PluginManifest['contributes']>['markdownSyntax'] = []
-  if (contributesRaw.markdownSyntax !== undefined) {
-    if (!Array.isArray(contributesRaw.markdownSyntax)) {
-      errors.push('contributes.markdownSyntax 必须是数组')
-    } else {
-      for (const [index, item] of contributesRaw.markdownSyntax.entries()) {
-        if (!isRecord(item)) {
-          errors.push(`markdownSyntax[${index}] 不是对象`)
-          continue
-        }
-        const syntaxName = typeof item.name === 'string' ? item.name.trim() : ''
-        const form = item.form === 'fence' || item.form === 'container' ? item.form : null
-        const component = typeof item.component === 'string' ? item.component.trim() : ''
-        const title = localized(item.title)
-        const itemDescription = localized(item.description)
-        if (!syntaxName) errors.push(`markdownSyntax[${index}].name 缺失`)
-        if (!form) errors.push(`markdownSyntax[${index}].form 必须是 fence 或 container`)
-        if (!component) errors.push(`markdownSyntax[${index}].component 缺失`)
-        if (!title) errors.push(`markdownSyntax[${index}].title.zh 缺失`)
-        if (!itemDescription) errors.push(`markdownSyntax[${index}].description.zh 缺失`)
-        if (syntaxName && form && component && title && itemDescription) {
-          markdownSyntax.push({
-            name: syntaxName,
-            form,
-            component,
-            title,
-            description: itemDescription,
-          })
         }
       }
     }
@@ -272,12 +192,10 @@ export function validateManifest(raw: unknown, hostApiVersion = '1'): Validation
 
   if (errors.length) return { ok: false, errors }
 
-  // 入口缺省时允许「纯声明插件」（只有主题或组件元数据，没有代码）
+  // 入口缺省时允许「纯声明插件」（只有主题等声明式贡献，没有代码）
   const hasCode = Boolean(entry)
   const contributes: PluginManifest['contributes'] = {}
-  if (components.length) contributes.components = components
   if (themes.length) contributes.themes = themes
-  if (markdownSyntax.length) contributes.markdownSyntax = markdownSyntax
   if (commands.length) contributes.commands = commands
 
   if (!hasCode && !Object.keys(contributes).length) {
@@ -301,8 +219,3 @@ export function validateManifest(raw: unknown, hostApiVersion = '1'): Validation
 }
 
 /** 便于插件作者自查：把校验错误拼成一段可读文本 */
-export function formatValidation(result: ValidationResult): string {
-  if (result.ok)
-    return result.notices.length ? `通过（提示：${result.notices.join('；')}）` : '通过'
-  return `校验失败：\n- ${result.errors.join('\n- ')}`
-}

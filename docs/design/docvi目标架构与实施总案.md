@@ -4,14 +4,19 @@ title: docvi 目标架构与实施总案
 
 # docvi 目标架构与实施总案
 
-> 状态：设计稿（待拍板）｜ 负责人：Fanki ｜ 创建：2026-10-21 ｜ 更新：2026-10-24（宿主模型修订）
+> **状态（2026-11-24）：大幅作废——只剩「设计意图与历史依据」的价值，不要按本文实现。**
 >
-> **2026-10-24 宿主模型修订**：本文提到的「deployer / viewer 冻结」已不成立——单文件 viewer 与旧壳
-> 已删除；容器 deployer 是**在役的第二种宿主**，伺服 `apps/desktop/dist-web`，与桌面共用同一份渲染层。
-> 两种宿主的能力差异只由 `window.docvi` 的提供方决定（preload / `lib/web-host.ts`），
-> 渲染层不得按宿主分叉 UI。其余设计内容仍然有效。
+> v1.0.0 做了三项与本文冲突的决定，均以 [ADR-0007](../architecture/adr/0007-desktop-only-and-plain-markdown.md)
+> 与 [ADR-0006](../architecture/adr/0006-native-markdown-first.md) 为准：
 >
-> 本文是 docs-studio → docvi 重构的唯一设计文档：产品定位、仓库形态、进程模型、渲染与编辑内核、插件体系、UI 规范、旧功能迁移映射与验收口径。实现态细节在代码与 ADR，本文不重复。
+> 1. **容器宿主已删除**——本文所有「web 作为次级宿主」「`lib/web-host.ts`」「deployer」「`dist-web`」
+>    相关段落（含 2026-10-24 那段宿主模型修订）都已失效；
+> 2. **自研声明式组件系统已删除**——本文的组件注册表、组件 Widget 生命周期、`<at-*>` 渲染管线、
+>    `components` / `markdownSyntax` 贡献点、`ComponentPreview` 全部不存在；
+> 3. **git 托管工作区已删除**——本文 11.3 节描述的克隆/分支模型已退役。
+>
+> **当前架构以这套为准**：[ADR 索引](../architecture/adr/README.md) → [项目总览](../project/OVERVIEW.md)
+> → [目录结构](../engineering/目录结构.md)。本文仅作为「当时为什么这么想」的存档。
 
 ## 一、决策摘要
 
@@ -117,7 +122,6 @@ packages/
 plugins/
   base/                    # 24 个通用组件（必装）
   audio/                   # 3 个音频组件（可选安装，公开包）
-courses/                   # 示例内容根
 docs/                      # 设计文档与 ADR
 scripts/                   # 构建、门禁、图标
 ```
@@ -680,7 +684,7 @@ Button（primary/secondary/ghost/danger × sm/md/lg）、IconButton、Input、Te
 5. 大纲、内容宽度、Zen 模式、滚动恢复。
 6. 阅读态文档内查找（原生 findInPage）。
 
-**验收**：`courses/` 全量渲染，23 组件示例可用；抽 5 篇长文档对比旧版无排版退化。
+**验收**：（原「全量渲染 23 组件示例」已随组件退役作废，2026-11-24）抽 5 篇长文档对比旧版无排版退化。
 
 ### S2 工作区与导航（约 1 周）
 
@@ -797,7 +801,7 @@ Button（primary/secondary/ghost/danger × sm/md/lg）、IconButton、Input、Te
 ### 11.3 Git 托管工作区（2026-10-22 落地，#23）
 
 旧版这套模型（平台自持镜像 + 分支工作树）已跑过实仓，这里**移植而不是重写**
-（`apps/desktop/src/main/git.mjs`，旧 `packages/desktop/src/git.mjs` 随旧宿主退役）：
+（该模型随 git 功能一并退役，2026-11-24）：
 
 | 环节     | 做法                                                                                     |
 | -------- | ---------------------------------------------------------------------------------------- |

@@ -34,18 +34,13 @@ const props = defineProps<{
   scopeLabel?: string
   /** 是否有可粘贴的条目（剪贴板内容由 App 持有；这里只决定菜单项是否可用） */
   canPaste?: boolean
-  /**
-   * 只读宿主（容器版）：右键菜单只留「在新标签页打开」「复制路径」，不可拖拽、
-   * 不进多选。新建 / 重命名 / 剪切 / 粘贴 / 删除全部依赖本地磁盘写权限，容器里
-   * 点了只会拿到 E_FORBIDDEN——菜单里不留这些必然失败的项。
-   */
-  readonly?: boolean
   /** 递增触发「滚动到当前文档行」（祖先展开由 App 先做完，这里只管滚） */
   revealSignal?: number
 }>()
 
 const emit = defineEmits<{
-  open: [path: string]
+  /** 打开文档；pin=true 表示双击（固定标签），false 表示单击（预览标签） */
+  open: [path: string, pin: boolean]
   /** 右键「在新标签页打开」 */
   openNewTab: [path: string]
   updateExpanded: [expanded: string[]]
@@ -103,7 +98,7 @@ watch(
      * 收起全部 → 定位 → 展开所选，展开的是别的文件夹）。这里重置为当前
      * 文档行，让「展开所选」与「定位」语义连贯：都是围绕当前文档。
      */
-    if (!props.readonly) emit('select', [path])
+    emit('select', [path])
     /*
      * 从搜索 / 最近打开进来时，目标行可能在折叠目录里或者滚出视野。
      * 祖先展开由 App 负责（它才知道标签的 expanded），这里等一帧让 DOM 落定
@@ -181,7 +176,6 @@ function cssEscape(value: string): string {
 const anchor = ref<string | null>(null)
 
 function onSelect(mode: 'single' | 'toggle' | 'range', path: string): void {
-  if (props.readonly) return
   const visiblePaths = visible.value.map(row => row.node.path)
   if (mode === 'range') {
     emit('select', rangeSelection(visiblePaths, anchor.value, path))
@@ -210,7 +204,7 @@ function onKeydown(event: KeyboardEvent): void {
   const isDir = row.node.type === 'dir'
   const open = isDir && expandedSet.value.has(row.node.path)
 
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a' && !props.readonly) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
     event.preventDefault()
     emit(
       'select',
@@ -218,14 +212,14 @@ function onKeydown(event: KeyboardEvent): void {
     )
     return
   }
-  if (event.key === 'Delete' && !props.readonly) {
+  if (event.key === 'Delete') {
     const paths = props.checkedPaths ?? []
     if (!paths.length) return
     event.preventDefault()
     emit('fsAction', 'trash', [...paths], '')
     return
   }
-  if (event.key === 'F2' && !props.readonly) {
+  if (event.key === 'F2') {
     const paths = props.checkedPaths ?? []
     if (paths.length !== 1) return
     event.preventDefault()
@@ -277,12 +271,12 @@ function onKeydown(event: KeyboardEvent): void {
     event.preventDefault()
     if (isDir) {
       if (row.node.landing) {
-        emit('open', row.node.landing)
+        emit('open', row.node.landing, false)
         if (!open) toggle(row.node.path)
       } else toggle(row.node.path)
       return
     }
-    emit('open', row.node.path)
+    emit('open', row.node.path, true)
   }
 }
 
@@ -304,7 +298,6 @@ function targetDirOf(path: string): string {
 }
 
 function onDragStart(event: DragEvent, path: string): void {
-  if (props.readonly) return
   // 拖动行在选区内 → 整组一起拖；不在 → 拖动同时把选区重置为该行
   const paths = (props.checkedPaths ?? []).includes(path)
     ? [...(props.checkedPaths as string[])]
@@ -396,7 +389,6 @@ function onTreeContextMenu(event: MouseEvent): void {
   const target = event.target as Element | null
   if (target?.closest?.('.row')) return
   event.preventDefault()
-  if (props.readonly) return
   emit('select', [])
   menu.value = {
     open: true,
@@ -438,16 +430,13 @@ const menuItems = computed<MenuItem[]>(() => {
   const single = menu.value.paths.length === 1
   const openItem = single && !isDir ? [{ id: 'tree.openNewTab', label: t('tree.openNewTab') }] : []
   /*
-   * 路径类动作（复制相对 / 绝对路径、在资源管理器打开）对**只读宿主也放行**：
-   * 它们不写磁盘，容器版留着「复制相对路径」正是它最需要的（拿去贴到别处）。
-   * 「在资源管理器打开」只对桌面宿主有意义，App 侧按 hostKind 决定是否执行。
+   * 路径类动作（复制相对 / 绝对路径、在资源管理器打开）都不写磁盘，一律放行。
    */
   const pathActions: MenuItem[] = [
     { id: 'tree.copyPath', label: t('tree.copyPath'), separatorBefore: true },
     { id: 'tree.copyAbsolutePath', label: t('tree.copyAbsolutePath') },
     { id: 'tree.revealInFolder', label: t('tree.revealInFolder') },
   ]
-  if (props.readonly) return [...openItem, ...pathActions]
   /*
    * 空白区右键：不指向任何条目，所以没有「打开 / 重命名 / 剪切 / 删除」可言。
    * 只留三个落点在工作区根的动作，让空工作区也有完整的右键入口，
@@ -537,7 +526,7 @@ function onMenuSelect(id: string): void {
     class="tree"
     :class="{ 'is-drop-root': dropTarget === '' }"
     role="tree"
-    :aria-label="scopeLabel || t('app.library')"
+    :aria-label="scopeLabel || t('tree.label')"
     :aria-activedescendant="activePath ? `tree-node-${activePath}` : undefined"
     @keydown="onKeydown"
     @focusin="onFocusIn"
@@ -556,8 +545,8 @@ function onMenuSelect(id: string): void {
       :checked="checkedSet"
       :focused-path="activePath"
       :drop-target="dropTarget"
-      :draggable="!readonly"
-      @open="emit('open', $event)"
+      :draggable="true"
+      @open="(path, pin) => emit('open', path, pin)"
       @toggle="toggle"
       @context="onContextMenu"
       @select="onSelect"

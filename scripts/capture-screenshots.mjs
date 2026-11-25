@@ -46,7 +46,7 @@ const only = onlyIndex >= 0 ? args[onlyIndex + 1] : undefined
  * 截图清单。
  *
  * 字段：
- *  - `view`  打开哪一屏（library / editor / plugins / settings）
+ *  - `view`  打开哪一屏（plugins / settings）
  *  - `doc`   编辑器里打开哪篇文档（相对演示工作区的路径）
  *  - `mode`  阅读 / 实时预览 / 源码 / 分屏
  *  - `theme` 主题 id
@@ -57,7 +57,7 @@ const only = onlyIndex >= 0 ? args[onlyIndex + 1] : undefined
  *  - `scrollTo` 先滚到某个元素
  */
 const SHOTS = [
-  // —— 首图：实时预览 + 组件渲染，一张图说清「这是什么」 ——
+  // —— 首图：实时预览 + mermaid 渲染，一张图说清「这是什么」 ——
   /*
    * 首图的空隙比其它屏更大：它上面紧接着一句引言，留白不够会把那句话切掉半行，
    * 顶部就挂着一行断句。留够一整段，读者看到的是「标题下的一段话 + 图」。
@@ -67,16 +67,16 @@ const SHOTS = [
     doc: '开始/系统概览.md',
     mode: 'live',
     theme: 'slate',
-    scrollTo: '.at-flow',
+    scrollTo: '.at-mermaid',
     scrollAlign: 'start',
     scrollGap: 208,
   },
   /*
    * 编辑体验：实时预览不显示 Markdown 语法。
    *
-   * 刻意用纯散文文档（无任何图表组件）：这一屏要展示的是「标记被隐藏后正文长什么
+   * 刻意用纯散文文档（无任何图表）：这一屏要展示的是「标记被隐藏后正文长什么
    * 样」——标题、加粗术语、行内代码、引用、代码块。用带图的文档会让读者以为这张图
-   * 在介绍那个图，后面每张图又都是同一张图，整套截图看起来就只剩一个组件。
+   * 在介绍那个图，后面每张图又都是同一张图。
    */
   {
     name: 'editor-live',
@@ -89,8 +89,7 @@ const SHOTS = [
    * 分屏：左源码右渲染，同一份缓冲区。
    *
    * 这里刻意选**竖排**内容（时间线 + 清单），不选宽图表：右栏只有半个窗口宽，
-   * 表关系图那类横向布局在窄栏里触发「保字不保图」的缩放下限会被裁切——那不是
-   * 缺陷，但作为产品介绍图会让人以为图显示不全。
+   * 横向布局在窄栏里会被裁切——那不是缺陷，但作为产品介绍图会让人以为图显示不全。
    */
   {
     name: 'editor-split',
@@ -116,47 +115,37 @@ const SHOTS = [
       return true
     })()`,
   },
-  // —— 状态机（与 hero 的流程图不同，单独露面） ——
+  // —— 状态机：mermaid stateDiagram-v2 ——
   {
     name: 'state-flow',
     doc: '设计与实现/订单状态机.md',
     mode: 'live',
     theme: 'slate',
-    scrollTo: '.at-stateflow',
+    scrollTo: '.at-mermaid',
     scrollAlign: 'start',
   },
   // —— 阅读态：不带编辑工具条，右侧本页目录 ——
   /*
-   * 阅读态：不带编辑工具条，右侧本页目录。
-   *
-   * 选表字段明细（table-tabs）——它是这套截图里唯一还没单独露面的表格组件，
-   * 而首图已经是一张流程图，阅读态再放同一张就只是「同一屏换个模式」。
-   * 这一屏要证三件事：没有选区工具条、没有行首徽标、右侧有可选的本页目录。
+   * 阅读态要证三件事：没有选区工具条、没有行首徽标、右侧有可选的本页目录。
+   * 用带表格的文档，顺带展示「列多了自动吸顶表头」。
    */
   {
     name: 'reading',
     doc: '设计与实现/表结构设计.md',
     mode: 'read',
     theme: 'slate',
-    scrollTo: '.at-tabletabs',
+    scrollTo: '.at-doc table',
     scrollAlign: 'start',
   },
-  /*
-   * 评审记录：决策卡 + 风险清单 + 改动清单。
-   * 这三类是「判断」而不是「数据」——Markdown 里它们只能写成散文，读者读完
-   * 记不住结论；做成卡片后每条都有固定的位置（决定 / 原因 / 证据）。
-   */
+  // —— 评审记录：决策与风险用通用 Markdown 承载（标题 + 表格） ——
   {
     name: 'review-cards',
     doc: '设计与实现/评审记录.md',
     mode: 'live',
     theme: 'slate',
-    scrollTo: '.at-decision',
-    scrollAlign: 'start',
   },
   /*
    * 多标签：同时开五篇文档。
-   * 标签是「内容源 + 路径 + 滚动位置」，不持有 DOM——切回去滚动位置还在。
    *
    * 正文用纯散文文档（对账口径）铺满视口：主体是标签栏，正文只是背景。
    * 用带图或短文档的首页会露出一大片空白或切半张卡片，注意力全跑到背景上。
@@ -164,7 +153,7 @@ const SHOTS = [
   {
     name: 'tabs',
     doc: '设计与实现/对账口径.md',
-    mode: 'live',
+    mode: 'read',
     theme: 'slate',
     extraDocs: [
       '设计与实现/评审记录.md',
@@ -173,44 +162,23 @@ const SHOTS = [
       '设计与实现/接口清单.md',
     ],
   },
-  // —— 表关系图：悬停高亮整条链路 ——
-  {
-    name: 'table-graph',
-    doc: '设计与实现/表结构设计.md',
-    mode: 'live',
-    theme: 'slate',
-    scrollTo: '.at-tablegraph',
-  },
-  // —— 接口清单：折叠 + 展开契约详情 ——
+  // —— 接口清单：标准 Markdown 表格承载参数与不变量 ——
   {
     name: 'endpoints',
     doc: '设计与实现/接口清单.md',
-    mode: 'live',
+    mode: 'read',
     theme: 'slate',
-    script: `(() => {
-      const row = document.querySelector('.at-endpoints__row')
-      if (row) row.click()
-      return true
-    })()`,
+    scrollTo: '.at-doc table',
+    scrollAlign: 'start',
   },
-  // —— 文档库首页 ——
-  { name: 'library', view: 'library', theme: 'slate' },
   // —— 浅色主题：证明两套主题都成立，不是简单反色 ——
-  /*
-   * 落点是指标卡：它是这套截图里唯一还没单独露面的组件，靠数值/单位/涨跌色
-   * 区分状态，最能看出「另一套配色」而不是简单反色。
-   * 上方留白要够到小节标题，否则顶部会挂半行被切断的正文。
-   */
   {
     name: 'theme-paper',
     doc: '开始/系统概览.md',
-    mode: 'live',
+    mode: 'read',
     theme: 'paper',
-    scrollTo: '.at-metricrow',
-    scrollAlign: 'start',
-    scrollGap: 200,
   },
-  // —— 插件面板：已安装页签 ——
+  // —— 插件面板 ——
   { name: 'plugins', view: 'plugins', theme: 'slate' },
   // —— 设置页 ——
   { name: 'settings', view: 'settings', theme: 'slate' },
@@ -254,6 +222,8 @@ function demoRoot() {
  * 这种随机名一眼就是测试残留。固定成 `docvi-demo/订单中台`，看起来就是个正常的
  * 本地文档目录。每张截图开始前重建，互不影响。
  */
+const DEMO_WORKSPACE = '订单中台'
+
 function seedWorkspace(name) {
   const root = join(demoRoot(), 'docvi-demo')
   const workspace = join(root, name)
@@ -309,7 +279,7 @@ function connect(url) {
 
 async function capture(shot) {
   const dataDir = mkdtempSync(join(tmpdir(), `docvi-shot-data-${shot.name}-`))
-  const { workspace, cleanupRoot } = seedWorkspace('订单中台')
+  const { workspace, cleanupRoot } = seedWorkspace(DEMO_WORKSPACE)
   const port = 9800 + Math.floor(Math.random() * 150)
 
   const child = spawn(ELECTRON, [APP_DIR, '--no-sandbox'], {
@@ -374,48 +344,52 @@ async function capture(shot) {
     await client.evaluate('location.reload()')
     await wait(3200)
 
-    // 2) 打开工作区（点文档库里的卡片）。
-    //    按卡片上显示的 root 路径匹配，不按名字：工作区名（订单中台）在别处也可能出现。
-    const opened = await client.evaluate(`(() => {
-      const cards = [...document.querySelectorAll('.card')]
-      const hit = cards.find(el => (el.textContent || '').includes(${JSON.stringify(workspace)}))
-      if (!hit) return { ok: false, count: cards.length, texts: cards.map(c => (c.textContent || '').trim().slice(0, 60)) }
-      hit.click()
-      return { ok: true }
+    /*
+     * 2) 用左栏切换器选中演示工作区（ADR-0008：不再有文档库首屏）。
+     *
+     * 重启后左栏落在工作区列表的第一项，那可能是启动时自动播种的空默认库。
+     * 不显式切过去，树里就是空的、或者（更糟）是另一批文档——必须点真正的
+     * 切换器走一遍用户路径，找不到就直接报错，不要拍错画面。
+     */
+    const picked = await client.evaluate(`(async () => {
+      const btn = document.querySelector('.sidebar__ws-btn')
+      if (!btn) return { error: '左栏没有工作区切换器' }
+      const current = (document.querySelector('.sidebar__ws-name')?.textContent ?? '').trim()
+      if (current !== ${JSON.stringify(DEMO_WORKSPACE)}) {
+        btn.click()
+        await new Promise(r => setTimeout(r, 500))
+        const items = [...document.querySelectorAll('.menu__item, [role="menuitem"]')]
+        const hit = items.find(el => (el.textContent || '').trim() === ${JSON.stringify(DEMO_WORKSPACE)})
+        if (!hit) return { error: '切换器菜单里没有演示工作区', current, items: items.map(el => (el.textContent || '').trim()) }
+        hit.click()
+      }
+      return { ok: true, current }
     })()`)
-    if (!opened?.ok) {
-      throw new Error(
-        `找不到工作区卡片（共 ${opened?.count} 张）：${JSON.stringify(opened?.texts ?? [])}`,
-      )
+    if (!picked?.ok) throw new Error(`切不到演示工作区：${JSON.stringify(picked)}`)
+    await wait(1200)
+
+    /*
+     * 等树里出现文档行：行没出来就报错——早期版本因为找不到入口而默默拍到了上一屏。
+     */
+    let rows = 0
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      rows = await client.evaluate(`document.querySelectorAll('[data-tree-path]').length`)
+      if (rows > 0) break
+      await wait(300)
     }
-    await wait(3000)
+    if (!rows) throw new Error('左栏目录树没有出现（工作区可能没登记成功）')
+    await wait(1200)
 
     // 3) 按需切到目标页面
-    if (shot.view === 'plugins' || shot.view === 'settings' || shot.view === 'library') {
-      /*
-       * 回文档库：点标签栏里钉住的「文档库」标签。
-       *
-       * 它不是 button——是 `role="tab"` 的 div（没有 aria-label），早期按
-       * `aria-label === '文档库'` 找按钮会静默找不到，于是 library 那一屏拍出来的
-       * 其实是上一个文档页。这里找不到就直接报错，别再默默拍错画面。
-       */
-      const back = await client.evaluate(`(() => {
-        const tab = document.querySelector('.tabbar__pinned .tab--library')
-        if (!tab) return false
-        tab.click()
-        return true
-      })()`)
-      if (!back) throw new Error('找不到标签栏里的「文档库」标签，无法回首页')
-      await wait(1600)
+    if (shot.view === 'plugins' || shot.view === 'settings') {
       const label = { plugins: '插件', settings: '设置' }[shot.view]
-      if (label) {
-        await client.evaluate(`(() => {
-          const btn = [...document.querySelectorAll('button')].find(b => (b.getAttribute('aria-label') || '').includes(${JSON.stringify(label)}))
-          if (btn) btn.click()
-          return Boolean(btn)
-        })()`)
-        await wait(1600)
-      }
+      const opened = await client.evaluate(`(() => {
+        const btn = [...document.querySelectorAll('button')].find(b => (b.getAttribute('aria-label') || '').includes(${JSON.stringify(label)}))
+        if (btn) btn.click()
+        return Boolean(btn)
+      })()`)
+      if (!opened) throw new Error(`找不到「${label}」入口`)
+      await wait(1600)
     } else if (shot.doc) {
       /*
        * 展开所有折叠的目录。

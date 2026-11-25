@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import {
   AlertTriangle,
   Blocks,
-  ChevronDown,
   Download,
   ExternalLink,
   FolderPlus,
@@ -14,14 +13,13 @@ import {
   Trash2,
 } from 'lucide-vue-next'
 
-import { formatStars, type MarketEntry, type PluginRecordView } from '@docvi/shared'
+import { formatStars, type MarketEntry } from '@docvi/shared'
 
-import ComponentPreview from './ComponentPreview.vue'
 import { usePluginStore } from '../stores/plugins'
 import { useI18n } from '../lib/i18n'
 
 /**
- * 插件面板：列表 + 启停 + 安装/卸载 + 组件示例预览。
+ * 插件面板：列表 + 启停 + 安装/卸载 + 市场。
  *
  * 三个信息必须一眼可见，否则用户没法做安装决定：
  *  1. **信任等级**——呈现插件只是页面代码，受信服务插件能读整个文件系统；
@@ -41,56 +39,10 @@ const { t, locale } = useI18n()
  * 安装 / 卸载 / 启停整组隐藏——容器里的插件清单来自部署器配置，浏览器这边
  * 改了也不会影响任何人，留着开关只会让人以为自己改动了平台。
  */
-defineProps<{ readonly?: boolean }>()
-
 onMounted(() => {
   void store.load()
   void store.loadMarket()
 })
-
-/** 已展开组件清单的插件名 */
-const expanded = ref<Set<string>>(new Set())
-/** 正在预览的组件：`<plugin>::<kind>`，同一时刻只预览一个 */
-const previewing = ref<string | null>(null)
-
-function toggleExpand(name: string): void {
-  const next = new Set(expanded.value)
-  if (next.has(name)) {
-    next.delete(name)
-    // 收起插件时顺手关掉它的预览，避免卡片收起了预览还悬在下面
-    if (previewing.value?.startsWith(`${name}::`)) previewing.value = null
-  } else {
-    next.add(name)
-  }
-  expanded.value = next
-}
-
-function togglePreview(record: PluginRecordView, kind: string): void {
-  const key = `${record.name}::${kind}`
-  previewing.value = previewing.value === key ? null : key
-}
-
-/** 这个组件是否被单独停用 */
-function isComponentOff(record: PluginRecordView, kind: string): boolean {
-  return record.disabledComponents.includes(kind)
-}
-
-/**
- * 切换单个组件。
- *
- * 停用后预览要关掉——否则会看到「已停用」的开关旁边还渲染着它的预览，
- * 两处说法互相矛盾。
- */
-function toggleComponent(record: PluginRecordView, kind: string): void {
-  const currentlyOff = isComponentOff(record, kind)
-  // 从「停用」切回「启用」时关掉预览没有意义；从启用切到停用才需要收起
-  if (!currentlyOff && previewing.value === `${record.name}::${kind}`) previewing.value = null
-  void store.setComponentEnabled(record.name, kind, currentlyOff)
-}
-
-function isPreviewing(record: PluginRecordView, kind: string): boolean {
-  return previewing.value === `${record.name}::${kind}`
-}
 
 /** 协议字段双形态（string / 语言映射）：按当前语言取，回退中文 */
 function lz(value: { zh: string; en?: string }): string {
@@ -204,13 +156,9 @@ function trustHint(trust: string): string {
 
 function contributionSummary(record: (typeof store.records)[number]): string {
   const parts: string[] = []
-  const components = record.contributes?.components?.length ?? 0
   const themes = record.contributes?.themes?.length ?? 0
-  const syntax = record.contributes?.markdownSyntax?.length ?? 0
   const commands = record.contributes?.commands?.length ?? 0
-  if (components) parts.push(t('plugins.contrib.components', { count: components }))
   if (themes) parts.push(t('plugins.contrib.themes', { count: themes }))
-  if (syntax) parts.push(t('plugins.contrib.syntax', { count: syntax }))
   if (commands) parts.push(t('plugins.contrib.commands', { count: commands }))
   return parts.join(' · ') || t('plugins.contrib.none')
 }
@@ -224,7 +172,7 @@ function contributionSummary(record: (typeof store.records)[number]): string {
           <h1 class="plugins__title">{{ t('plugins.title') }}</h1>
           <p class="plugins__sub">{{ t('plugins.subtitle') }}</p>
         </div>
-        <button v-if="!readonly" class="btn btn--primary" type="button" @click="store.install()">
+        <button class="btn btn--primary" type="button" @click="store.install()">
           <FolderPlus :size="15" :stroke-width="1.8" />
           <span>{{ t('plugins.install') }}</span>
         </button>
@@ -302,85 +250,9 @@ function contributionSummary(record: (typeof store.records)[number]): string {
                   <span>{{ record.error }}</span>
                 </p>
                 <p v-else class="card__trust">{{ trustHint(record.trust) }}</p>
-
-                <!-- 组件清单：默认折叠，展开后可逐个预览示例 -->
-                <div v-if="record.contributes?.components?.length" class="comps">
-                  <button
-                    class="comps__toggle"
-                    type="button"
-                    :aria-expanded="expanded.has(record.name)"
-                    @click="toggleExpand(record.name)"
-                  >
-                    <ChevronDown
-                      :size="12"
-                      :stroke-width="2"
-                      class="comps__chevron"
-                      :class="{ 'is-open': expanded.has(record.name) }"
-                    />
-                    <span>{{
-                      t('plugins.components.toggle', {
-                        count: record.contributes.components.length,
-                      })
-                    }}</span>
-                  </button>
-                  <ul v-if="expanded.has(record.name)" class="comps__list">
-                    <li
-                      v-for="item in record.contributes.components"
-                      :key="item.kind"
-                      class="comp"
-                      :class="{ 'is-off': isComponentOff(record, item.kind) }"
-                    >
-                      <!-- 预览按钮与开关是兄弟节点：button 里不能再嵌可交互元素 -->
-                      <div class="comp__row-wrap">
-                        <button
-                          class="comp__row"
-                          type="button"
-                          :class="{ 'is-open': isPreviewing(record, item.kind) }"
-                          :aria-expanded="isPreviewing(record, item.kind)"
-                          @click="togglePreview(record, item.kind)"
-                        >
-                          <code class="comp__kind">{{ item.kind }}</code>
-                          <span class="comp__title">{{ lz(item.title) }}</span>
-                          <span class="comp__desc">{{ lz(item.description) }}</span>
-                        </button>
-                        <!--
-                        逐组件开关：两个包声明同一 kind 时，关掉其中一个，另一个实现
-                        自动顶上来——这就是「同名切换」，不需要单独的切换 UI。
-                      -->
-                        <button
-                          v-if="!readonly"
-                          v-tooltip="
-                            isComponentOff(record, item.kind)
-                              ? t('plugins.components.enable')
-                              : t('plugins.components.disable')
-                          "
-                          class="comp__switch"
-                          type="button"
-                          role="switch"
-                          :aria-checked="!isComponentOff(record, item.kind)"
-                          :aria-label="`${lz(item.title)}（${item.kind}）`"
-                          :data-kind="item.kind"
-                          @click="toggleComponent(record, item.kind)"
-                        >
-                          <span class="switch__knob" />
-                        </button>
-                      </div>
-                      <ComponentPreview
-                        v-if="isPreviewing(record, item.kind) && item.example"
-                        :plugin="record.name"
-                        :kind="item.kind"
-                        :example="item.example"
-                        @close="previewing = null"
-                      />
-                      <p v-else-if="isPreviewing(record, item.kind)" class="comp__no-example">
-                        {{ t('plugins.preview.noExample') }}
-                      </p>
-                    </li>
-                  </ul>
-                </div>
               </div>
 
-              <div v-if="!readonly" class="card__actions">
+              <div class="card__actions">
                 <button
                   class="switch"
                   type="button"
@@ -424,7 +296,7 @@ function contributionSummary(record: (typeof store.records)[number]): string {
           <button
             class="btn btn--ghost btn--sm"
             type="button"
-            :disabled="refreshing || readonly"
+            :disabled="refreshing"
             @click="refreshMarket()"
           >
             <RefreshCw :size="13" :stroke-width="1.8" :class="{ 'is-spinning': refreshing }" />
@@ -482,7 +354,7 @@ function contributionSummary(record: (typeof store.records)[number]): string {
             </div>
             <div class="card__actions">
               <button
-                v-if="!readonly && canInstall(entry)"
+                v-if="canInstall(entry)"
                 class="btn btn--primary btn--sm"
                 type="button"
                 :disabled="Boolean(store.installing) || store.isInstalled(entry.name)"
@@ -509,13 +381,13 @@ function contributionSummary(record: (typeof store.records)[number]): string {
               没提供产物的条目：给出为什么没有安装按钮，而不是静默少一个控件。
               用户看到「不能装」时必须知道原因，否则会怀疑是客户端出了问题。
             -->
-            <p v-if="!readonly && !canInstall(entry)" class="card__no-artifact">
+            <p v-if="!canInstall(entry)" class="card__no-artifact">
               {{ t('plugins.market.noArtifact') }}
             </p>
           </article>
         </div>
 
-        <p v-if="!readonly" class="market-note">
+        <p class="market-note">
           {{ t('plugins.market.installHint') }}
           <button class="market-note__link" type="button" @click="openSubmitDocs()">
             {{ t('plugins.market.submit') }} →
@@ -985,152 +857,5 @@ function contributionSummary(record: (typeof store.records)[number]): string {
   margin-top: 12px;
   font-size: 12px;
   color: var(--dv-ui-danger);
-}
-
-/* ---------- 组件清单与示例预览 ---------- */
-
-.comps {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--dv-ui-line-soft);
-}
-
-.comps__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--dv-ui-text-muted);
-  font-size: 11.5px;
-  cursor: pointer;
-}
-
-.comps__toggle:hover {
-  color: var(--dv-ui-text);
-}
-
-.comps__chevron {
-  transition: transform 0.15s ease;
-}
-
-.comps__chevron.is-open {
-  transform: rotate(180deg);
-}
-
-.comps__list {
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.comp__row-wrap {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.comp__row {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 130px 88px 1fr;
-  align-items: baseline;
-  gap: 10px;
-  padding: 5px 8px;
-  border: none;
-  border-radius: var(--dv-ui-radius-sm);
-  background: transparent;
-  color: var(--dv-ui-text-2);
-  text-align: left;
-  cursor: pointer;
-}
-
-/* 逐组件开关：比整包开关小一号，视觉上明确是「包内子项」 */
-.comp__switch {
-  position: relative;
-  flex: none;
-  width: 26px;
-  height: 15px;
-  padding: 0;
-  border: 1px solid var(--dv-ui-line);
-  border-radius: 8px;
-  background: var(--dv-ui-surface-3);
-  cursor: pointer;
-  transition: background var(--dv-dur-1, 130ms) ease;
-}
-
-.comp__switch .switch__knob {
-  position: absolute;
-  top: 1px;
-  left: 1px;
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: var(--dv-ui-text-muted);
-  transition: transform var(--dv-dur-1, 130ms) ease;
-}
-
-.comp__switch[aria-checked='true'] {
-  background: var(--dv-ui-accent);
-  border-color: transparent;
-}
-
-.comp__switch[aria-checked='true'] .switch__knob {
-  background: #fff;
-  transform: translateX(11px);
-}
-
-/* 停用的组件行整体压暗，但名称仍可读——用户要能看出它还在、只是关着 */
-.comp.is-off .comp__kind,
-.comp.is-off .comp__title,
-.comp.is-off .comp__desc {
-  opacity: 0.45;
-}
-
-.comp__row:hover,
-.comp__row.is-open {
-  background: var(--dv-ui-surface-2);
-}
-
-.comp__kind {
-  font-family: var(--dv-font-mono, ui-monospace, monospace);
-  font-size: 11px;
-  color: var(--dv-ui-text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.comp__row.is-open .comp__kind {
-  color: var(--dv-ui-accent);
-}
-
-.comp__title {
-  font-size: 12px;
-  color: var(--dv-ui-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.comp__desc {
-  font-size: 11.5px;
-  color: var(--dv-ui-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.comp__no-example {
-  margin: 6px 0 10px;
-  padding: 8px 10px;
-  border-radius: var(--dv-ui-radius-sm);
-  background: var(--dv-ui-surface-2);
-  font-size: 11.5px;
-  color: var(--dv-ui-text-muted);
 }
 </style>

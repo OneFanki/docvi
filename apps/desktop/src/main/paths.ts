@@ -1,6 +1,8 @@
 import { app } from 'electron'
 import { join } from 'node:path'
 
+import { documentsDirFor } from './paths-isolation.ts'
+
 /**
  * 数据目录布局（全部在 app.getPath('userData') 下）。
  *
@@ -23,21 +25,22 @@ export function workspacesFile(): string {
   return join(dataDir(), 'workspaces.json')
 }
 
+/**
+ * 系统「文档」目录 —— 内建默认工作区的落点。
+ *
+ * `DOCVI_DATA_DIR` 生效时（测试 / 截图 / 自动化）改用数据目录下的 `documents/`，
+ * 规则与理由见 `paths-isolation.ts`（纯函数，有单测守着）。
+ */
+export function documentsDir(): string {
+  return documentsDirFor(process.env.DOCVI_DATA_DIR, app.getPath('documents'))
+}
+
 export function recentFile(): string {
   return join(dataDir(), 'recent.json')
 }
 
-export function settingsFile(): string {
-  return join(dataDir(), 'settings.json')
-}
-
-/** 本地服务配置：令牌与局域网开关。单独成文件，便于用户手动重置令牌。 */
 export function serviceFile(): string {
   return join(dataDir(), 'service.json')
-}
-
-export function sharesFile(): string {
-  return join(dataDir(), 'shares.json')
 }
 
 export function cacheDir(): string {

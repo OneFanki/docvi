@@ -6,7 +6,6 @@
  * 并把核心函数以 node fs IO 绑定后按原签名导出（既有调用点零改动）。
  *
  * 三种内容根形态（部署器与本地调试共用同一套解析）：
- * - courses    平台缺省示例根（pnpm dev）；
  * - standalone 纯外部：传目录（内含 docs.config.yaml）或传 yaml + --standalone；
  * - aggregate  聚合：传 yaml 文件（默认），内置示例与外部内容合并。
  */
@@ -48,16 +47,18 @@ export function loadDocsConfig(root, filename = DOCS_CONFIG_FILENAME) {
 /**
  * 解析启动目标 → 启动模式（纯函数，供部署器与测试使用）。
  *
- * 目标优先级：显式 target > DOCS_ROOT 环境变量 > 缺省 courses。
+ * 目标优先级：显式 target > DOCS_ROOT 环境变量；都没有时要求显式指定（内置示例已随组件系统退役）。
  * - target 以 .yaml/.yml 结尾 → yaml 配置文件：默认 aggregate，--standalone 切 standalone；
  * - target 为目录 → standalone（目录内必须有 docs.config.yaml，否则报错并给模板）；
- * - 无 target 且无 DOCS_ROOT → courses。
+ * - 无 target 且无 DOCS_ROOT → 返回 error 提示指定内容目录。
  *
  * 返回 { mode, dir?, yamlPath?, error? }；error 非空时其余字段无意义。
  */
 export function resolveLaunchTarget({ target, standalone = false, envDocsRoot = '' } = {}) {
   const raw = (target ?? envDocsRoot ?? '').trim()
-  if (!raw) return { mode: 'courses' }
+  if (!raw) {
+    return { error: '未指定内容目录：请传 target 或设置 DOCS_ROOT' }
+  }
 
   const abs = isAbsolute(raw) ? raw : resolve(raw)
   if (/\.(ya?ml)$/i.test(abs)) {

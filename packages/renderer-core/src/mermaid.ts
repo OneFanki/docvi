@@ -21,14 +21,6 @@ async function loadMermaid(): Promise<MermaidApi> {
   return modulePromise
 }
 
-/**
- * 当前文档外观（亮/暗）：读宿主写好的 `data-appearance`（按主题声明解析的
- * 结果），不能拿主题 id 猜——`mist` 等亮色主题会被「不在已知暗色表里」误判。
- */
-export function resolveAppearance(doc: Document = document): 'light' | 'dark' {
-  return doc.documentElement.dataset.appearance === 'light' ? 'light' : 'dark'
-}
-
 export interface MermaidPassOptions {
   /**
    * 在图容器右上角渲染「全屏查看」按钮。点击经 `docvi-mermaid-expand`

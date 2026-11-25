@@ -48,14 +48,6 @@ export const IPC = {
   workspaceProbe: 'docvi:workspace:probe',
   workspaceAddAt: 'docvi:workspace:add-at',
 
-  /** git：能力探测 / 克隆仓库 / 拉取 / 分支列表 / 切换分支 */
-  gitState: 'docvi:git:state',
-  gitClone: 'docvi:git:clone',
-  gitPull: 'docvi:git:pull',
-  gitBranches: 'docvi:git:branches',
-  gitSwitchBranch: 'docvi:git:switch-branch',
-  /** 克隆进度推送（主进程 → 渲染进程） */
-  gitProgress: 'docvi:git:progress',
   workspaceRemove: 'docvi:workspace:remove',
   workspaceTouch: 'docvi:workspace:touch',
   workspaceSetTreeSort: 'docvi:workspace:set-tree-sort',
@@ -152,7 +144,6 @@ export const IPC = {
   pluginInstall: 'docvi:plugin:install',
   pluginUninstall: 'docvi:plugin:uninstall',
   pluginSetEnabled: 'docvi:plugin:set-enabled',
-  pluginSetComponentEnabled: 'docvi:plugin:set-component-enabled',
 
   /** 本地服务：状态 / 重启 / 局域网开关 / 在浏览器打开 MCP 地址 */
   serviceState: 'docvi:service:state',
@@ -214,8 +205,6 @@ export const IPC = {
    */
   perfReport: 'docvi:perf:report',
 } as const
-
-export type IpcChannel = (typeof IPC)[keyof typeof IPC]
 
 /** 统一错误码。渲染进程按码分支，不解析 message 文本。 */
 export const ERROR_CODES = [
@@ -363,13 +352,6 @@ export interface UpdateDownloaded {
   fileName: string
 }
 
-export interface AppInfo {
-  name: string
-  version: string
-  platform: string
-  dataDir: string
-}
-
 /**
  * 内容根里的文件变化（一次批量，已防抖）。
  *
@@ -406,81 +388,6 @@ export interface WorkspaceEntry {
    * 找文件比靠文件名快得多。
    */
   treeSort?: TreeSortMode
-  /**
-   * git 托管的平台副本信息（缺省 = 普通本地目录工作区）。
-   *
-   * 托管工作区的 root 指向分支工作树 `worktrees/<repo>/<branch>/`——平台自持，
-   * 云端为准（切换分支即换一棵树），用户自己的目录永不写入。
-   */
-  git?: GitWorkspace
-  /**
-   * 容器读者面：平台侧仓库状态（桌面工作区没有这个字段）。
-   *
-   * 分支选择器、卡片上的「克隆中 / 同步失败 / 最近同步」都从这里取数——
-   * 这些信息部署器本来就在 `/api/portal` 里给，界面不该再去猜。
-   */
-  portal?: PortalWorkspace
-}
-
-/** 部署器已发布的一个分支（读者面口径） */
-export interface PortalBranch {
-  branch: string
-  /** 产物：ready 才能浏览；building/failed/none 只作状态展示 */
-  artifact: 'ready' | 'building' | 'failed' | 'none'
-  /** 索引：indexed 才是最新且可搜索 */
-  index: 'indexed' | 'indexing' | 'pending' | 'failed'
-  isDefault: boolean
-}
-
-/** 容器仓库的读者面状态 */
-export interface PortalWorkspace {
-  branches: PortalBranch[]
-  defaultBranch: string | null
-  /** 最近一次同步完成时间（ISO）；从未同步为 null */
-  syncAt: string | null
-  /** 上次同步失败信息（成功时 null） */
-  syncError: string | null
-  /** 首次克隆尚未完成：卡片显示「克隆中」并禁止进入 */
-  cloning: boolean
-}
-
-/**
- * 本地预览装载项：浏览器读成的文本 + 内容根内相对路径。
- *
- * 容器读者面没有磁盘，但用户经常要「先看一眼 AI 刚生成的文件」再提交——
- * 旧版首页支持拖入/选择本地 Markdown，在内存里浏览。这个类型就是那条通道。
- */
-export interface LocalPreviewFile {
-  path: string
-  text: string
-}
-
-/** 本地预览临时工作区的固定 id（路由前缀 `/__local/` 与它一一对应） */
-export const LOCAL_PREVIEW_ID = '__local'
-
-/** 一个 git 托管工作区当前读的是哪份副本的哪个分支 */
-export interface GitWorkspace {
-  /** 平台副本名（数据目录 `git/<repo>.git`） */
-  repo: string
-  /** 远端地址（展示与「刷新」提示用） */
-  url: string
-  branch: string
-}
-
-/** git 能力面（宿主探测 + 克隆 / 拉取 / 分支 / 切换） */
-export interface GitState {
-  /** git 是否可用；不可用时 reason 给安装指引 */
-  available: boolean
-  version: string | null
-  reason: string | null
-}
-
-/** 克隆进度事件（主进程 → 渲染进程推送） */
-export interface GitProgressEvent {
-  workspaceName: string
-  phase: string
-  message: string
-  percent: number | null
 }
 
 /**
@@ -504,8 +411,6 @@ export type TreeNodeType = 'dir' | 'doc'
  *  mtime  —— 修改时间倒序，最新改动的排最上面（找「刚写的那篇」用）
  */
 export type TreeSortMode = 'manual' | 'mtime'
-
-export const TREE_SORT_MODES: readonly TreeSortMode[] = ['manual', 'mtime']
 
 export interface TreeNode {
   /** 相对 workspace 根的 POSIX 路径；根目录为空串 */
@@ -570,22 +475,6 @@ export interface SearchCorpus {
    * 猜错就会把「已全文索引」说成「仅文件名」。
    */
   fullText: boolean
-}
-
-/** 宿主侧搜索的一条命中（容器里索引在服务端，覆盖全部仓库）。 */
-export interface HostSearchHit {
-  /** 命中所属工作区（仓库 slug）；单文件入口不产生命中 */
-  workspaceId: string | null
-  path: string
-  title: string
-  score: number
-  snippet: string
-}
-
-export interface HostSearchResult {
-  /** 索引里的文档总数（搜索面板据此显示「已索引 N 篇」） */
-  total: number
-  hits: HostSearchHit[]
 }
 
 /** 最近打开：按绝对路径去重，单文件打开的 workspaceId 为 null。 */
@@ -712,25 +601,6 @@ export interface DocviApi {
   bootSettings: AppSettings
 
   /**
-   * 宿主类型。
-   *
-   * 渲染层靠它决定「哪些入口不该出现」，而不是去猜某个方法是否存在：
-   * 容器里没有「打开本地文件」「克隆仓库」「改托盘设置」这些动作，
-   * 露出来只会让用户点了报错。
-   * 缺省视为 `electron`（老版本 preload 没这个字段，行为不变）。
-   */
-  hostKind?: 'electron' | 'web'
-
-  /**
-   * 插件包内资源的可访问 URL（容器宿主用）。
-   *
-   * Electron 走自定义协议 `docvi://plugin/...`；容器里资源是 HTTP 路径
-   * `/plugins/<name>/<version>/...`。不给这个方法就说明宿主支持自定义协议。
-   */
-  pluginAssetUrl?(plugin: string, relPath: string): string
-
-  appInfo(): Promise<Result<AppInfo>>
-  /**
    * 用系统默认程序打开外链。
    *
    * 正文里的 `https://…` 链接必须走这里：在窗口里直接导航会**离开应用**
@@ -801,23 +671,6 @@ export interface DocviApi {
    */
   workspaceSetTreeSort(id: string, mode: TreeSortMode): Promise<Result<WorkspaceEntry>>
 
-  /** git 是否可用（读 `git --version`，不可用时给安装指引） */
-  gitState(): Promise<Result<GitState>>
-  /**
-   * 克隆远端仓库并加为工作区。
-   *
-   * 产物是**平台自持副本 + 分支工作树**：只写数据目录，绝不碰用户磁盘上的仓。
-   * 进度经 `onGitProgress` 推送；成功返回新建的工作区条目。
-   */
-  gitClone(input: { url: string; name: string; branch?: string }): Promise<Result<WorkspaceEntry>>
-  /** 拉取当前分支（fetch + reset --hard，云端为准）；返回新增提交数 */
-  gitPull(id: string): Promise<Result<{ branch: string; commits: number; changed: boolean }>>
-  /** 列出平台副本的分支（先 fetch，离线时用本地 refs） */
-  gitBranches(id: string): Promise<Result<string[]>>
-  /** 切换工作区分支：返回换树后的工作区条目（root 已更新） */
-  gitSwitchBranch(id: string, branch: string): Promise<Result<WorkspaceEntry>>
-  /** 订阅克隆进度；返回取消订阅函数 */
-  onGitProgress(callback: (progress: GitProgressEvent) => void): () => void
   workspaceRemove(id: string): Promise<Result<null>>
   workspaceTouch(id: string): Promise<Result<null>>
 
@@ -848,8 +701,7 @@ export interface DocviApi {
   /**
    * 把图片字节写进工作区素材目录，返回可写进 Markdown 的相对路径。
    *
-   * 容器读者面没有写权限，由 `web-host` 实现为 E_FORBIDDEN（与其它写操作一致）——
-   * 契约上必须存在，渲染层只按 `hostKind` 决定是否露出入口，不做方法存在性探测。
+   * 契约上必须存在（不做方法存在性探测），失败统一走 Result 的错误分支。
    */
   imageImport(request: ImageImportRequest): Promise<Result<ImageImportResult>>
   /**
@@ -866,27 +718,7 @@ export interface DocviApi {
   filePick(): Promise<Result<string | null>>
   fileRead(absolutePath: string): Promise<Result<DocPayload>>
 
-  /**
-   * 把浏览器选中的本地 Markdown 装载成一个**临时工作区**（容器读者面）。
-   *
-   * 内容只在内存里：刷新即失效、不写服务器、不影响任何仓库。桌面宿主没有
-   * 这个场景（它有真实磁盘与工作区），实现为返回 null 的空操作。
-   *
-   * `kind: 'dir'` 时按文件路径建目录树；`'files'` 时全部平铺在同一层。
-   * 返回的 workspace id 固定为 `LOCAL_PREVIEW_ID`，路由落在 `/__local/…`。
-   */
-  localPreview(
-    files: LocalPreviewFile[],
-    kind: 'files' | 'dir',
-  ): Promise<Result<WorkspaceEntry | null>>
-
   searchCorpus(workspaceId: string): Promise<Result<SearchCorpus>>
-
-  /**
-   * 宿主侧全文搜索（可选）：索引已在服务端构建好时，渲染进程不该再拉整库
-   * 原文自己建一份。提供这个方法即接管整个搜索面板（跨全部仓库、一次查询）。
-   */
-  searchQuery?(query: string): Promise<Result<HostSearchResult>>
 
   recentList(): Promise<Result<RecentEntry[]>>
   /** 记录一次打开（按绝对路径覆盖），返回更新后的列表 */
@@ -954,11 +786,6 @@ export interface DocviApi {
   pluginUninstall(id: string): Promise<Result<PluginRecordView[]>>
   pluginSetEnabled(id: string, enabled: boolean): Promise<Result<PluginRecordView[]>>
   /** 逐组件启停：停用某 kind 后，声明同名 kind 的其他包会自动顶上来 */
-  pluginSetComponentEnabled(
-    id: string,
-    kind: string,
-    enabled: boolean,
-  ): Promise<Result<PluginRecordView[]>>
 
   /** 本地服务状态（MCP 端点、端口、局域网开关、崩溃信息） */
   serviceState(): Promise<Result<ServiceState>>
@@ -1139,13 +966,6 @@ export interface PluginRecordView {
       appearance: 'light' | 'dark'
       tokens: string
     }>
-    markdownSyntax?: Array<{
-      name: string
-      form: 'fence' | 'container'
-      component: string
-      title: { zh: string; en?: string }
-      description: { zh: string; en?: string }
-    }>
     commands?: Array<{
       id: string
       title: { zh: string; en?: string }
@@ -1158,8 +978,6 @@ export interface PluginRecordView {
   /** 插件包目录的绝对路径（渲染进程按 docvi://plugin 协议取资源） */
   dir: string
   error: string | null
-  /** 该包内被单独停用的组件 kind（清单仍完整，面板据此渲染开关状态） */
-  disabledComponents: string[]
 }
 
 /**

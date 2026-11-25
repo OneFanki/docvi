@@ -28,13 +28,6 @@ export const usePluginStore = defineStore('plugins', () => {
     ),
   )
 
-  /** 已启用插件声明的 Markdown 语法扩展（围栏语言 → 组件 kind） */
-  const syntax = computed(() =>
-    enabled.value.flatMap(record =>
-      (record.contributes?.markdownSyntax ?? []).map(item => ({ ...item, plugin: record.name })),
-    ),
-  )
-
   function unwrap<T>(
     result: { ok: true; data: T } | { ok: false; error: { message: string } },
   ): T | null {
@@ -148,18 +141,12 @@ export const usePluginStore = defineStore('plugins', () => {
     if (list) records.value = list
   }
 
-  async function setComponentEnabled(id: string, kind: string, value: boolean): Promise<void> {
-    const list = unwrap(await window.docvi.pluginSetComponentEnabled(id, kind, value))
-    if (list) records.value = list
-  }
-
   return {
     records,
     market,
     marketMeta,
     enabled,
     themes,
-    syntax,
     loading,
     error,
     load,
@@ -170,6 +157,5 @@ export const usePluginStore = defineStore('plugins', () => {
     isInstalled,
     remove,
     setEnabled,
-    setComponentEnabled,
   }
 })

@@ -179,7 +179,6 @@
   --dv-ui-success: #6cae8f;
   --dv-ui-focus: #d9a05b;
 
-  --dv-ui-shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
   --dv-ui-shadow-2: 0 8px 24px rgb(0 0 0 / 45%);
 
   /* 目录树图标：三种语义各一色，明度与 --dv-ui-text-muted 接近，不抢标题 */
@@ -211,7 +210,6 @@
   --dv-ui-success: #2f7268;
   --dv-ui-focus: #833d20;
 
-  --dv-ui-shadow-1: 0 1px 2px rgb(60 48 32 / 10%);
   --dv-ui-shadow-2: 0 8px 24px rgb(60 48 32 / 14%);
 
   --dv-tree-file: #4a6f9e;
@@ -239,26 +237,14 @@
   --dv-doc-accent: #d9a05b;
   --dv-doc-accent-strong: #e6b174;
   --dv-doc-accent-soft: rgb(217 160 91 / 16%);
-  --dv-doc-accent-contrast: #1a1305;
   --dv-doc-code-bg: #1d2127;
-  --dv-doc-highlight: rgb(217 160 91 / 20%);
   /* 选中底色：正文用强调色的低透明度，深底上也能一眼看出选区 */
   --dv-doc-selection: rgb(217 160 91 / 38%);
-  --dv-doc-highlight-border: rgb(217 160 91 / 55%);
   --dv-doc-ok: #6cae8f;
   --dv-doc-warn: #d9a05b;
   --dv-doc-danger: #d9736a;
-  --dv-doc-info: #85a8f0;
-  --dv-doc-tree-folder: #d9a94a;
   /* 图形组件专用：画布压深让卡片浮起来，连线保持 ≥3:1 非文本对比度 */
-  --dv-doc-graph-canvas: #171a1f;
-  --dv-doc-graph-grid: #232830;
-  --dv-doc-graph-line: #333b45;
   --dv-doc-graph-wire: #46505c;
-  --dv-doc-graph-pill: #1d2127;
-  --dv-doc-graph-badge: #232830;
-  --dv-doc-shadow-sm: 0 1px 2px rgb(0 0 0 / 35%);
-  --dv-doc-shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 14px rgb(0 0 0 / 45%);
 
   /* 分类色（图表多系列）：与正文同源、彼此区分度足够 */
   --dv-c-cat-1: #6cae8f;
@@ -308,24 +294,12 @@
   --dv-doc-accent: #833d20;
   --dv-doc-accent-strong: #6f3319;
   --dv-doc-accent-soft: rgb(131 61 32 / 10%);
-  --dv-doc-accent-contrast: #fffaf5;
   --dv-doc-code-bg: #efeade;
-  --dv-doc-highlight: rgb(131 61 32 / 14%);
   --dv-doc-selection: rgb(131 61 32 / 30%);
-  --dv-doc-highlight-border: rgb(131 61 32 / 40%);
   --dv-doc-ok: #2f7268;
   --dv-doc-warn: #8a6720;
   --dv-doc-danger: #a8402c;
-  --dv-doc-info: #335c8f;
-  --dv-doc-tree-folder: #b8862a;
-  --dv-doc-graph-canvas: #eae4d8;
-  --dv-doc-graph-grid: #ded5c6;
-  --dv-doc-graph-line: #b8ab95;
   --dv-doc-graph-wire: #8a7c66;
-  --dv-doc-graph-pill: #fffdf8;
-  --dv-doc-graph-badge: #e7e0d2;
-  --dv-doc-shadow-sm: 0 1px 2px rgb(60 48 32 / 10%);
-  --dv-doc-shadow: 0 1px 2px rgb(60 48 32 / 8%), 0 4px 14px rgb(60 48 32 / 12%);
   --dv-c-cat-1: #2f7268;
   --dv-c-cat-2: #5f4f9c;
   --dv-c-cat-3: #96394f;
@@ -353,7 +327,6 @@
 
 /* 正文容器：只负责底色与排版基线，颜色全部来自上面的主题变量 */
 .doc-surface {
-  --dv-doc-measure: 68ch;
   --dv-doc-font-size: 16px;
   --dv-doc-line-height: 1.8;
   background: var(--dv-doc-bg);
@@ -366,74 +339,9 @@
   --dv-c-surface: var(--dv-doc-surface);
   --dv-c-surface-2: var(--dv-doc-surface-2);
   --dv-c-border: var(--dv-doc-border);
-  --dv-c-border-strong: var(--dv-doc-border-strong);
-  --dv-c-text: var(--dv-doc-text);
   --dv-c-text-2: var(--dv-doc-text-2);
   --dv-c-text-muted: var(--dv-doc-text-muted);
-  --dv-c-text-body: var(--dv-doc-text-body);
   --dv-c-accent: var(--dv-doc-accent);
-  --dv-c-accent-strong: var(--dv-doc-accent-strong);
-  --dv-c-accent-soft: var(--dv-doc-accent-soft);
-  --dv-c-accent-contrast: var(--dv-doc-accent-contrast);
-  --dv-c-ok: var(--dv-doc-ok);
-  --dv-c-warn: var(--dv-doc-warn);
-  --dv-c-danger: var(--dv-doc-danger);
-  --dv-c-info: var(--dv-doc-info);
-  --dv-c-code-bg: var(--dv-doc-code-bg);
-  --dv-c-highlight: var(--dv-doc-highlight);
-  --dv-c-highlight-border: var(--dv-doc-highlight-border);
-  --dv-c-graph-canvas: var(--dv-doc-graph-canvas);
-  --dv-c-graph-grid: var(--dv-doc-graph-grid);
-  --dv-c-graph-line: var(--dv-doc-graph-line);
-  --dv-c-graph-wire: var(--dv-doc-graph-wire);
-  --dv-c-graph-pill: var(--dv-doc-graph-pill);
-  --dv-c-graph-badge: var(--dv-doc-graph-badge);
-  --dv-c-tree-folder: var(--dv-doc-tree-folder);
-  --dv-c-shadow-sm: var(--dv-doc-shadow-sm);
-  --dv-c-shadow: var(--dv-doc-shadow);
-  --dv-c-font-sans: var(--dv-font-sans);
-  --dv-c-font-mono: var(--dv-font-mono);
-  --dv-c-radius-sm: var(--dv-radius-sm);
-  --dv-c-radius-md: var(--dv-radius-md);
-  --dv-c-radius-lg: var(--dv-radius-lg);
-
-  /* ── 旧组件包兼容别名（v1）：全部指向 --dv-c-*，迁移完成后删除 ── */
-  --at-bg: var(--dv-doc-bg);
-  --at-surface: var(--dv-c-surface);
-  --at-surface-2: var(--dv-c-surface-2);
-  --at-border: var(--dv-c-border);
-  --at-border-strong: var(--dv-c-border-strong);
-  --at-text: var(--dv-c-text);
-  --at-text-2: var(--dv-c-text-2);
-  --at-text-muted: var(--dv-c-text-muted);
-  --at-text-body: var(--dv-c-text-body);
-  --at-accent: var(--dv-c-accent);
-  --at-accent-strong: var(--dv-c-accent-strong);
-  --at-accent-soft: var(--dv-c-accent-soft);
-  --at-accent-contrast: var(--dv-c-accent-contrast);
-  --at-ok: var(--dv-c-ok);
-  --at-warn: var(--dv-c-warn);
-  --at-danger: var(--dv-c-danger);
-  --at-code-bg: var(--dv-c-code-bg);
-  --at-highlight: var(--dv-c-highlight);
-  --at-highlight-border: var(--dv-c-highlight-border);
-  --at-graph-canvas: var(--dv-c-graph-canvas);
-  --at-graph-grid: var(--dv-c-graph-grid);
-  --at-graph-line: var(--dv-c-graph-line);
-  --at-graph-wire: var(--dv-c-graph-wire);
-  --at-graph-pill: var(--dv-c-graph-pill);
-  --at-graph-badge: var(--dv-c-graph-badge);
-  --at-tree-folder: var(--dv-c-tree-folder);
-  --at-shadow-sm: var(--dv-c-shadow-sm);
-  --at-shadow: var(--dv-c-shadow);
-  --at-font-sans: var(--dv-font-sans);
-  --at-font-mono: var(--dv-font-mono);
-  --at-radius-sm: var(--dv-radius-sm);
-  --at-radius-md: var(--dv-radius-md);
-  --at-radius-lg: var(--dv-radius-lg);
-  --at-dur-1: var(--dv-dur-1);
-  --at-dur-2: var(--dv-dur-2);
-  --at-ease: var(--dv-ease);
 }
 
 /* ══════════════ 全屏覆盖层的窗口按钮避让 ══════════════
@@ -461,10 +369,7 @@
   --dv-ed-caret: #d9a05b;
   /* 选中：必须明显可见。原 #2b3442 在 #14161a 上几乎看不出选区 */
   --dv-ed-selection: rgb(217 160 91 / 42%);
-  --dv-ed-selection-match: rgb(217 160 91 / 30%);
   --dv-ed-active-line: #191d23;
-  --dv-ed-line-number: #5c6470;
-  --dv-ed-active-line-number: #d9a05b;
   /* 行号槽比正文底色略深一档：源码模式靠这个色差 + 右侧分界线划出「行号区」，
      否则缩进宽度与行号间隙混在一起，看不出这一行前面到底有没有空格。
      分界线必须真的看得见：#22272e 落在 #101216 上实测几乎消失，这里提亮一档。 */
@@ -510,10 +415,7 @@
   --dv-ed-text: #1f1d19;
   --dv-ed-caret: #833d20;
   --dv-ed-selection: rgb(131 61 32 / 30%);
-  --dv-ed-selection-match: rgb(131 61 32 / 24%);
   --dv-ed-active-line: #f1ece1;
-  --dv-ed-line-number: #a09889;
-  --dv-ed-active-line-number: #833d20;
   --dv-ed-gutter-bg: #f0ebe1;
   /* 浅色下 #e8e2d6 与槽底色几乎同灰，分界线等于不存在；压深到能看出边界 */
   --dv-ed-gutter-border: #d6ccba;
@@ -575,7 +477,6 @@
   --dv-ui-danger: #d9736a;
   --dv-ui-success: #63ab8b;
   --dv-ui-focus: #6f9fd8;
-  --dv-ui-shadow-1: 0 1px 2px rgb(0 0 0 / 38%);
   --dv-ui-shadow-2: 0 8px 24px rgb(0 0 0 / 44%);
   --dv-tree-file: #7f9cc4;
   --dv-tree-page: #9aa4b2;
@@ -594,24 +495,12 @@
   --dv-doc-accent: #6f9fd8;
   --dv-doc-accent-strong: #8ab5e8;
   --dv-doc-accent-soft: rgb(111 159 216 / 16%);
-  --dv-doc-accent-contrast: #0f1620;
   --dv-doc-code-bg: #1e2126;
-  --dv-doc-highlight: rgb(111 159 216 / 20%);
   --dv-doc-selection: rgb(111 159 216 / 38%);
-  --dv-doc-highlight-border: rgb(111 159 216 / 55%);
   --dv-doc-ok: #63ab8b;
   --dv-doc-warn: #cba45f;
   --dv-doc-danger: #d9736a;
-  --dv-doc-info: #7fa9e0;
-  --dv-doc-tree-folder: #9aa4b2;
-  --dv-doc-graph-canvas: #181a1f;
-  --dv-doc-graph-grid: #24282e;
-  --dv-doc-graph-line: #343941;
   --dv-doc-graph-wire: #474d57;
-  --dv-doc-graph-pill: #1e2126;
-  --dv-doc-graph-badge: #24282e;
-  --dv-doc-shadow-sm: 0 1px 2px rgb(0 0 0 / 35%);
-  --dv-doc-shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 14px rgb(0 0 0 / 45%);
   --dv-c-cat-1: #63ab8b;
   --dv-c-cat-2: #9d95e8;
   --dv-c-cat-3: #d9899b;
@@ -640,10 +529,7 @@
   --dv-ed-text: #c3c7ce;
   --dv-ed-caret: #6f9fd8;
   --dv-ed-selection: rgb(111 159 216 / 42%);
-  --dv-ed-selection-match: rgb(111 159 216 / 30%);
   --dv-ed-active-line: #191c21;
-  --dv-ed-line-number: #5b626c;
-  --dv-ed-active-line-number: #8ab5e8;
   --dv-ed-gutter-bg: #101216;
   --dv-ed-gutter-border: #2a2e35;
   --dv-ed-whitespace-dot: #4a5058;
@@ -694,7 +580,6 @@
   --dv-ui-danger: #b0432f;
   --dv-ui-success: #2c7266;
   --dv-ui-focus: #2f6ba8;
-  --dv-ui-shadow-1: 0 1px 2px rgb(24 30 40 / 8%);
   --dv-ui-shadow-2: 0 8px 24px rgb(24 30 40 / 12%);
   --dv-tree-file: #4a6f9e;
   --dv-tree-page: #5d6b7d;
@@ -712,24 +597,12 @@
   --dv-doc-accent: #2f6ba8;
   --dv-doc-accent-strong: #235185;
   --dv-doc-accent-soft: rgb(47 107 168 / 10%);
-  --dv-doc-accent-contrast: #ffffff;
   --dv-doc-code-bg: #eff1f5;
-  --dv-doc-highlight: rgb(47 107 168 / 14%);
   --dv-doc-selection: rgb(47 107 168 / 30%);
-  --dv-doc-highlight-border: rgb(47 107 168 / 40%);
   --dv-doc-ok: #2c7266;
   --dv-doc-warn: #8a6420;
   --dv-doc-danger: #b0432f;
-  --dv-doc-info: #2f5f8f;
-  --dv-doc-tree-folder: #6b7787;
-  --dv-doc-graph-canvas: #eef0f4;
-  --dv-doc-graph-grid: #e1e5eb;
-  --dv-doc-graph-line: #b9c0ca;
   --dv-doc-graph-wire: #8b939f;
-  --dv-doc-graph-pill: #ffffff;
-  --dv-doc-graph-badge: #e8ebf0;
-  --dv-doc-shadow-sm: 0 1px 2px rgb(24 30 40 / 8%);
-  --dv-doc-shadow: 0 1px 2px rgb(24 30 40 / 6%), 0 4px 14px rgb(24 30 40 / 10%);
   --dv-c-cat-1: #2c7266;
   --dv-c-cat-2: #5a4b9c;
   --dv-c-cat-3: #96394f;
@@ -758,10 +631,7 @@
   --dv-ed-text: #23272e;
   --dv-ed-caret: #2f6ba8;
   --dv-ed-selection: rgb(47 107 168 / 30%);
-  --dv-ed-selection-match: rgb(47 107 168 / 24%);
   --dv-ed-active-line: #eff1f5;
-  --dv-ed-line-number: #9aa1ac;
-  --dv-ed-active-line-number: #2f6ba8;
   --dv-ed-gutter-bg: #eff1f5;
   --dv-ed-gutter-border: #d3d8e0;
   --dv-ed-whitespace-dot: #c0c7d1;

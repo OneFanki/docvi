@@ -7,11 +7,7 @@ import type { SearchResponse, SearchHit } from '../workers/search.worker'
 /**
  * 搜索索引客户端：管理 worker 生命周期、请求配对，并对**所有工作区**建同一份索引。
  *
- * 两种宿主两种实现：
- *  - 桌面：主进程按工作区给整库原文，这里在 worker 里建 minisearch 索引；
- *  - 容器：服务端构建时已生成索引，宿主提供 `searchQuery`，这里只做查询。
- *
- * 分支只在这一处判断（`usesHostIndex`），上层组件拿到的都是同一份 state。
+ * 主进程按工作区给整库原文，这里在 worker 里建 minisearch 索引。
  *
  * 请求带自增 id，只接受最新一次查询的结果——输入框逐字触发查询时，
  * 旧查询可能后到并覆盖新结果（乱序返回），这是搜索框最常见的竞态。
@@ -31,8 +27,6 @@ export interface SearchState {
   query: string
   hits: SearchHit[]
   error: string | null
-  /** 索引由宿主提供（容器）：面板据此换掉「打开工作区才能搜」的引导文案 */
-  external: boolean
   /** 超过全文预算、只索引了文件名与路径的工作区 id */
   filenameOnly: string[]
 }
@@ -42,9 +36,6 @@ interface CorpusDoc {
   path: string
   text: string
 }
-
-/** 宿主自带索引（容器）：不需要语料，也不需要 worker */
-const usesHostIndex = typeof window.docvi.searchQuery === 'function'
 
 export function useSearchIndex() {
   const state = reactive<SearchState>({
@@ -56,7 +47,6 @@ export function useSearchIndex() {
     query: '',
     hits: [],
     error: null,
-    external: usesHostIndex,
     filenameOnly: [],
   })
 
@@ -201,8 +191,6 @@ export function useSearchIndex() {
 
   /** 确保某个工作区已索引（幂等，可重复调用） */
   function index(workspaceId: string): Promise<void> {
-    // 服务端已建好索引：这条路径只服务于「本地建索引」的桌面宿主
-    if (usesHostIndex) return Promise.resolve()
     if (indexed.has(workspaceId)) return Promise.resolve()
     if (!queue.includes(workspaceId)) queue.push(workspaceId)
     return runQueue()
@@ -215,7 +203,6 @@ export function useSearchIndex() {
    * 其余工作区不该抢当前交互的 IO，推到空闲回调里逐个补。
    */
   function indexRest(workspaceIds: string[], activeId: string | null): void {
-    if (usesHostIndex) return
     state.totalWorkspaces = workspaceIds.length
     const rest = workspaceIds.filter(id => id !== activeId && !indexed.has(id))
     if (!rest.length) return
@@ -236,31 +223,6 @@ export function useSearchIndex() {
       return
     }
     seq += 1
-    const current = seq
-    if (usesHostIndex) {
-      // 服务端索引：查询是异步 HTTP，仍按 seq 丢弃过期结果
-      void window.docvi.searchQuery?.(text).then(result => {
-        if (current !== seq) return
-        if (!result.ok) {
-          state.error = result.error.message
-          state.hits = []
-          return
-        }
-        state.error = null
-        // 首次查询顺带把总篇数带回：面板的「已索引 N 篇」不依赖逐仓建索引
-        if (result.data.total) state.count = result.data.total
-        state.ready = true
-        state.hits = result.data.hits.map(hit => ({
-          id: `${hit.workspaceId ?? ''}:${hit.path}`,
-          workspaceId: hit.workspaceId,
-          path: hit.path,
-          title: hit.title,
-          score: hit.score,
-          snippet: hit.snippet,
-        }))
-      })
-      return
-    }
     awaited = seq
     ensureWorker().postMessage({ type: 'query', id: seq, text })
   }
@@ -310,7 +272,6 @@ export function useSearchIndex() {
    * 否则先发起、后返回的那次会用更旧的语料覆盖新语料。
    */
   function invalidateSoon(workspaceId: string, delay = 1200): void {
-    if (usesHostIndex) return
     const existing = reindexTimers.get(workspaceId)
     if (existing) clearTimeout(existing)
     reindexTimers.set(

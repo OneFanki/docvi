@@ -35,13 +35,3 @@ export function toPlain<T>(value: T): T {
     return value
   }
 }
-
-/**
- * 剥掉 Vue 的响应式包装（等价于 `toRaw` 的浅层版，但本模块不依赖 vue）。
- *
- * 只处理**一层**：IPC 参数几乎都是「一个扁平对象」，嵌多层响应式对象的写法
- * 极少见，而递归剥离开销不小。真要嵌套，调用点自己展开——见 UpdateDialog。
- */
-export function plainRequest<T extends Record<string, unknown>>(value: T): T {
-  return toPlain(value)
-}

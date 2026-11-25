@@ -8,14 +8,7 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view'
-import {
-  findPluginBlocks,
-  renderMarkdown,
-  readFrontmatter,
-  type ComponentRegistry,
-  type DeclarativeMount,
-  type PluginSyntaxDeclaration,
-} from '@docvi/renderer-core'
+import { renderMarkdown, readFrontmatter } from '@docvi/renderer-core'
 
 /**
  * Live Preview 装饰层（飞书手感）。
@@ -24,7 +17,7 @@ import {
  *  1. **行内语法永远隐形**：`#`、`**`、反引号、`-`、`>`、链接的 `[..](url)` 等标记
  *     任何时刻都不显示（含光标所在行），只保留渲染后的样式。这是「所见即成品」的前提。
  *  2. **IME 冻结**：组合输入期间不重建装饰，否则中文输入法会被中途改写打断。
- *  3. **块级组件不参与选区**：块 Widget（代码块 / 表格 / 组件卡片 / 插件容器）覆盖的
+ *  3. **块级块不参与选区**：块 Widget（代码块 / 表格 / 图片 / mermaid）覆盖的
  *     区间一旦与选区相交就退回源码文本，否则用户无法把光标放进块里编辑。
  *     这是能力边界，与规则 1 不是一回事：行内标记藏掉后照样能编辑，块级结构
  *     藏掉后却没有可编辑的落点，所以只有块级保留光标守卫。
@@ -34,15 +27,6 @@ import {
  */
 
 export interface LivePreviewOptions {
-  /** 组件注册表：块级组件卡片与阅读态共用同一个，保证两处渲染一致 */
-  registry: ComponentRegistry
-  /**
-   * 插件声明的容器语法（`::: merged` 之类）。
-   *
-   * 编辑态必须与阅读态用同一份声明：否则同一个块在阅读时是卡片、编辑时是一坨
-   * 裸 YAML，用户会以为「插入的组件坏了」。真实注册表在宿主手里，这里只接收结论。
-   */
-  containerSyntax?: PluginSyntaxDeclaration[]
   /**
    * 当前文档在内容根内的相对路径。
    *
@@ -75,7 +59,7 @@ export interface LivePreviewOptions {
 /**
  * 通用「把一段源码渲染成 HTML」的块 Widget。
  *
- * 关键复用点：块内容（代码块 / 表格 / 图片 / 组件卡片）不另写渲染器，而是把源码
+ * 关键复用点：块内容（代码块 / 表格 / 图片 / mermaid）不另写渲染器，而是把源码
  * 交给 renderer-core 的同一条管线，保证编辑态与阅读态**长得一模一样**——
  * 两套渲染器迟早会漂移，这是最贵的一类不一致。
  */
@@ -83,15 +67,12 @@ class RenderedBlockWidget extends WidgetType {
   readonly source: string
   readonly kind: string
   readonly fingerprint: string
-  readonly frontmatter: Record<string, unknown> | null
-  readonly registry: ComponentRegistry
   readonly tableEdit: {
     from: number
     to: number
     onEdit: (payload: { from: number; to: number; source: string }) => void
   } | null
   readonly imageEdit: RenderedBlockWidget['tableEdit']
-  readonly containerSyntax: PluginSyntaxDeclaration[]
   readonly docPath: string
   readonly assetPrefix: string | undefined
 
@@ -99,10 +80,7 @@ class RenderedBlockWidget extends WidgetType {
     source: string,
     kind: string,
     fingerprint: string,
-    frontmatter: Record<string, unknown> | null,
-    registry: ComponentRegistry,
     tableEdit: RenderedBlockWidget['tableEdit'] = null,
-    containerSyntax: PluginSyntaxDeclaration[] = [],
     docPath = 'live-preview.md',
     assetPrefix?: string,
     imageEdit: RenderedBlockWidget['tableEdit'] = null,
@@ -111,11 +89,8 @@ class RenderedBlockWidget extends WidgetType {
     this.source = source
     this.kind = kind
     this.fingerprint = fingerprint
-    this.frontmatter = frontmatter
-    this.registry = registry
     this.tableEdit = tableEdit
     this.imageEdit = imageEdit
-    this.containerSyntax = containerSyntax
     this.docPath = docPath
     this.assetPrefix = assetPrefix
   }
@@ -145,7 +120,7 @@ class RenderedBlockWidget extends WidgetType {
 
     /*
      * 表格块右上角的「编辑表格」：点它打开网格编辑器，产物写回**同一段
-     * Markdown 原文**（不转成组件、不加私有语法）。
+     * Markdown 原文**（不转成私有语法）。
      * 按钮放在块外沿（absolute），不挤压表格本身。
      */
     if (this.tableEdit) {
@@ -197,38 +172,25 @@ class RenderedBlockWidget extends WidgetType {
       })
     }
 
-    let mount: DeclarativeMount | null = null
+    /*
+     * 异步渲染在 widget 被销毁后可能还在 await 里：用「已销毁」标记挡掉迟到的
+     * DOM 写入，否则会把内容写进一个已从文档摘除的容器（白渲染一遍）。
+     * destroy() 拿不到这个闭包变量，挂到元素上让它读取。
+     */
     let disposed = false
+    ;(wrapper as HTMLElement & { __cleanup?: () => void }).__cleanup = () => {
+      disposed = true
+    }
 
     void import('@docvi/renderer-core').then(async core => {
       if (disposed) return
       try {
-        // 组件卡片需要 frontmatter 里的数据：拼一页「只含该组件」的迷你文档走同一条管线
-        const doc =
-          this.kind === 'component' && this.frontmatter
-            ? `---\ncomponents: ${JSON.stringify(this.frontmatter)}\n---\n\n${this.source}\n`
-            : this.source
         // 块内图片要按**真实文档路径**解析相对引用：写死 live-preview.md 会让
         // 子目录文档里的 `![](img/a.png)` 全部取错；前缀与阅读视图同一份
-        const result = renderMarkdown(doc, this.docPath, {
-          containerSyntax: this.containerSyntax,
+        const result = renderMarkdown(this.source, this.docPath, {
           ...(this.assetPrefix ? { assetPrefix: this.assetPrefix } : {}),
         })
         body.innerHTML = result.html
-        if (this.kind === 'component') {
-          mount = core.mountDeclarativeComponents(
-            body,
-            (result.frontmatter.components as
-              Record<string, Record<string, unknown>> | undefined) ?? null,
-            this.registry,
-            { onMissing: () => undefined },
-          )
-        } else if (this.kind === 'container' || this.kind === 'fence') {
-          // 结构化块的数据在块内 YAML，不走 frontmatter：挂载器读占位元素的 payload。
-          // container 与 fence 共用同一条挂载路径——区别只在围栏长什么样，
-          // 渲染时 source 里已经带着围栏行，extractPluginBlocks 统一处理。
-          mount = core.mountPluginBlocks(body, this.registry, { onMissing: () => undefined })
-        }
         await core.highlightPass(body)
         await core.mermaidPass(body)
       } catch {
@@ -236,13 +198,6 @@ class RenderedBlockWidget extends WidgetType {
         body.textContent = this.source
       }
     })
-
-    // destroy() 拿不到闭包里的 mount，挂到元素上让 destroy 读取
-    ;(wrapper as HTMLElement & { __cleanup?: () => void }).__cleanup = () => {
-      disposed = true
-      mount?.dispose()
-      mount = null
-    }
 
     return wrapper
   }
@@ -256,7 +211,7 @@ class RenderedBlockWidget extends WidgetType {
    * 高度估计必须给，且必须**明显大于一行**。
    *
    * ⚠️ 不实现这个 getter 时 CM6 用默认值（约一行高 20px）估算块 widget 的高度。
-   * 而组件卡片实际可能是 200~400px（表格、图、时间线），估算与真实的差值会一直
+   * 而表格块实际可能是 200~400px，估算与真实的差值会一直
    * 累积进高度预言机——表现为「表格之后的所有行，鼠标点到行中间偏下就跳到下一行」。
    * 实测：表格块实际 219.9px、按 20px 估，其后的行只有上部 35% 能命中本行。
    *
@@ -277,7 +232,7 @@ class RenderedBlockWidget extends WidgetType {
 /**
  * 折叠的 frontmatter：只显示条目数。
  *
- * 为什么默认折叠、且必须点一下才展开：这块是组件数据与页面元信息，写一次就不再动；
+ * 为什么默认折叠、且必须点一下才展开：这块是页面元信息，写一次就不再动；
  * 实时预览里把它整段摊开，占满首屏又没人看得懂。点击后才把光标放进 frontmatter，
  * 由「光标在属性区内」的既有规则展开原文——想改的人点一下就能改。
  */
@@ -385,18 +340,11 @@ function listDepth(node: { parent: { name: string; parent: unknown } | null }): 
   return depth + 1
 }
 
-/* ---------- frontmatter 解析（编辑态需要它给组件卡片喂数据） ---------- */
+/* ---------- frontmatter 解析（编辑态只需折叠它并列出键名） ---------- */
 
 interface FrontmatterInfo {
   /** 结束位置（含闭合 --- 与其后的换行） */
   end: number
-  /**
-   * `components` 段（组件卡片的数据源）。
-   *
-   * 只有这一段是编辑态真正要用的：块 Widget 需要它把数据喂给组件。
-   * 其余键只用于「属性 · N 项」里列名字。
-   */
-  data: Record<string, Record<string, unknown>> | null
   keys: string[]
 }
 
@@ -404,23 +352,15 @@ interface FrontmatterInfo {
  * 解析 frontmatter。
  *
  * ⚠️ 必须复用 renderer-core 的正式解析（`readFrontmatter`），不能在这里手写一份
- * 「两层 key: 标量」的简化版：组件数据普遍含数组与嵌套对象（`endpoints:` /
- * `decisions:`），简化版会把它们啃成空串与散落标量，组件拿到坏 props 渲染成空壳，
- * 而阅读态走正式解析一切正常——同一篇文档两种结果，用户只会当成随机故障。
- * 这里曾踩过：`endpoints` 变成 `''`，`props.endpoints.map()` 抛错，卡片全空白。
+ * 「两层 key: 标量」的简化版：属性区普遍含数组与嵌套对象，简化版会把它们啃成
+ * 空串，属性卡的条目数与真实不符。
  */
 function parseFrontmatter(text: string): FrontmatterInfo | null {
   const snapshot = readFrontmatter(text)
   if (snapshot.end === 0 && !snapshot.error) return null
-  const data = snapshot.data
-  const components =
-    data.components && typeof data.components === 'object'
-      ? (data.components as Record<string, Record<string, unknown>>)
-      : null
   return {
     end: snapshot.end,
-    data: components && Object.keys(components).length ? components : null,
-    keys: Object.keys(data),
+    keys: Object.keys(snapshot.data),
   }
 }
 
@@ -524,7 +464,7 @@ function buildDecorations(
   /*
    * 块级替换：**保留光标守卫**，但对少数块豁免。
    *
-   * 代码块 / 表格 / 组件卡片 / 插件容器一旦被块 Widget 覆盖，选区就没有可落脚的
+   * 代码块 / 表格 / 图片 / mermaid 一旦被块 Widget 覆盖，选区就没有可落脚的
    * 源码位置——光标进不来也就改不了。所以光标（或选区）与块区间相交时必须退回
    * 源码文本，这是能力边界。
    *
@@ -559,13 +499,10 @@ function buildDecorations(
         source,
         kind,
         fingerprint(kind, source, `${extra ?? ''}\u0001${theme}`),
-        frontmatterInfo?.data ?? null,
-        options.registry,
         // 表格块的「编辑表格」按钮要能定位原文区间，位置在建立装饰时才知道
         kind === 'table' && options.onEditTable
           ? { from: startLine.from, to: endLine.to, onEdit: options.onEditTable }
           : null,
-        options.containerSyntax ?? [],
         options.docPath ?? 'live-preview.md',
         options.assetPrefix,
         kind === 'image' && options.onEditImage
@@ -665,10 +602,9 @@ function buildDecorations(
       /* ---- 块级 ---- */
 
       if (name === 'FencedCode') {
-        // 组件卡片：代码围栏写成 ```at-card {...} 也能出卡片（与行内标签等价）
         const raw = text.slice(ref.from, ref.to)
         const info = /^```+\s*([\w+-]*)/.exec(raw)?.[1] ?? ''
-        block(ref.from, ref.to, /^at-|^component/.test(info) ? 'component' : info, raw)
+        block(ref.from, ref.to, info, raw)
         return false
       }
 
@@ -845,38 +781,6 @@ function buildDecorations(
     },
   })
 
-  /* ---- 组件标签：<at-kind ... /> 独占一行 ---- */
-
-  const componentTag = /^[ \t]*<at-([\w-]+)([\s\S]*?)\/?>[ \t]*$/
-  for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber += 1) {
-    const line = doc.line(lineNumber)
-    const match = componentTag.exec(line.text)
-    if (!match) continue
-    block(line.from, line.to, 'component', line.text.trim())
-  }
-
-  /*
-   * ---- 插件结构化块：`::: name` 容器与 ```` ```name ```` 围栏 ----
-   *
-   * 不用语法树：markdown-it 的容器扩展在 CM6 的 Lezer 语法里根本不存在，
-   * `::: merged` 会被解析成普通段落；围栏虽然能被语法树认出来，但那是「代码块」，
-   * 这里要的是把它换成组件卡片。
-   *
-   * 扫描实现来自 renderer-core 的 `findPluginBlocks`——与阅读态、导出、分享
-   * **同一份**。曾经这里与渲染管线各写一份正则，结果缩进两格的收尾 `:::` 在
-   * 编辑态被识别、阅读态不认，同一篇文档两处长得不一样。
-   */
-  const syntax = options.containerSyntax ?? []
-  if (syntax.length) {
-    const lines = Array.from({ length: doc.lines }, (_, i) => doc.line(i + 1).text)
-    for (const span of findPluginBlocks(lines, syntax)) {
-      const startLine = doc.line(span.startLine + 1)
-      const endLine = doc.line(span.endLine + 1)
-      // kind 用 form 而不是语法名：Widget 按 'container' / 'fence' 决定怎么重新渲染块
-      block(startLine.from, endLine.to, span.form, text.slice(startLine.from, endLine.to))
-    }
-  }
-
   /*
    * 组装 RangeSet。
    *
@@ -953,7 +857,7 @@ export function refreshDecorations(view: EditorView): void {
  * IME 冻结开关：true = 冻结（保留当前装饰、只跟随位置映射）。
  *
  * ⚠️ 早期实现是「清空装饰回到纯源码」，代价是**布局高度瞬间塌陷**：
- * 表格、组件卡片这些块级 Widget 一消失，整篇文档高度骤降，`scrollTop`
+ * 表格、图片这些块级 Widget 一消失，整篇文档高度骤降，`scrollTop`
  * 超出新高度被浏览器夹到 0——用户看到的就是「输入法一打字，页面直接跳到顶部」。
  * 触发条件很日常：想打 `/` 但没切英文，输入了顿号「、」，组合期一到位置就跳。
  *

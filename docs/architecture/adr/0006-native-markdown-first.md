@@ -2,7 +2,7 @@
 
 ## 状态
 
-已采纳（2026-11-12）
+已采纳（2026-11-12）｜**后续变更（2026-11-24）：组件系统已彻底删除**，见文末「后续变更」
 
 ## 背景
 
@@ -59,7 +59,7 @@ docvi 的差异化建立在「任意 Markdown 目录 → 可浏览 / 可搜索 /
 - MCP `initialize` 的 `instructions` 以「默认写标准 Markdown」开头，组件作为带限制说明的可选能力出现在后面。
 - `list_components` / `get_component_docs` 的返回文本必须包含「非通用 Markdown、仅 docvi 渲染」的限制声明，不能只列清单。
 - `component-protocol` skill 的「图表达选型」表改为主推 mermaid / 原生语法，组件标注为「需要交互或字段级锚定时才用」。
-- `plugins/base/docs/SKILL.md` 与 `docs/architecture/组件协议.md` 顶部声明可移植性边界。
+- `docs/architecture/组件协议.md` 顶部声明可移植性边界。
 - 新增测试钉住该口径（instructions 必须先提原生 Markdown、必须提到组件仅在 docvi 渲染）。
 
 **不再**：
@@ -70,5 +70,22 @@ docvi 的差异化建立在「任意 Markdown 目录 → 可浏览 / 可搜索 /
 **代价与保留**：
 
 - 组件系统继续维护（不废弃），插件协议与既有文档不受影响。
-- 存量 30 篇文档不做批量重写：碰到才迁，`courses/component-showcase` 保留作为能力展示，但不再作为「推荐写法」的范本。
+- 存量 30 篇文档不做批量重写：碰到才迁；组件展示样例目录已于 2026-11-24 随组件系统一并删除。
 - `TableGraph` 的退役单独评估（它依赖一次布局质量的实测对照），不在本决策内强制。
+
+## 后续变更（2026-11-24）
+
+本 ADR 的决策是「组件降级为可选，保留」——它解决的是**推荐口径**，没有解决**系统存在本身**。
+
+一个月后的实际结果是：只要组件系统还在仓库里、还在 MCP 的工具清单上，AI 写文档时仍然
+优先套组件；而它 4.5% 的真实使用率与「离开 docvi 就不可读」的代价并不相称。因此 v1.0.0
+做了更进一步的决定：
+
+- 删除两个内置组件包（通用组件包与音频组件包）与整条声明式渲染链路
+  （`ComponentRegistry`、`mountDeclarativeComponents`、`mountPluginBlocks`、容器语法）；
+- 删除 MCP 的 `list_components` / `get_component_docs` 两个工具；
+- 交互式图解改为正文里的原生 `<iframe src="./x.html" sandbox="allow-scripts">`——
+  HTML 标准写法，不依赖本平台渲染器。
+
+本 ADR 的「不删除、不冻结」结论因此被取代；其中关于 mermaid 优先、可移植性优先的论证
+仍然成立，并被这次删除进一步确认。详见 [组件协议.md](../组件协议.md)。

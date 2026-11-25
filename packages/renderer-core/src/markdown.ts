@@ -16,12 +16,12 @@ import { parse as parseYaml } from 'yaml'
 
 import { colorLiteral } from './color-literal.ts'
 import { alignAsciiBlock, needsAsciiAlignment } from './ascii-align.ts'
-import { findPluginBlocks, type PluginSyntaxDeclaration } from './plugin-blocks.ts'
+import { rewriteIframeSrc } from './iframe-assets.ts'
+import { registerMath } from './math.ts'
 
 export interface Frontmatter {
   title?: string
   order?: number
-  components?: Record<string, Record<string, unknown>>
   /** colors: false = 本页关闭行内代码颜色色块（默认开） */
   colors?: boolean
   /** terms: false = 本页关闭段首加粗升格（默认开） */
@@ -56,15 +56,6 @@ export interface RenderOptions {
    * 渲染产物目录，图上就是破图。
    */
   assetPrefix?: string
-  /**
-   * 插件提供的容器语法扩展（manifest 的 markdownSyntax，form: container）。
-   *
-   * `name` 是容器名（`::: merged`），`component` 是目标组件 kind。
-   * 渲染成 `<div data-plugin-syntax="<name>" data-plugin-component="<kind>">`
-   * 内嵌 YAML —— 组件挂载由宿主在 DOM 插入后按 data-plugin-component 触发，
-   * 渲染管线本身不认识任何具体插件。
-   */
-  containerSyntax?: Array<{ name: string; component: string }>
   /**
    * 给块级元素标注 `data-source-line`（原文件 0-based 行号）。
    *
@@ -124,79 +115,6 @@ function escapeHtml(value: string): string {
 }
 
 /**
- * 插件的结构化块语法声明。
- *
- * `form` 缺省按 `container` 处理（老清单只有容器一种形态）。
- * 两种形态的数据都写在块内 YAML，区别只在围栏长什么样。
- */
-export type ContainerSyntax = PluginSyntaxDeclaration
-
-/**
- * 把插件结构化块替换成占位 HTML。
- *
- * 两种形态：`::: <name>` 容器与 ```` ```<name> ```` 围栏。缩小为同一个
- * `data-plugin-*` 占位元素，挂载器按 data-plugin-component 触发——渲染管线
- * 本身不认识任何具体插件。
- *
- * 为什么在 Markdown 解析之前处理：块内是 YAML，不是 Markdown。交给容器规则
- * 或围栏规则渲染会把 `title: xxx` 变成正文段落；这里整块摘出来，原始 YAML
- * 用 percent-encoding 放进 data 属性。
- *
- * 行扫描统一走 `findPluginBlocks`（与编辑态同一份实现）：两处各写一份正则曾
- * 导致缩进两格的收尾 `:::` 在编辑态被识别、阅读态不认。
- */
-export function extractPluginBlocks(
-  markdown: string,
-  syntax: ContainerSyntax[],
-  /**
-   * 行号对齐：`null` = 不对齐（默认，导出与分享页用）；数字 = 正文首行在**原文件**
-   * 里的 0-based 行号（有 frontmatter 时 > 0，没有时也是 0——所以能不能用 0 判断
-   * "是否要对齐"是错的，必须用 null 显式区分）。
-   */
-  lineOffset: number | null = null,
-): string {
-  if (!syntax.length) return markdown
-
-  // 按行切并保留原始行尾，替换时只动插件块所在的行，其余字节不动
-  const lines = markdown.split(/\r?\n/)
-  const spans = findPluginBlocks(lines, syntax)
-  if (!spans.length) return markdown
-
-  const crlf = /\r\n/.test(markdown) ? '\r\n' : '\n'
-  const out: string[] = []
-  let cursor = 0
-  for (const span of spans) {
-    out.push(...lines.slice(cursor, span.startLine))
-    /*
-     * 数据放 data 属性而不是 <script> 子节点，且用 percent-encoding：
-     *  - 属性值可安全承载换行（编码后没有裸换行），不会被 Markdown 的 HTML 块规则截断；
-     *  - 不依赖「script 文本在 HTML 解析后保真」——实测把换行替换成占位字符后，
-     *    浏览器会把它规范化成 U+FFFD，YAML 直接解析失败。
-     */
-    const payload = encodeURIComponent(span.body.trim())
-    const linePart = lineOffset === null ? '' : ` data-source-line="${span.startLine + lineOffset}"`
-    out.push(
-      `<div class="at-plugin-block"${linePart}` +
-        ` data-plugin-syntax="${escapeHtml(span.name)}"` +
-        ` data-plugin-form="${span.form}"` +
-        ` data-plugin-component="${escapeHtml(span.component)}"` +
-        ` data-plugin-payload="${escapeHtml(payload)}"></div>`,
-    )
-    /*
-     * 保持行数：一个 N 行的插件块被替换成 1 行 HTML 之后，后续块的行号会整体
-     * 前移 N-1——分屏同步滚动与「源行 ↔ 渲染块」的映射靠行号，一漂就全错。
-     * 补 N-1 个空行，空行在 Markdown 里不产生任何输出。
-     */
-    if (lineOffset !== null) {
-      for (let i = span.startLine + 1; i <= span.endLine; i += 1) out.push('')
-    }
-    cursor = span.endLine + 1
-  }
-  out.push(...lines.slice(cursor))
-  return out.join(crlf)
-}
-
-/**
  * 相对路径按 baseDir 归一为根相对（折叠 `..` / `.` / 空段）。
  *
  * 导出给宿主的「图片预览」复用：编辑弹窗里显示现有图片时，路径必须与块内渲染
@@ -228,37 +146,6 @@ export function resolveLink(href: string, docPath: string): string {
   const baseDir = docPath.includes('/') ? docPath.slice(0, docPath.lastIndexOf('/')) : ''
   const normalized = toRootRelative(rawPath.replace(/\.md$/i, ''), baseDir)
   return anchorPart !== undefined ? `${normalized}#${anchorPart}` : normalized
-}
-
-/**
- * 把组件数据里的 `src` 归一到内容根的资产地址。
- *
- * 为什么必须在这里做：组件包只消费 props，不知道自己是哪个工作区、内容根在哪；
- * 而宿主的前缀（桌面 `docvi://asset/<工作区>/`、容器 `/<仓库>/`）只有渲染管线
- * 拿得到。此前没做这一步，`src` 被浏览器当成相对当前页解析——桌面端落到
- * `docvi://app/assets/x.html`（渲染产物目录），必然 404，用户只能把整份 HTML
- * 粘进 frontmatter。
- *
- * 规则（与正文图片同口径）：相对路径按文档所在目录解析，`/` 开头按内容根解析；
- * 外链、`data:`、已带协议的一律不动。字段名固定为 `src`——组件的资源入口只有一个
- * 约定，不做按 kind 的特判。
- */
-function normalizeComponentSources(
-  components: Record<string, Record<string, unknown>> | undefined,
-  docPath: string,
-  assetPrefix: string,
-): void {
-  if (!components) return
-  const baseDir = docPath.includes('/') ? docPath.slice(0, docPath.lastIndexOf('/')) : ''
-  for (const entry of Object.values(components)) {
-    if (!entry || typeof entry !== 'object') continue
-    const src = entry.src
-    if (typeof src !== 'string' || !src) continue
-    if (/^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('//')) continue
-    // 幂等：容器前缀是普通路径（`/<仓库>`），不幂等会在二次渲染时叠成 `/<仓库>/<仓库>/…`
-    if (assetPrefix && src.startsWith(`${assetPrefix}/`)) continue
-    entry.src = assetPrefix + toRootRelative(src, baseDir)
-  }
 }
 
 const CONTAINERS = ['tip', 'note', 'info', 'warning', 'danger'] as const
@@ -586,13 +473,6 @@ function createMarkdownIt(ctx: BuildContext): MarkdownItInstance {
     },
   })
 
-  /*
-   * 插件容器语法不走 markdown-it-container：容器内的内容是一段 YAML，
-   * 交给容器规则会被当作普通 Markdown 渲染成段落（`title: xxx` 变成正文）。
-   * 改在渲染前把整块替换成占位 HTML（见 extractPluginBlocks），
-   * 渲染管线不认识任何具体插件，组件挂载由宿主按 data-plugin-component 完成。
-   */
-
   // 代码块：占位结构（lang 标签 + 复制按钮），高亮由异步 pass 替换
   md.renderer.rules.fence = (tokens, idx) => {
     const token = tokens[idx]
@@ -668,6 +548,8 @@ function createMarkdownIt(ctx: BuildContext): MarkdownItInstance {
   if (ctx.sourceLines) annotateSourceLines(md, ctx.lineOffset)
   promoteTermParagraphs(md, () => ctx.termBlocks)
   taskLists(md)
+  // 数学公式：$…$ 行内、行首 $$…$$ 成块。理由与语法见 math.ts
+  registerMath(md)
 
   return md
 }
@@ -678,13 +560,8 @@ export function renderMarkdown(
   docPath: string,
   options: RenderOptions = {},
 ): RenderResult {
-  const { data, content: rawContent, error, lineOffset } = splitFrontmatter(src)
+  const { data, content, error, lineOffset } = splitFrontmatter(src)
   const sourceLines = options.sourceLines === true
-  const content = extractPluginBlocks(
-    rawContent,
-    options.containerSyntax ?? [],
-    sourceLines ? lineOffset : null,
-  )
   const outline: OutlineEntry[] = []
   const md = createMarkdownIt({
     docPath,
@@ -700,14 +577,23 @@ export function renderMarkdown(
       if (level === 2 || level === 3) outline.push({ level, text: info.title, id: info.slug })
     },
   })
-  const html = md.render(content)
-  const h1 = /^#\s+(.+)$/m.exec(content)?.[1]?.trim() ?? null
-  // 组件数据的资源入口统一归一到资产地址：让「引用文件」与「内联代码」共用同一条管线
-  normalizeComponentSources(
-    data.components,
+  /*
+   * 原生 `<iframe>` 的 src 归一。
+   *
+   * 放在 `md.render` 之后而不是写一条 markdown-it 规则：iframe 可能出现在
+   * 块级 HTML、内联 HTML、甚至作者的 raw 片段里，逐条拦截规则会漏；整段
+   * 后处理只有一处入口，且不改变 markdown-it 的解析结果。
+   *
+   * 为什么需要它：图片有 `image` 规则补资产前缀，而原生 HTML 原样透传，
+   * `<iframe src="./demo.html">` 会被解析到渲染产物目录（docvi://app/…）
+   * 而 404。补上之后「在 md 里嵌一个本地 html 图解」是标准写法，不依赖组件。
+   */
+  const html = rewriteIframeSrc(
+    md.render(content),
     docPath,
     options.assetPrefix ?? options.urlPrefix ?? '',
   )
+  const h1 = /^#\s+(.+)$/m.exec(content)?.[1]?.trim() ?? null
   return { html, frontmatter: data, h1, outline, error }
 }
 
@@ -722,10 +608,7 @@ export interface FrontmatterSnapshot {
 /**
  * 只读 frontmatter（不渲染正文）。
  *
- * 为什么单独导出：编辑态的 Live Preview 需要同一份 frontmatter 数据来给组件卡片
- * 喂 props。此前那里手写了一个「只认两层 key: 标量」的迷你解析器，遇到数组/嵌套
- * 对象（`endpoints:` / `decisions:`）会把数据啃成空串与散落标量——组件拿到坏 props
- * 后渲染成空壳，阅读态却正常，形成「同一篇文档两种结果」。
+ * 为什么单独导出：编辑态的 Live Preview 要折叠属性区并列出条目，需要同一份解析。
  * 解析规则只能有一份：这里就是那份。
  */
 export function readFrontmatter(src: string): FrontmatterSnapshot {

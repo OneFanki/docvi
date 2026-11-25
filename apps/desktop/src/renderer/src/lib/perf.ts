@@ -149,13 +149,3 @@ export function setPerfTracing(value: boolean): void {
     observer = null
   }
 }
-
-/** 当前是否在采集（界面据此显示开关状态与提示） */
-export function isPerfTracing(): boolean {
-  return enabled
-}
-
-/** 最近一次采集到的记录数（设置页显示用，避免把整份数据搬到 UI） */
-export function perfSampleCount(): number {
-  return buffer.length
-}

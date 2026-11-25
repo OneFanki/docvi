@@ -55,34 +55,20 @@ export function saveServiceSettings(patch: Partial<ServiceSettings>): ServiceSet
   return next
 }
 
-/** 当前已启用插件 → 服务快照（MCP 的插件工具只应看到启用中的包与组件） */
+/** 当前已启用插件 → 服务快照（MCP 的插件工具只应看到启用中的包） */
 export function pluginSnapshot(plugins: PluginStore): ServicePlugin[] {
   return plugins
     .list()
     .filter(record => record.enabled && !record.error)
-    .map(record => {
-      const off = record.disabledComponents
-      // 逐组件停用要在快照里就剔掉：MCP 的 list_components 必须与宿主注册表
-      // 看到同一份活跃清单，否则 AI 会写出「AI 看得见、渲染不出来」的标签
-      const contributes =
-        record.manifest.contributes && off.length
-          ? {
-              ...record.manifest.contributes,
-              components: (record.manifest.contributes.components ?? []).filter(
-                item => !off.includes(item.kind),
-              ),
-            }
-          : record.manifest.contributes
-      return {
-        name: record.manifest.name,
-        displayName: record.manifest.displayName,
-        version: record.manifest.version,
-        trust: record.manifest.trust,
-        dir: record.dir,
-        ...(record.manifest.description ? { description: record.manifest.description } : {}),
-        ...(contributes ? { contributes } : {}),
-      }
-    })
+    .map(record => ({
+      name: record.manifest.name,
+      displayName: record.manifest.displayName,
+      version: record.manifest.version,
+      trust: record.manifest.trust,
+      dir: record.dir,
+      ...(record.manifest.description ? { description: record.manifest.description } : {}),
+      ...(record.manifest.contributes ? { contributes: record.manifest.contributes } : {}),
+    }))
 }
 
 /**

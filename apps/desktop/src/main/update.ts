@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { createWriteStream, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { rename, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
@@ -352,11 +352,6 @@ export function pendingUpdate(): PendingUpdate | null {
   return existsSync(pending.filePath) ? pending : null
 }
 
-export function clearPendingUpdate(): void {
-  if (pending) rmSync(pending.filePath, { force: true })
-  pending = null
-}
-
 /**
  * 下载响应的最小形状。
  *
@@ -634,12 +629,6 @@ export function pruneUpdateCache(): void {
   } catch {
     // 清理是尽力而为，失败不影响启动
   }
-}
-
-/** 文件名（给 UI 展示用） */
-export function pendingUpdateName(): string | null {
-  const current = pendingUpdate()
-  return current ? basename(current.filePath) : null
 }
 
 /* ---------- 后台自动检查 ---------- */

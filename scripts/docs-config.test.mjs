@@ -91,9 +91,9 @@ test('toPosixPath 归一化分隔符与首尾斜杠', () => {
 
 // ── 启动目标解析（三形态） ──
 
-test('resolveLaunchTarget：无目标无环境变量 → courses', () => {
-  assert.deepEqual(resolveLaunchTarget({}), { mode: 'courses' })
-  assert.deepEqual(resolveLaunchTarget({ target: '', envDocsRoot: '' }), { mode: 'courses' })
+test('resolveLaunchTarget：无目标无环境变量 → 报错要求指定内容目录', () => {
+  const result = resolveLaunchTarget({})
+  assert.match(result.error ?? '', /未指定内容目录/, '内置示例已退役，不能再默默回退')
 })
 
 test('resolveLaunchTarget：目录目标 → standalone，缺配置报错并给模板', () => {

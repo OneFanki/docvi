@@ -8,18 +8,18 @@
 
 同一批服务能力目前有两份实现：
 
-| 能力       | 容器端                                 | 桌面端                                               |
-| ---------- | -------------------------------------- | ---------------------------------------------------- |
-| 临时分享   | `deployer/src/shares.mjs`（Node）      | `src-tauri/serve/src/share.rs`（Rust，893 行）       |
-| MCP        | `deployer/src/mcp.mjs`（Node，277 行） | `src-tauri/serve/src/mcp.rs`（Rust，919 行）         |
-| 插件资产   | `deployer/src/plugins.mjs`（Node）     | `src-tauri/serve` 内 Rust 实现                       |
-| 目录树扫描 | `scripts/lib/docs-core.mjs`            | `share.rs` 内重复实现（`scan_dir` / `subtree_node`） |
+| 能力       | 容器端                                   | 桌面端                                               |
+| ---------- | ---------------------------------------- | ---------------------------------------------------- |
+| 临时分享   | `packages/server/src/shares.mjs`（Node） | `src-tauri/serve/src/share.rs`（Rust，893 行）       |
+| MCP        | `packages/server/src/mcp.mjs`（Node）    | `src-tauri/serve/src/mcp.rs`（Rust，919 行）         |
+| 插件资产   | ~~`deployer/src/plugins.mjs`~~（已删除） | `src-tauri/serve` 内 Rust 实现                       | <!-- scan-allow: 历史记录引用已退役路径 --> |
+| 目录树扫描 | `scripts/lib/docs-core.mjs`              | `share.rs` 内重复实现（`scan_dir` / `subtree_node`） |
 
 两份实现靠人工对齐语义，已经出现过漂移：目录分享的 kind 判别、失效原因文案、扫描深度与排除规则都是先在一侧加、再补另一侧。
 
 ## 决策
 
-服务能力只在 **`packages/server`** 实现一份（纯 Node，零 Electron / 零前端依赖）；容器 deployer 与桌面 utilityProcess 都以**进程**方式消费同一份代码。
+服务能力只在 **`packages/server`** 实现一份（纯 Node，零 Electron / 零前端依赖）；桌面 utilityProcess 以**进程**方式消费这份代码（容器 deployer 已于 2026-11-24 退役）。
 
 ## 原因
 
@@ -30,11 +30,11 @@
 
 ## 被否方案
 
-| 方案                                                  | 否决原因                                                                           |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| 保持两份，靠契约测试对齐                              | 契约测试只能覆盖已想到的差异；实现成本翻倍，长期必然漂移                           |
-| 抽成一个 npm 包发布，deployer 与 desktop 各自依赖版本 | 单维护者 + 双版同源仓，发布与版本对齐开销大于收益；同仓 workspace 直接引用即可     |
-| 让桌面端内嵌整个 deployer                             | deployer 携带 git 编排、索引队列等容器专属能力，桌面不需要，会引入无关依赖与攻击面 |
+| 方案                                    | 否决原因                                                                           |
+| --------------------------------------- | ---------------------------------------------------------------------------------- |
+| 保持两份，靠契约测试对齐                | 契约测试只能覆盖已想到的差异；实现成本翻倍，长期必然漂移                           |
+| 抽成一个 npm 包发布，各宿主各自依赖版本 | 单维护者 + 双版同源仓，发布与版本对齐开销大于收益；同仓 workspace 直接引用即可     |
+| 让桌面端内嵌整个 deployer               | deployer 携带 git 编排、索引队列等容器专属能力，桌面不需要，会引入无关依赖与攻击面 |
 
 ## 后果
 

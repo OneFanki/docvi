@@ -194,6 +194,3 @@ export const vTooltip: Directive<HTMLElement, Binding> = {
 }
 
 /** 供验收脚本判断「气泡是否在显示」（不参与业务逻辑） */
-export function activeTooltipText(): string | null {
-  return current ? [current.text, current.hint].filter(Boolean).join(' · ') : null
-}

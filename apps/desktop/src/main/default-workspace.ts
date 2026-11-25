@@ -1,8 +1,6 @@
 import { mkdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import type { AppSettings } from '@docvi/shared'
-
 import { createWorkspaceEntry, type WorkspaceStore } from './store.ts'
 
 /**
@@ -101,25 +99,7 @@ export function ensureDefaultWorkspace(
 }
 
 /** 判断一个工作区根是否就是默认工作区（服务端据此打「默认落笔处」标记） */
-export function isDefaultWorkspaceRoot(root: string, documentsDir: string): boolean {
-  return root === defaultWorkspaceRoot(documentsDir)
-}
 
-/** 需要写入的 settings 补丁（供主进程一处落地） */
-export function seededSettingsPatch(): Pick<AppSettings, 'defaultWorkspaceSeeded'> {
-  return { defaultWorkspaceSeeded: true }
-}
-
-/**
- * 这个工作区能不能被移除？
- *
- * 抽成纯函数而不是写在 ipc 的 handler 里：这是「默认工作区不可删」的**唯一**
- * 判定点，界面（隐藏按钮）、命令面板、将来的脚本都该问它，而不是各自理解
- * 「什么叫默认工作区」。
- *
- * 注意它判的是**根路径**而不是 `entry.default` 标记：标记是派生字段，
- * 可能来自旧快照或未标记的调用方；路径是事实。
- */
 export function isRemovableWorkspace(
   entry: { root: string },
   defaultRoot: string | null | undefined,

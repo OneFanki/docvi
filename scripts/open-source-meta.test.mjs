@@ -28,7 +28,7 @@ const rootPkg = readJson('package.json')
 /** 所有要检查 license 的包清单：workspace 三个域 + 根 */
 function workspacePackages() {
   const list = ['package.json']
-  for (const dir of ['apps', 'packages', 'plugins']) {
+  for (const dir of ['apps', 'packages']) {
     const base = join(root, dir)
     if (!existsSync(base)) continue
     for (const name of readdirSync(base)) {
@@ -61,15 +61,6 @@ test('所有 workspace 包的 license 与根一致（不得残留 UNLICENSED）'
     if (pkg.license !== 'MIT') offenders.push(`${file}: ${pkg.license ?? '(缺失)'}`)
   }
   assert.deepEqual(offenders, [], '这些包的 license 不是 MIT')
-})
-
-test('插件清单的 license 与仓库一致（不是 UNLICENSED）', () => {
-  for (const name of readdirSync(join(root, 'plugins'))) {
-    const file = join('plugins', name, 'plugin.json')
-    if (!existsSync(join(root, file))) continue
-    const manifest = readJson(file)
-    assert.equal(manifest.license, 'MIT', `${file} 的 license 应为 MIT`)
-  }
 })
 
 test('更新清单与插件市场的地址指向同一个 GitHub 仓库', () => {

@@ -4,8 +4,6 @@ import { FolderOpen, ImagePlus, Link2, Trash2, Upload, X } from 'lucide-vue-next
 
 import { parseImage, serializeImage, type ImageModel } from '@docvi/editor'
 
-import { isWebHost } from '../lib/host'
-
 /**
  * 图片块的可视化编辑器。
  *
@@ -64,7 +62,7 @@ watch(
   },
 )
 
-const canImport = computed(() => props.canImport && !isWebHost)
+const canImport = computed(() => props.canImport)
 
 /** 把 File 读成 base64（不带 data: 前缀，由主进程统一处理） */
 async function readBase64(file: File): Promise<string> {

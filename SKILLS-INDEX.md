@@ -7,7 +7,5 @@
 | ------------------ | ----------------------------------------------------------------------------------- | ------------------------------------ | ---- |
 | skill-governance   | 创建、编辑、合并或审查本项目 `.agents/skills/` 下的项目级 skill 时使用。            | `.agents/skills/skill-governance/`   | 生效 |
 | content-model      | 改 `docs.config.yaml`、目录树生成、搜索索引、扫描规则、内容根零污染相关逻辑时使用。 | `.agents/skills/content-model/`      | 生效 |
-| markdown-rendering | 改 Markdown 渲染管线、代码高亮、mermaid、锚点、正文排版时使用。                     | `.agents/skills/markdown-rendering/` | 生效 |
-| component-protocol | 改 `<at-*>` 声明式协议、frontmatter components 段、组件运行时或组件数据协议时使用。 | `.agents/skills/component-protocol/` | 生效 |
-| plugin-development | 新增、修改、打包或发布插件包（`plugin.json` / dist / docs / examples）时使用。      | `.agents/skills/plugin-development/` | 生效 |
-| deployer-ops       | 改容器部署器、运维 API、git 编排、索引刷新队列、Docker 打包时使用。                 | `.agents/skills/deployer-ops/`       | 生效 |
+| markdown-rendering | 改 Markdown 渲染管线、代码高亮、mermaid、锚点、iframe 内嵌、正文排版时使用。        | `.agents/skills/markdown-rendering/` | 生效 |
+| plugin-development | 新增、修改、打包或发布插件包（`plugin.json` / 主题令牌 / docs）时使用。             | `.agents/skills/plugin-development/` | 生效 |

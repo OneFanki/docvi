@@ -320,9 +320,7 @@ const localLabel = computed(() => workspaceName(props.activeWorkspaceId))
         <div v-if="!total" class="palette__empty">
           <template v-if="terms.length">没有匹配的文档或命令</template>
           <template v-else-if="searchIndex.state.indexing">正在建立索引…</template>
-          <template v-else-if="!searchIndex.state.count && !searchIndex.state.external"
-            >打开一个工作区后即可全库搜索</template
-          >
+          <template v-else-if="!searchIndex.state.count">打开一个工作区后即可全库搜索</template>
           <template v-else>输入关键词开始搜索</template>
         </div>
       </div>

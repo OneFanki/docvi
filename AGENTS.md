@@ -5,16 +5,17 @@
 
 ## 项目介绍
 
-docvi 把任意 Markdown 目录变成**可浏览 / 可搜索 / 可交互**的文档站。一份渲染层服务两种宿主：
+docvi 是一个**通用 Markdown 阅读器与编辑器**：把任意 Markdown 目录变成可浏览 / 可搜索的文档站，桌面应用即全部产品形态。
 
-| 宿主     | 入口           | 说明                                                        |
-| -------- | -------------- | ----------------------------------------------------------- |
-| 桌面应用 | `apps/desktop` | 本地工作区浏览 + 编辑 + git + 本地服务（MCP / 分享 / 插件） |
-| 容器站点 | `deployer/`    | git 仓库编排 + 索引队列 + 多仓门户，对外提供 MCP 与临时分享 |
+| 能力       | 位置                                           | 说明                                                      |
+| ---------- | ---------------------------------------------- | --------------------------------------------------------- |
+| 浏览与编辑 | `apps/desktop`                                 | 本地工作区 + 标签页编辑 + 主题                            |
+| 本地服务   | `apps/desktop/src/service` + `packages/server` | MCP（供 AI 读写文档）与局域网临时分享                     |
+| 渲染核心   | `packages/renderer-core`                       | Markdown → HTML、代码高亮、mermaid、数学公式、iframe 内嵌 |
 
 **零编译渲染**是产品根基：md 原文直出、浏览器端渲染，改完刷新即见，没有构建等待。
 
-**单载体**：桌面与容器共用 `apps/desktop` 的同一份 UI 源码，宿主差异只在 `window.docvi` 由谁提供（Electron preload / 浏览器 HTTP 适配层 `lib/web-host.ts`）。禁止为容器另写一套界面。
+**表达通道只有通用格式**：标准 Markdown（GFM / mermaid / `::: tip` 容器 / `$…$` 数学公式）+ 原生 HTML（交互式图解走 `<iframe sandbox="allow-scripts">`）。自研声明式组件已于 2026-11-24 整体退役，禁止重新引入。
 
 ## 规则优先级
 
@@ -26,24 +27,24 @@ docvi 把任意 Markdown 目录变成**可浏览 / 可搜索 / 可交互**的文
 - 安装依赖：`pnpm install`
 - 桌面开发：`pnpm docvi:dev`（Electron + Vite 热更新）
 - 桌面构建 / 打包：`pnpm docvi:build` / `pnpm docvi:dist`
-- 容器版前端产物：`pnpm docvi:build:web`（→ `apps/desktop/dist-web`，deployer 伺服它）
 - 全量校验：`pnpm verify`（非 fail-fast，一次暴露全部欠账）
-- 单项：`pnpm typecheck` / `pnpm docvi:typecheck` / `pnpm test` / `pnpm docs:check` / `pnpm skills:check` / `pnpm scan:open-source`
-- 容器部署器：`cd deployer && pnpm test`；本地起服务见 `README.md`
+- 单项：`pnpm docvi:typecheck` / `pnpm test` / `pnpm docs:check` / `pnpm skills:check` / `pnpm scan:open-source`
+- iframe 内嵌端到端验证：`pnpm verify:iframe`
+- 应用交互端到端回归：`pnpm verify:app`（拉起真实 Electron 验工作区 / 标签 / 滚动 / 编辑保存 / 分享 / 服务，需先 `pnpm docvi:build`）
+- 分享页读者侧验证：`pnpm verify:share`（用裸浏览器实例打开分享链接，验 CSP / 表格 / mermaid / 无宿主桥泄漏）
 
 ## 强制约束
 
 ### 架构边界
 
 - **依赖方向只能单向**：渲染进程（纯 web）只经 preload 白名单访问宿主，禁止 `node:` / `electron`；主进程不得 import 渲染层；服务进程（`apps/desktop/src/service`）不得 import 窗口层。由 `scripts/check-boundaries.mjs` 守护。
-- **宿主差异只有一个收口处**：`window.docvi`（契约在 `packages/shared/src/ipc.ts`）。桌面由 preload 提供，容器由 `lib/web-host.ts` 提供；渲染层问 `hostKind` 决定入口显隐，禁止在各组件里探测「方法是否存在」。
-- **服务只有一份实现**：MCP、临时分享、检索语料的协议逻辑只允许存在于 `packages/server`；deployer 与 app 必须复用，禁止各自实现一套。
+- **宿主差异只有一个收口处**：`window.docvi`（契约在 `packages/shared/src/ipc.ts`），由 preload 提供。渲染层禁止探测「方法是否存在」来决定行为。
+- **服务只有一份实现**：MCP、临时分享、检索语料的协议逻辑只允许存在于 `packages/server`；app 必须复用，禁止另写一套。
 - **插件包零宿主依赖**：只允许 `vue` 作为 peerDependency；禁止访问 `window` 上的宿主全局、禁止 import 壳内部模块。
-- **前端保留路由必须在 deployer 放行**：平台以 `/_` 为运维页命名空间，凡以 `/_` 开头的 SPA 路由
-  （如 `/_/preview/…`）不登记就会被 404 兜底拦下；渲染层漏登记则会落进内容加载分支（点入口没反应）。
-- **同一份 `index.html` 跨路径深度复用时，相对资产必须给显式基准**：`/s/<id>/` 这类前缀路由下
-  相对资产会被解析到前缀里，服务端回落 HTML → 模块脚本拿到 `text/html` → 白屏。
-  分享路由回落的入口必须注入 `<base href="/">`（并注意 `<base>` 只对其后的元素生效）。
+- **分享页是服务端自渲染的独立 HTML，必须带 CSP**：正文来自用户 Markdown（`html: true`），
+  作者写下的 `<script>` / `onerror=` / `javascript:` 默认都会执行，而分享页在**读者的普通浏览器**
+  里打开、不享受渲染进程那套策略。策略固定为 `script-src 'self'`（只放行同源 runtime.js）
+  - `object-src 'none'` + `base-uri 'none'`；`style-src` 保留 `unsafe-inline`（主题令牌是内联下发）。
 - **复用 CodeMirror `EditorState` 必须同时重配扩展**：state 里装的是**旧配置**，
   回调型扩展（斜杠/选区上报、表格与图片入口、onChange）全是旧组件实例的闭包，
   切视图后它们写进已销毁实例的 ref，界面毫无反应且日志零报错。
@@ -54,9 +55,8 @@ docvi 把任意 Markdown 目录变成**可浏览 / 可搜索 / 可交互**的文
 
 - 服务默认只绑 `127.0.0.1`；局域网访问必须显式开关。
 - `POST /control/stop` 仅回环地址可调，非回环一律 403。
-- 临时分享只暴露**显式登记**的路径；解析后必须 `realpath` 再做共享根判定（防符号链接逃逸）。
-- OPS_TOKEN 未配置 = 运维面整体关闭，不是「空口令放行」。
-- git 凭证只写入数据卷内的 0600 临时文件，不进入镜像层、不落日志。
+- 临时分享只暴露**显式登记**的路径；解析后必须 `realpath` 再判定目标是否仍在登记根内
+  （防「根内放一个软链接指向根外」——字符串前缀比对看不出来）。
 - **测试与脚本禁止触碰真实用户数据目录**：凡读写 `%APPDATA%` / `userData` / `~` 的函数，
   路径必须可注入；单测一律传临时目录，禁止依赖默认值。迁移类函数必须自带
   「源与目标相同/互为父子 → 拒绝移动」防御（2026-10-19 曾因此搬走用户 shares.json）。
@@ -89,8 +89,7 @@ docvi 把任意 Markdown 目录变成**可浏览 / 可搜索 / 可交互**的文
 - 未得到当次明确指令，不得提交或推送；提交与推送是两个独立授权。
 - 禁止 `git add -A` / `git add .` / `git commit -a`，只按显式路径暂存本次任务文件。
 - 子代理一律禁止 git 写操作。
-- 单载体规则：桌面能力只允许一处实现（`apps/desktop/src/main` + `packages/server` 服务层）；禁止再引入第二个桌面运行时——两套载体必然漂移，这是删除 Tauri 与旧 Electron 宿主的直接教训。
-- 预设插件源码留在仓库 `plugins/`；服务层只认 `<包名>/<版本>/` 视图，由 `scripts/assemble-plugins.mjs` 生成（勿手改产物）。
+- 单载体规则：桌面能力只允许一处实现（`apps/desktop/src/main` + `packages/server` 服务层）；禁止再引入第二个桌面运行时——两套载体必然漂移，这是删除 Tauri、旧 Electron 宿主与容器站点的直接教训。
 
 ## 质量要求
 
@@ -103,28 +102,24 @@ docvi 把任意 Markdown 目录变成**可浏览 / 可搜索 / 可交互**的文
 
 ## 按任务读取
 
-| 任务                                          | 必读                                                                                                   |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| 了解项目全貌 / 新人上手                       | `docs/project/OVERVIEW.md`；`README.md`                                                                |
-| 改目录结构、加包、跨包引用                    | `docs/engineering/目录结构.md`；`docs/architecture/adr/`                                               |
-| 改内容根配置 / 索引生成                       | skill `content-model`；`scripts/lib/docs-core.mjs`                                                     |
-| 改容器宿主适配 / SPA 路由                     | `apps/desktop/src/renderer/src/lib/web-host.ts`、`web-router.ts`                                       |
-| 改 Markdown 渲染、代码高亮、图示              | skill `markdown-rendering`                                                                             |
-| 决定文档该用什么表达（原生 / mermaid / 组件） | `docs/architecture/adr/0006-native-markdown-first.md`；skill `component-protocol`                      |
-| 改组件声明式协议 / `<at-*>` 标签              | skill `component-protocol`；`docs/architecture/组件协议.md`                                            |
-| 新增或改插件包                                | skill `plugin-development`；`docs/design/平台插件化与 AI 分发.md`                                      |
-| 往界面加提示文字 / 改设置页                   | `docs/engineering/界面文案规范.md`                                                                     |
-| 改容器部署器 / 运维 API                       | skill `deployer-ops`                                                                                   |
-| 改 Electron 宿主 / 桌面能力                   | `apps/desktop/src/main/`；`docs/design/docvi目标架构与实施总案.md`                                     |
-| 改主题令牌 / 新增内置主题                     | `packages/renderer-core/src/styles/theme.css`；`apps/desktop/src/renderer/src/lib/theme-options.ts`    |
-| 改插件市场清单 / 安装来源                     | `plugins/market.json`；`apps/desktop/src/main/plugin-market.ts`                                        |
-| 改容器读者面能力（分支/运维/MCP/本地预览）    | `apps/desktop/src/renderer/src/lib/web-host.ts`、`components/BranchPicker.vue`、`lib/local-preview.ts` |
-| 改关于面板 / 检查更新                         | `apps/desktop/src/main/update.ts`、`version.ts`；`components/SettingsView.vue`                         |
-| 写功能设计（PRD / 方案）                      | `docs/engineering/文档模板.md`                                                                         |
-| 新建或重建 feature 文档                       | `docs/engineering/文档模板.md`、`docs/engineering/文档规范.md`                                         |
-| 写契约测试 / 门禁脚本                         | `docs/engineering/契约测试规范.md`                                                                     |
-| 遇到报错、现象诡异                            | `docs/engineering/踩坑库.md`                                                                           |
-| 新建 / 修改项目 skill                         | `.agents/skills/skill-governance/SKILL.md`                                                             |
+| 任务                             | 必读                                                                                                |
+| -------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 了解项目全貌 / 新人上手          | `docs/project/OVERVIEW.md`；`README.md`                                                             |
+| 改目录结构、加包、跨包引用       | `docs/engineering/目录结构.md`；`docs/architecture/adr/`                                            |
+| 改内容根配置 / 目录树扫描        | skill `content-model`；`apps/desktop/src/main/config.ts`、`content.ts`                              |
+| 改 Markdown 渲染、代码高亮、图示 | skill `markdown-rendering`                                                                          |
+| 决定文档该用什么表达             | `docs/engineering/内容写法.md`；`docs/architecture/adr/0006-native-markdown-first.md`               |
+| 新增或改插件包 / 主题            | skill `plugin-development`；`docs/design/平台插件化与 AI 分发.md`                                   |
+| 往界面加提示文字 / 改设置页      | `docs/engineering/界面文案规范.md`                                                                  |
+| 改 Electron 宿主 / 桌面能力      | `apps/desktop/src/main/`；`docs/architecture/adr/`                                                  |
+| 改主题令牌 / 新增内置主题        | `packages/renderer-core/src/styles/theme.css`；`apps/desktop/src/renderer/src/lib/theme-options.ts` |
+| 改插件市场清单 / 安装来源        | `plugins/market.json`；`apps/desktop/src/main/plugin-market.ts`                                     |
+| 改关于面板 / 检查更新            | `apps/desktop/src/main/update.ts`、`version.ts`；`components/SettingsView.vue`                      |
+| 写功能设计（PRD / 方案）         | `docs/engineering/文档模板.md`                                                                      |
+| 新建或重建 feature 文档          | `docs/engineering/文档模板.md`、`docs/engineering/文档规范.md`                                      |
+| 写契约测试 / 门禁脚本            | `docs/engineering/契约测试规范.md`                                                                  |
+| 遇到报错、现象诡异               | `docs/engineering/踩坑库.md`                                                                        |
+| 新建 / 修改项目 skill            | `.agents/skills/skill-governance/SKILL.md`                                                          |
 
 ## 技能沉淀规范
 
@@ -134,5 +129,5 @@ docvi 把任意 Markdown 目录变成**可浏览 / 可搜索 / 可交互**的文
 
 ## Git 规范
 
-- 提交格式 `type(scope): 中文描述`：`type` 只用英文前缀（`feat` / `fix` / `refactor` / `docs` / `test` / `chore` / `perf` / `build`），`scope` 必填且来自自动发现（`packages/*` 目录名、`deployer` / `shell` / `scripts` / `root` …），subject 必须以中文汉字或全角标点开头，header ≤ 100 字符。
+- 提交格式 `type(scope): 中文描述`：`type` 只用英文前缀（`feat` / `fix` / `refactor` / `docs` / `test` / `chore` / `perf` / `build`），`scope` 必填且来自自动发现（`packages/*` 与 `apps/*` 目录名、`plugins` / `scripts` / `docs` / `tests` / `ci` / `root`），subject 必须以中文汉字或全角标点开头，header ≤ 100 字符。
 - 由 `commitlint.config.mjs` 强制；提交前 `pnpm verify` 至少跑通本次改动相关项。

@@ -6,25 +6,23 @@
  * - **串行执行**：串行日志按序可读、定位最直接。
  * - **非 fail-fast**：每步独立收集 exit code 与输出尾部，全部跑完统一出报告——
  *   一次 verify 就能看到全部欠账，而不是修一项、跑一轮、再暴露下一项。
- * - **只读为主**：绝大多数步骤只扫描不写盘。唯一例外是「插件产物构建」——它必须
- *   在单元测试之前跑，否则 `plugins.test.mjs` 的 dist 约束会因为「文件不存在」而
- *   静默 skip（CI 上实测跳过 2 项，等于没验）。产物目录已 gitignore，不影响工作区。
+ * - **只读为主**：所有步骤只扫描、只构建产物，不修改源码或数据。
  */
 import { spawn } from 'node:child_process'
 
 const checks = [
   { name: '格式检查', args: ['run', 'format:check'] },
   { name: '代码检查', args: ['run', 'lint'] },
-  { name: '组件类型检查', args: ['run', 'typecheck'] },
   { name: 'docvi 类型检查', args: ['run', 'docvi:typecheck'] },
   { name: 'docvi 构建', args: ['run', 'docvi:build'] },
-  // 写盘步骤（产物在 plugins/*/dist，已 gitignore）：不跑它，下面的单测会 skip 掉
-  // 插件产物约束
-  { name: '插件产物构建', args: ['run', 'build:plugins'] },
   { name: '单元测试', args: ['run', 'test'] },
   { name: '服务层测试', args: ['--filter', '@docvi/server', 'run', 'test'] },
   { name: 'docvi 服务测试', args: ['--filter', '@docvi/desktop', 'run', 'test'] },
-  { name: '部署器单元测试', args: ['--dir', 'deployer', 'run', 'test'] },
+  // 必须在构建之后：它拉起的是 out/ 里的产物，测的就是用户真正会跑的代码
+  { name: '应用端到端回归', args: ['run', 'verify:app'] },
+  { name: '分享页读者侧验证', args: ['run', 'verify:share'] },
+  // 公式排版只有在真实浏览器里才成立（MathML 尺寸为 0 是「有标签看不见」的唯一信号）
+  { name: '数学公式渲染验证', args: ['run', 'verify:math'] },
   { name: 'docvi 文案校验', args: ['run', 'docvi:i18n:check'] },
   { name: '文档校验', args: ['run', 'docs:check'] },
   { name: '技能治理校验', args: ['run', 'skills:check'] },

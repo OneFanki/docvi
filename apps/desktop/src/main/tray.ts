@@ -19,10 +19,6 @@ let tray: Tray | null = null
 /** true = 正在真正退出；before-quit 置位，close 处理器据此放行 */
 let quitting = false
 
-export function isQuitting(): boolean {
-  return quitting
-}
-
 export function markQuitting(): void {
   quitting = true
 }

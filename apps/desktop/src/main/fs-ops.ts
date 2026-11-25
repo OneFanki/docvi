@@ -5,9 +5,7 @@ import {
   readdirSync,
   realpathSync,
   renameSync,
-  rmSync,
   statSync,
-  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { basename, dirname, join, relative, sep } from 'node:path'
@@ -215,10 +213,3 @@ export function resolveForTrash(
 }
 
 /** 回收站不可用时（无桌面环境）才走，永久删除 */
-export function hardDelete(abs: string): void {
-  if (statSync(abs).isDirectory()) {
-    rmSync(abs, { recursive: true, force: true })
-    return
-  }
-  unlinkSync(abs)
-}

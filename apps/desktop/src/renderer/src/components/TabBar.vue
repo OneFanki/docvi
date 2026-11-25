@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { Blocks, FileText, Folder, House, ListChecks, Settings, X } from 'lucide-vue-next'
+import { Blocks, FileText, Folder, ListChecks, Settings, X } from 'lucide-vue-next'
 
 import type { TabRecord } from '../stores/tabs'
 import { isRealScopeLabel, tabTitleOf } from '../stores/tabs'
@@ -9,21 +9,19 @@ import { MOD_LABEL, TAB_MOD_LABEL } from '../lib/shortcuts'
 import ContextMenu, { type MenuItem } from './ContextMenu.vue'
 
 /**
- * 标签条：左边钉住文档库，右边是可滚动的工作区标签区。
+ * 标签条：一条可滚动的标签带，没有任何钉住区。
  *
- * 三条设计决定：
- *  1. **文档库不参与滚动**：它必须永远在第一眼可见的位置，不能被标签挤出视野；
- *  2. **固定宽度 + 单行滚动**（可在设置里改）：自适应宽度会让两个标签各占半屏，
+ * 两条设计决定：
+ *  1. **固定宽度 + 单行滚动**（可在设置里改）：自适应宽度会让两个标签各占半屏，
  *     标题长的时候反而更难扫读；
- *  3. **标题只写文档名**：标签里再带一段工作区名（或更糟——工作区 id）会挤掉
- *     真正要扫读的文档名，而工作区身份已经显示在标签内的目录树顶部。
+ *  2. **标题只写文档名**：标签里再带一段工作区名（或更糟——工作区 id）会挤掉
+ *     真正要扫读的文档名，而工作区身份已经显示在侧栏顶部的切换器上。
  *
  * 右键菜单与命令面板动作同源：菜单项 id 直接对应 App 注册的 tab.* 命令。
  */
 const props = defineProps<{
   tabs: TabRecord[]
   activeId: string | null
-  /** 固定宽度（px） */
   /** 标签最大宽度：短标题按内容宽，长标题截断 */
   maxWidth: number
   wrap: boolean
@@ -34,6 +32,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   activate: [id: string]
+  /** 双击预览标签 → 固定它（VSCode 语义） */
+  pin: [id: string]
   close: [id: string]
   /** 菜单项 id（见 App 的 tab.* 命令） */
   command: [id: string, tabId: string]
@@ -45,8 +45,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const library = computed(() => props.tabs.find(tab => tab.kind === 'library') ?? null)
-const workspaceTabs = computed(() => props.tabs.filter(tab => tab.kind !== 'library'))
 const scroller = ref<HTMLElement | null>(null)
 
 const menu = ref<{ open: boolean; x: number; y: number; tabId: string }>({
@@ -57,7 +55,6 @@ const menu = ref<{ open: boolean; x: number; y: number; tabId: string }>({
 })
 
 const tabLabels = computed(() => ({
-  library: t('app.library'),
   settings: t('app.settings'),
   plugins: t('app.plugins'),
 }))
@@ -72,9 +69,9 @@ function tooltipOf(tab: TabRecord): string {
   return isRealScopeLabel(scope) && scope !== label ? `${scope} / ${label}` : label
 }
 
-/** 中键关闭：桌面应用通用约定（文档库不可关） */
+/** 中键关闭：桌面应用通用约定 */
 function onAuxClick(event: MouseEvent, tab: TabRecord): void {
-  if (event.button === 1 && tab.kind !== 'library') {
+  if (event.button === 1) {
     event.preventDefault()
     emit('close', tab.id)
   }
@@ -87,18 +84,12 @@ function openMenu(event: MouseEvent, tab: TabRecord): void {
 
 const menuItems = computed<MenuItem[]>(() => {
   const tab = props.tabs.find(item => item.id === menu.value.tabId)
-  const isLibrary = tab?.kind === 'library'
   const hasDoc = Boolean(tab?.history.length)
   return [
-    { id: 'tab.close', label: t('tabmenu.close'), disabled: isLibrary, hint: `${MOD_LABEL}+W` },
-    { id: 'tab.closeOthers', label: t('tabmenu.closeOthers'), disabled: isLibrary },
-    { id: 'tab.closeRight', label: t('tabmenu.closeRight'), disabled: isLibrary },
-    {
-      id: 'tab.closeAll',
-      label: t('tabmenu.closeAll'),
-      // 只剩文档库时不必给这个入口：点了什么都不会发生
-      disabled: props.tabs.every(item => item.kind === 'library'),
-    },
+    { id: 'tab.close', label: t('tabmenu.close'), hint: `${MOD_LABEL}+W` },
+    { id: 'tab.closeOthers', label: t('tabmenu.closeOthers') },
+    { id: 'tab.closeRight', label: t('tabmenu.closeRight') },
+    { id: 'tab.closeAll', label: t('tabmenu.closeAll') },
     {
       id: 'tab.copy',
       label: t('tabmenu.copy'),
@@ -121,18 +112,13 @@ const menuItems = computed<MenuItem[]>(() => {
  * 自动滚动、指针捕获与点击抑制三件事；原生 drag 已经把它们都做了，并且能拿到
  * 跨元素的 dragover 语义。
  *
- * 拖动源必须排除文档库（钉住的首页不该被挪走），`dropEffect = 'move'` 让光标
- * 在平台上是「移动」而不是「复制」。
+ * `dropEffect = 'move'` 让光标在平台上是「移动」而不是「复制」。
  */
 const draggingId = ref<string | null>(null)
 /** 当前落点（高亮插入位置） */
 const dropTarget = ref<{ id: string; after: boolean } | null>(null)
 
 function onDragStart(event: DragEvent, tab: TabRecord): void {
-  if (tab.kind === 'library') {
-    event.preventDefault()
-    return
-  }
   draggingId.value = tab.id
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move'
@@ -142,7 +128,7 @@ function onDragStart(event: DragEvent, tab: TabRecord): void {
 }
 
 function onDragOver(event: DragEvent, tab: TabRecord): void {
-  if (!draggingId.value || tab.kind === 'library') return
+  if (!draggingId.value) return
   event.preventDefault()
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
   // 以中点为界：左半 = 插到它前面，右半 = 插到它后面
@@ -156,7 +142,7 @@ function onDrop(event: DragEvent): void {
   const target = dropTarget.value
   resetDrag()
   if (!from || !target || from === target.id) return
-  const order = props.tabs.filter(tab => tab.kind !== 'library').map(tab => tab.id)
+  const order = props.tabs.map(tab => tab.id)
   const fromIndex = order.indexOf(from)
   if (fromIndex < 0) return
   // 先摘掉自己，再按落点计算插入位置
@@ -217,37 +203,22 @@ defineExpose({ revealTab })
 
 <template>
   <div class="tabbar" :class="{ 'is-wrap': wrap }" role="tablist" aria-label="标签页">
-    <!-- 钉住区：文档库不随标签滚动 -->
-    <div class="tabbar__pinned">
-      <div
-        v-if="library"
-        :data-tab-id="library.id"
-        class="tab tab--library"
-        :class="{ 'is-active': activeId === library.id }"
-        role="tab"
-        :aria-selected="activeId === library.id"
-        :tabindex="activeId === library.id ? 0 : -1"
-        @click="emit('activate', library.id)"
-        @keydown.enter.prevent="emit('activate', library.id)"
-        @keydown.space.prevent="emit('activate', library.id)"
-      >
-        <House :size="13" :stroke-width="1.7" class="tab__icon" aria-hidden="true" />
-        <span class="tab__title">{{ titleOf(library).scope }}</span>
-      </div>
-    </div>
-
     <div
       ref="scroller"
       class="tabbar__scroll"
       :class="{ 'is-shrink': overflowX === 'shrink' && !wrap }"
     >
       <div
-        v-for="tab in workspaceTabs"
+        v-for="tab in tabs"
         :key="tab.id"
         v-tooltip="{ text: tooltipOf(tab), placement: 'bottom' }"
         class="tab"
         :class="[
-          { 'is-active': tab.id === activeId, 'is-file': tab.kind === 'file' },
+          {
+            'is-active': tab.id === activeId,
+            'is-file': tab.kind === 'file',
+            'is-preview': tab.preview,
+          },
           dropClass(tab),
         ]"
         :style="{ maxWidth: `${maxWidth}px` }"
@@ -261,6 +232,7 @@ defineExpose({ revealTab })
         @drop="onDrop"
         @dragend="resetDrag"
         @click="emit('activate', tab.id)"
+        @dblclick="tab.preview && emit('pin', tab.id)"
         @keydown.enter.prevent="emit('activate', tab.id)"
         @keydown.space.prevent="emit('activate', tab.id)"
         @keydown.left.prevent="onArrow($event, -1)"
@@ -345,24 +317,13 @@ defineExpose({ revealTab })
   flex-wrap: wrap;
 }
 
-.tabbar__pinned {
-  flex: none;
-  display: flex;
-  align-items: stretch;
-  padding-left: 8px;
-  position: relative;
-  /* 右侧发丝线：视觉上把「固定首页」和「可滚动工作区」分开 */
-  box-shadow: 1px 0 0 var(--dv-ui-line-soft);
-  z-index: 1;
-}
-
 .tabbar__scroll {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: stretch;
   gap: 2px;
-  padding: 0 4px;
+  padding: 0 4px 0 8px;
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -440,16 +401,12 @@ defineExpose({ revealTab })
   box-shadow: inset -2px 0 0 var(--dv-ui-accent);
 }
 
-.tab--library {
-  padding-right: 10px;
-}
-
 .tab__icon {
   flex: none;
   opacity: 0.8;
 }
 
-/* 单段标题：只有文档名，单行省略（工作区名交给标签内的树顶部） */
+/* 单段标题：只有文档名，单行省略（工作区名交给侧栏顶部的切换器） */
 .tab__labels {
   flex: 1;
   min-width: 0;
@@ -466,10 +423,15 @@ defineExpose({ revealTab })
   white-space: nowrap;
 }
 
-.tab__title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/*
+ * 预览标签：标题斜体。
+ *
+ * 斜体是 VSCode 用户已经形成的语感——「斜体 = 我还没决定留它」。
+ * 只改字形不改颜色：颜色在标签上已经承担了「激活 / 脏」两种语义，
+ * 再叠一种会让三者都失去可读性。
+ */
+.tab.is-preview .tab__doc {
+  font-style: italic;
 }
 
 .tab__dirty {

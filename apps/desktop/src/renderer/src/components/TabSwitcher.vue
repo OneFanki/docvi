@@ -32,7 +32,6 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const tabLabels = computed(() => ({
-  library: t('app.library'),
   settings: t('app.settings'),
   plugins: t('app.plugins'),
 }))

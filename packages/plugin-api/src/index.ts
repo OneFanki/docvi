@@ -10,7 +10,7 @@ export const PLUGIN_API_VERSION = '1'
 
 /** 信任等级，决定安装时的提示强度与能拿到的能力 */
 export type TrustLevel =
-  /** A 层：渲染进程内的呈现插件（组件 / 主题 / 语法扩展） */
+  /** A 层：渲染进程内的呈现插件（主题等纯样式贡献） */
   | 'presentation'
   /** B 层：独立 worker，受限 Node 能力（显式授权的目录与网络） */
   | 'sandbox-service'
@@ -21,15 +21,6 @@ export type TrustLevel =
 export interface LocalizedText {
   zh: string
   en?: string
-}
-
-export interface ComponentContribution {
-  /** 组件 kind，对应文档里的 `<at-kind>` 与 frontmatter `kind` */
-  kind: string
-  title: LocalizedText
-  description: LocalizedText
-  /** 示例文档路径（插件包内相对路径） */
-  example?: string
 }
 
 export interface ThemeContribution {
@@ -74,9 +65,7 @@ export interface CommandContribution {
 }
 
 export interface PluginContributions {
-  components?: ComponentContribution[]
   themes?: ThemeContribution[]
-  markdownSyntax?: MarkdownSyntaxContribution[]
   commands?: CommandContribution[]
 }
 
@@ -110,13 +99,6 @@ export interface PluginRecord {
   dir: string
   /** 加载/校验失败时的可读原因；成功为 null */
   error: string | null
-  /**
-   * 该包内被单独停用的组件 kind。
-   *
-   * 清单本身保留原样：面板要能把这些 kind 也列出来（否则停用后就再也点不到
-   * 启用了）。宿主注册组件与 MCP 列活跃组件时按下标排除。
-   */
-  disabledComponents: string[]
 }
 
 /** 插件向宿主注册贡献时拿到的上下文 */
@@ -128,8 +110,6 @@ export interface PluginActivationContext {
   /** 当前 host 语言（'zh' | 'en'） */
   locale: string
   log: (level: 'info' | 'warn' | 'error', message: string) => void
-  /** 注册一个组件实现；返回反注册函数 */
-  registerComponent: (kind: string, component: unknown) => () => void
   /** 注册一条命令；返回反注册函数 */
   registerCommand: (command: CommandContribution & { run: () => void }) => () => void
 }

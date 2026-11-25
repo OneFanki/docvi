@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path'
 import test from 'node:test'
 
 const { createLocalAssetRegistry } = await import('../apps/desktop/src/main/local-assets.ts')
-const { pinSize } = await import('../plugins/base/src/components/svg-size.ts')
+const { pinSize } = await import('../apps/desktop/src/renderer/src/components/viewer/svg-size.ts')
 
 /*
  * 路径一律用宿主原生写法拼出来，不能写死 `C:\docs\note.md`。

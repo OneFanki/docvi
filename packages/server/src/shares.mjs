@@ -11,7 +11,7 @@
  * 审计：`audit(type, payload)` 由宿主注入（容器写 audit.log，桌面可空实现）。
  */
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve, sep } from 'node:path'
 import { parse as yamlParse } from 'yaml'
 
@@ -77,12 +77,31 @@ export function createSharesService({ dataDir, shareRoots = [], audit = () => {}
     writeFileSync(file, `${JSON.stringify({ ...data, shares: data.shares }, null, 2)}\n`, 'utf8')
   }
 
-  /** 目标必须在任一共享根内（含根自身）；桌面模式恒真 */
+  /**
+   * 目标必须在任一共享根内（含根自身）；桌面模式恒真。
+   *
+   * ⚠️ 必须对**真实路径**判定：共享根内放一个符号链接指向根外，字符串前缀
+   * 比对完全看不出来，读者就能通过分享页读到根外的任意文件。解析失败按
+   * 「不在根内」处理——存在性检查由调用方紧接着做。
+   */
   function insideRoot(target) {
     if (!restrict) return true
-    const key = pathKey(target)
+    let real
+    try {
+      real = realpathSync(target)
+    } catch {
+      return false
+    }
+    const key = pathKey(real)
     return roots.some(root => {
-      const rootKey = pathKey(root)
+      let realRoot
+      try {
+        realRoot = realpathSync(root)
+      } catch {
+        // 共享根本身不存在：不可能有东西落在里面
+        return false
+      }
+      const rootKey = pathKey(realRoot)
       return key === rootKey || key.startsWith(rootKey + sep)
     })
   }
@@ -160,8 +179,7 @@ export function createSharesService({ dataDir, shareRoots = [], audit = () => {}
 
   /**
    * 目录分享的树 + 搜索索引（5 秒 TTL 缓存）。
-   * 容器注入 docs-core 的 buildDocsIndex（带搜索）；桌面不注入时由 httpd 回落到
-   * share-site 的现场扫描（无搜索，壳自动隐藏搜索框）。
+   * 扫描实现由宿主注入（桌面用主进程的内容模型），这里只负责缓存。
    */
   const indexCache = new Map()
   async function buildIndex(entry, buildDocsIndex) {

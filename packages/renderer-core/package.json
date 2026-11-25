@@ -15,6 +15,7 @@
     "@shikijs/core": "^4.5.0",
     "@shikijs/langs": "^4.5.0",
     "@shikijs/themes": "^4.5.0",
+    "katex": "^0.16.47",
     "markdown-it": "^15.0.2",
     "markdown-it-anchor": "^10.0.0",
     "markdown-it-container": "^4.0.0",

@@ -287,6 +287,25 @@
   outline-offset: 2px;
 }
 
+/*
+ * 原生 `<iframe>`：md 里嵌本地 html 图解的标准写法。
+ *
+ * 只给「默认值」不给「精确值」：作者写了 height / width 就按作者的来
+ * （HTML 属性优先级高于 CSS 默认值）。默认 320px 是因为 iframe 的浏览器
+ * 缺省高度是 150px——对一张图解来说太矮，读者只看到一条窄缝会以为内容坏了。
+ *
+ * 白底不是装饰：被嵌入的 html 自带浅色背景时，透明底会让它与深色主题的
+ * 正文糊在一起；统一白底至少保证「这是一块独立文档」的边界可辨。
+ */
+.at-doc iframe {
+  display: block;
+  width: 100%;
+  min-height: 320px;
+  border: 1px solid var(--dv-doc-line-soft);
+  border-radius: var(--dv-radius-md);
+  background: #fff;
+}
+
 /* ---------- 表格 ---------- */
 
 /* ⚠️ 不用 `min-width: max-content`：中文整句不可断，表格会被撑到 2760px。
@@ -403,6 +422,46 @@
  */
 .at-doc table[data-wide] tbody tr:nth-child(2n) > :first-child {
   background-color: color-mix(in srgb, var(--dv-doc-surface) 45%, var(--dv-doc-bg));
+}
+
+/* ---------- 数学公式 ---------- */
+
+/*
+ * 公式走 MathML（见 renderer-core/src/math.ts），这里只补「不依赖字体文件」的排版。
+ *
+ * 为什么不用 katex.css：那条路要二十来个 woff2（约 1.2MB），而分享页与导出产物都
+ * 得各自找一遍字体。MathML 由浏览器原生排版，这里只需给出字号、间距与溢出处理。
+ */
+
+/* 行内公式：跟着正文字号，稍微放大一点——数学字形的 x-height 比西文正文小 */
+.at-doc math {
+  font-size: 1.05em;
+}
+
+/* 块级公式：独占一行、居中；长公式允许横向滚动（不折行，折行会破坏对齐语义） */
+.at-doc .at-math--block {
+  margin: 18px 0;
+  /*
+   * `overflow-x: auto` 而不是 `overflow: auto`：纵向也 auto 会生成第二个滚动容器，
+   * 让块级公式在页面滚动里「卡一下」（对齐表格那段的同一个坑）。
+   */
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* 公式在窄屏上比正文更需要横向空间，允许内边距压缩到 0 */
+  padding: 2px 0;
+}
+
+.at-doc .at-math--block math {
+  display: block;
+  /* 居中靠 margin auto：`text-align: center` 对 MathML 不生效 */
+  margin: 0 auto;
+}
+
+/* 解析失败的公式：保留源码并标红，不静默吞掉（作者要知道自己写错了） */
+.at-doc .katex-error {
+  font-family: var(--dv-font-mono);
+  font-size: 0.9em;
+  color: var(--dv-doc-danger);
 }
 
 /* ---------- 行内代码 ---------- */

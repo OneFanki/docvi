@@ -39,11 +39,6 @@ export interface ServicePlugin {
       description: { zh: string; en?: string }
     }>
     themes?: Array<{ id: string; title: { zh: string; en?: string } }>
-    markdownSyntax?: Array<{
-      name: string
-      form: 'fence' | 'container'
-      component: string
-    }>
   }
 }
 

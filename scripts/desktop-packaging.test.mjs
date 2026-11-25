@@ -1,8 +1,8 @@
 /**
  * 打包态缺陷回归（2026-10-22 安装包首次冒烟发现）。
  *
- * 1. 内置插件目录在打包产物里是 `<包>/<版本>/` 两层（assemble-plugins.mjs 生成），
- *    开发态是一层；扫描器只认一层会让安装包里「一个插件都没有」。
+ * 1. 插件目录有两种布局：安装后的用户插件是 `<包>/<版本>/` 两层，仓库里的
+ *    开发态是一层；扫描器只认一层会让「装好的插件一个都不显示」。
  * 2. 工作区注册表文件是外部可编辑的，形状写坏时不能把启动路径打崩（白屏）。
  */
 import assert from 'node:assert/strict'
@@ -37,7 +37,7 @@ function makeManifest(dir, name, version) {
   )
 }
 
-test('内置插件：扁平目录（开发态）能被发现', () => {
+test('插件：扁平目录能被发现', () => {
   const root = mkdtempSync(join(tmpdir(), 'docvi-plugins-flat-'))
   try {
     makeManifest(join(root, 'pack', 'base'), 'pack', '0.1.0')
@@ -55,7 +55,7 @@ test('内置插件：扁平目录（开发态）能被发现', () => {
   }
 })
 
-test('内置插件：带版本层（打包态）能被发现，且取最高版本', () => {
+test('插件：带版本层能被发现，且取最高版本', () => {
   const root = mkdtempSync(join(tmpdir(), 'docvi-plugins-versioned-'))
   try {
     makeManifest(join(root, 'pack', '0.1.0'), 'pack', '0.1.0')

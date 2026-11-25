@@ -15,6 +15,7 @@
  * 抽成纯函数是为了能锁住「什么时候该记、什么时候该清」这类时序契约：
  * 锚点用一次就清，否则下一次普通渲染会被它带偏。
  */
+import { sameDocumentPath } from './external-change.ts'
 
 /** 编辑器能提供的两种「位置读数」：源行（跨视图可用）与像素（仅同视图内可用） */
 export interface ViewPosition {
@@ -24,10 +25,18 @@ export interface ViewPosition {
   scrollTop: number
 }
 
+/** 待恢复的锚点：**绑定到具体文档**，不是全局游标 */
+export interface ViewAnchor {
+  /** 文档绝对路径（锚点只在它自己那篇重渲染时有效） */
+  path: string
+  /** 视口顶部的 0-based 源行 */
+  line: number
+}
+
 /** 视图切换需要保管的两样东西 */
 export interface ViewHandoff {
-  /** 待恢复的源行；null = 没有待恢复的锚点 */
-  anchor: number | null
+  /** 待恢复的锚点；null = 没有待恢复的锚点 */
+  anchor: ViewAnchor | null
   /** 编辑器状态快照（含撤销栈），按文档绝对路径存 */
   editorStates: Map<string, unknown>
 }
@@ -47,14 +56,26 @@ export function createHandoff(): ViewHandoff {
  * 谎称「他当时看着开头」，恢复时会把文档拽回顶部。这是「切标签回顶」的最后
  * 一层成因——文件监视回调在阅读视图刚重新挂载、还没排版完时读位置，拿到 -1，
  * 被压成 0 存进锚点，随后 onRendered 拿它去 `scrollToSourceLine(0)`。
+ *
+ * ⚠️ 锚点必须带 `path`。曾经它是全局单槽：外部改动记下 A 的视口行，紧接着
+ * 渲染的却是 B（切标签、连点两篇都会这样），于是 B 被滚到 A 的行号；反过来
+ * B 在顶部时记下的 0 又会在切回 A 时把 A 拉回开头。2026-11-24 审查实测：
+ * 长文滚到 900px，切走再切回，落点 0。
  */
-export function leaveView(handoff: ViewHandoff, position: ViewPosition | null): void {
-  if (!position) {
+export function leaveView(handoff: ViewHandoff, path: string, position: ViewPosition | null): void {
+  if (!position || !path) {
     handoff.anchor = null
     return
   }
   const line = Math.round(position.topLine)
-  handoff.anchor = line >= 0 ? line : null
+  handoff.anchor = line >= 0 ? { path, line } : null
+}
+
+/** 读锚点：只对锚点所属的那篇返回行号，别的文档视为「没有锚点」 */
+function anchorLineOf(handoff: ViewHandoff, path: string): number | null {
+  const anchor = handoff.anchor
+  if (!anchor || !path) return null
+  return sameDocumentPath(anchor.path, path) ? anchor.line : null
 }
 
 /**
@@ -63,11 +84,13 @@ export function leaveView(handoff: ViewHandoff, position: ViewPosition | null): 
  * 为什么必须清：视图渲染完成会多次触发「渲染完毕」回调（高亮、Mermaid、
  * 组件挂载各一次）。锚点若留着重放，后面的回调会把已经恢复正常滚动的页面
  * 又拽回锚点位置，表现为「滚不动 / 一直弹回去」。
+ *
+ * 只清自己那一篇的：另一篇的锚点还没被消费，不能顺手丢掉。
  */
-export function takeAnchor(handoff: ViewHandoff): number | null {
-  const anchor = handoff.anchor
-  handoff.anchor = null
-  return anchor
+export function takeAnchor(handoff: ViewHandoff, path: string): number | null {
+  const line = anchorLineOf(handoff, path)
+  if (line !== null) handoff.anchor = null
+  return line
 }
 
 /**
@@ -76,8 +99,8 @@ export function takeAnchor(handoff: ViewHandoff): number | null {
  * 编辑器挂载时用这个：它在 `onMounted` 里读一次，「消费」的那一刻由宿主在
  * 编辑器报告已落位后调 `takeAnchor`。这样同一帧内多次重渲染不会被重复触发。
  */
-export function peekAnchor(handoff: ViewHandoff): number | null {
-  return handoff.anchor
+export function peekAnchor(handoff: ViewHandoff, path: string): number | null {
+  return anchorLineOf(handoff, path)
 }
 
 /**

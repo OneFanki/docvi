@@ -12,8 +12,8 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
  * ESM 会被静默忽略——窗口正常显示但 `window.docvi` 不存在（S0 实测踩到）。
  * 5.0.0 的类型未声明 `build.lib`，运行时支持，故断言绕过（升级后删除）。
  *
- * renderer 需要能解析同仓 workspace 包（renderer-core / shared）与 plugins/* 源码，
- * 因此别名显式指向源码入口；plugins 下的组件由 Vite 直接编译（它们是 SFC）。
+ * renderer 需要能解析同仓 workspace 包（renderer-core / shared），因此别名显式
+ * 指向源码入口。插件不进本仓：安装后的插件由 `docvi://plugin/` 协议伺服，不走 Vite。
  */
 const aliases = {
   '@docvi/shared': resolve('../../packages/shared/src/index.ts'),
@@ -21,7 +21,6 @@ const aliases = {
   '@docvi/renderer-core/markdown': resolve('../../packages/renderer-core/src/markdown.ts'),
   '@docvi/renderer-core': resolve('../../packages/renderer-core/src/index.ts'),
   '@docvi/editor': resolve('../../packages/editor/src/index.ts'),
-  '@plugins': resolve('../../plugins'),
   '@renderer': resolve('src/renderer/src'),
 }
 
@@ -54,7 +53,7 @@ export default defineConfig({
     resolve: { alias: aliases },
     plugins: [vue()],
     server: {
-      // plugins/ 与 packages/ 在本应用根目录之外，需放行
+      // packages/ 在本应用根目录之外，需放行
       fs: { allow: [resolve('../..')] },
     },
   },

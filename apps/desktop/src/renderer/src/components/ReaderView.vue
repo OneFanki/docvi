@@ -14,22 +14,16 @@ import {
   enhanceMermaidSvg,
   highlightPass,
   mermaidPass,
-  mountDeclarativeComponents,
-  mountPluginBlocks,
   renderMarkdown,
-  type DeclarativeMount,
   type OutlineEntry,
   type RenderResult,
 } from '@docvi/renderer-core'
 
 import type { DocPayload } from '@docvi/shared'
 import { isStandaloneDoc } from '@docvi/shared'
-import ImageLightbox from '@plugins/base/src/components/ImageLightbox.vue'
 import ContextMenu, { type MenuItem } from './ContextMenu.vue'
-import { createHostRegistry } from '../lib/component-registry'
-import { isReadOnlyHost } from '../lib/host'
+import ImageLightbox from './viewer/ImageLightbox.vue'
 import { linkToAssetUrl, openHtmlInSandbox } from '../lib/html-sandbox'
-import { usePluginStore } from '../stores/plugins'
 import { useI18n } from '../lib/i18n'
 import { MOD_LABEL } from '../lib/shortcuts'
 import { clearMatches, collectMatches, paintMatches, scrollToRange } from '../lib/find-in-doc'
@@ -90,6 +84,14 @@ const emit = defineEmits<{
   error: [message: string]
   /** 空状态里的「打开文件…」：由 App 决定走文件选择框 */
   pickFile: []
+  /**
+   * 正文刚刚插入 DOM（骨架已可测量，高亮与图表都还没跑）。
+   *
+   * 存在的唯一理由：**这是浏览器绘制之前最后一个能落位的时机**。
+   * `rendered` 要等 shiki 与 mermaid 两个异步 pass 结束，中间已经让出过
+   * 事件循环、画过一帧——切标签时用户看到的就是「先到顶部、再闪回原处」。
+   */
+  contentReady: [payload: { path: string }]
   /** 正文异步渲染全部完成（此时高度已稳定，可以恢复滚动位置） */
   rendered: [payload: { path: string; title: string }]
   /** 分享当前文档：链接生成、复制都在宿主做（这里只管按钮位置） */
@@ -224,15 +226,8 @@ const exportItems = computed<MenuItem[]>(() => [
   { id: 'pdf', label: t('reader.exportPdf'), hint: '.pdf' },
 ])
 
-const plugins = usePluginStore()
 const { t } = useI18n()
-/**
- * 组件注册表：按插件启用状态决定注册哪些内置组件（规则见 lib/component-registry）。
- * 组件首次创建时注册；插件启停后由 App 用 key 强制重建本组件。
- */
-const registry = createHostRegistry()
 
-let mount: DeclarativeMount | null = null
 let generation = 0
 
 const wordCount = computed(() => {
@@ -391,40 +386,7 @@ watch(
 
 /* ---------- 渲染 ---------- */
 
-/**
- * 挂载一页里的全部 Vue 组件：frontmatter 声明式组件 + 插件结构化块。
- *
- * 两者共用一个 ComponentRegistry 与同一条卸载语义——分成两套容器管理，
- * 「切文档时漏掉一种」是必然会发生的错误。
- */
-function mountAll(
-  surface: HTMLElement,
-  declaration: Record<string, Record<string, unknown>> | null,
-): void {
-  const missing: string[] = []
-  const declarative = mountDeclarativeComponents(surface, declaration, registry, {
-    onMissing: info => {
-      missing.push(info.reason === 'no-data' ? `缺少数据：${info.key}` : `未注册组件：${info.kind}`)
-    },
-  })
-  const pluginBlocks = mountPluginBlocks(surface, registry, {
-    onMissing: info => emit('error', `插件组件未启用：${info.kind}`),
-    onInvalid: info => emit('error', `::: ${info.syntax} 数据解析失败：${info.message}`),
-  })
-  if (missing.length) emit('error', missing.join('；'))
-
-  mount = {
-    dispose: () => {
-      pluginBlocks.dispose()
-      declarative.dispose()
-    },
-    get count() {
-      return declarative.count + pluginBlocks.count
-    },
-  }
-}
-
-/** 主题变了要重渲染：mermaid 的深浅配色与块级组件配色都在渲染期决定 */
+/** 主题变了要重渲染：mermaid 的深浅配色在渲染期决定 */
 const themeTick = ref(0)
 
 watch(
@@ -438,9 +400,6 @@ watch(
 watch(
   () => [props.doc, props.assetPrefix, props.sourceLines, themeTick.value] as const,
   async ([doc]) => {
-    // 换文档前先卸载旧组件，避免 Vue 实例泄漏到新容器
-    mount?.dispose()
-    mount = null
     clearMatches()
     findRanges.value = []
     findIndex.value = 0
@@ -450,6 +409,15 @@ watch(
       emit('outline', [])
       return
     }
+
+    /*
+     * 换文档（含切标签复用本实例）时先把滚动归零。
+     *
+     * 不归零的话，新正文会先按旧文档的 scrollTop 渲染出来——短文档会卡在
+     * 一个错误的中途位置，长文档则会短暂显示「另一篇文档的同一高度」。
+     * 归零本身不进滚动上报（`restoring` 守卫会挡掉），所以不会污染记录。
+     */
+    if (scroller.value) scroller.value.scrollTop = 0
 
     const current = ++generation
     /*
@@ -467,12 +435,6 @@ watch(
       }
     })
     const result = renderMarkdown(doc.text, renderPath.value, {
-      // 插件声明的容器语法（::: merged 之类）：渲染成占位块，挂载交给 mountPluginBlocks
-      containerSyntax: plugins.syntax.map(item => ({
-        name: item.name,
-        component: item.component,
-        form: item.form,
-      })),
       // 容器版：站内链接要补仓库段（SPA 路由按 /<仓库>/<路径> 解析）
       ...(props.linkPrefix ? { urlPrefix: props.linkPrefix } : {}),
       // 图片前缀与链接前缀**分开**：桌面端的链接不带前缀，图片必须带资产协议前缀
@@ -490,7 +452,12 @@ watch(
     const surface = host.value?.querySelector<HTMLElement>('.at-doc')
     if (!surface) return
 
-    mountAll(surface, result.frontmatter.components ?? null)
+    /*
+     * 立刻通知宿主落位：此刻 DOM 已经可测量，而下面的高亮 / 图表还要
+     * await 动态导入，会让出事件循环——一旦让出，浏览器就把「顶部」画出来了。
+     * 所以恢复滚动必须抢在这两个 pass 之前，不能等 `rendered`。
+     */
+    emit('contentReady', { path: doc.path })
 
     // 异步 pass：代际令牌失效则直接丢弃结果
     try {
@@ -516,8 +483,6 @@ watch(
 
 onBeforeUnmount(() => {
   generation += 1
-  mount?.dispose()
-  mount = null
   clearMatches()
   /* 卸载前把最后一段未上报的滚动位置发出去，否则关闭/切换会丢最后几十像素 */
   flushScroll()
@@ -823,12 +788,7 @@ defineExpose({
         <p class="reader__empty-title">{{ t('empty.reader.title') }}</p>
         <p class="reader__empty-hint">{{ t('empty.reader.hint', { key: `${MOD_LABEL}+O` }) }}</p>
         <p v-if="showTreeHint" class="reader__empty-hint">{{ t('file.outsideHint') }}</p>
-        <button
-          v-if="!isReadOnlyHost"
-          class="reader__empty-action"
-          type="button"
-          @click="emit('pickFile')"
-        >
+        <button v-if="true" class="reader__empty-action" type="button" @click="emit('pickFile')">
           {{ t('empty.reader.open') }}
         </button>
       </div>
@@ -857,7 +817,7 @@ defineExpose({
               {{ (doc.size / 1024).toFixed(1) }} KB
             </span>
             <button
-              v-if="!isReadOnlyHost"
+              v-if="true"
               ref="exportButton"
               v-tooltip="t('reader.export')"
               class="reader__iconbtn reader__export"
@@ -870,7 +830,7 @@ defineExpose({
               <Download :size="13" :stroke-width="1.8" />
             </button>
             <button
-              v-if="!isReadOnlyHost"
+              v-if="true"
               ref="shareButton"
               v-tooltip="share ? t('reader.shareActive') : t('reader.share')"
               class="reader__iconbtn reader__share"

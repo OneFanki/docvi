@@ -4,7 +4,7 @@
  * MCP 协议与语料检索只有一份实现（`packages/server/src/mcp.mjs` / `corpus.mjs`），
  * 桌面侧新增的只有「ServicePlugin 形状 → MCP 归一化契约」的适配层
  * （`apps/desktop/src/service/plugin-deps.ts`）。因此这里测的是适配层 + 共享分发
- * 的组合行为：组件去重口径、插件文档取数、检索参数透传与协议错误码。
+ * 的组合行为：插件清单口径、插件文档取数、检索参数透传与协议错误码。
  *
  * 不启动 HTTP 服务、不 spawn 进程；工厂 / 归一化 / 分发都是纯逻辑。
  */
@@ -17,27 +17,16 @@ import test from 'node:test'
 import { dispatch, toolNames } from '../../packages/server/src/mcp.mjs'
 import { createServiceMcpDeps } from '../../apps/desktop/src/service/plugin-deps.ts'
 
-/** 两个插件、一套组件、一篇文档：覆盖同名 kind 冲突与文档取数两条路径 */
+/** 两个插件：覆盖清单口径与插件文档取数两条路径 */
 const PLUGINS = [
   {
     name: 'base',
-    displayName: { zh: '通用组件包' },
+    displayName: { zh: '通用包' },
     version: '1.0.0',
     trust: 'presentation',
     dir: '/plugins/base',
     contributes: {
-      components: [
-        {
-          kind: 'flow-diagram',
-          title: { zh: '流程图' },
-          description: { zh: '有序流程：节点 + 连边' },
-        },
-        {
-          kind: 'timeline',
-          title: { zh: '时间轴' },
-          description: { zh: '竖向时间轴' },
-        },
-      ],
+      themes: [{ id: 'sea', title: { zh: '海岬' }, appearance: 'dark', tokens: 'themes/sea.json' }],
     },
   },
   {
@@ -46,21 +35,6 @@ const PLUGINS = [
     version: '0.2.0',
     trust: 'presentation',
     dir: '/plugins/extra',
-    contributes: {
-      components: [
-        // 与 base 同名：后到者不出现（与宿主注册表「先到先得」同口径）
-        {
-          kind: 'flow-diagram',
-          title: { zh: '冲突实现' },
-          description: { zh: '不应出现' },
-        },
-        {
-          kind: 'merged-table',
-          title: { zh: '合并表格' },
-          description: { zh: '带合并单元格的表格' },
-        },
-      ],
-    },
   },
 ]
 
@@ -127,18 +101,9 @@ test('tools/list 暴露 6 个工具（含 search_docs / read_doc）', () => {
   assert.equal(outcome.kind, 'result')
   assert.deepEqual(
     outcome.result.tools.map(tool => tool.name),
-    [
-      'list_plugins',
-      'list_components',
-      'get_component_docs',
-      'get_plugin_docs',
-      'search_docs',
-      'read_doc',
-      'list_workspaces',
-      'write_doc',
-    ],
+    ['list_plugins', 'get_plugin_docs', 'search_docs', 'read_doc', 'list_workspaces', 'write_doc'],
   )
-  assert.equal(toolNames().length, 8)
+  assert.equal(toolNames().length, 6)
 })
 
 test('initialize 回显支持的协议版本，未知版本回最新；serverInfo 为 docvi', () => {
@@ -177,33 +142,17 @@ test('未知方法回 -32601', () => {
   assert.equal(outcome.code, -32601)
 })
 
-test('list_components 去重：同名 kind 取先声明的插件', () => {
-  const text = callText('list_components', {})
-  assert.ok(text.includes('flow-diagram'))
-  assert.ok(!text.includes('冲突实现'), '后声明的同名实现不应出现')
-  assert.ok(text.includes('merged-table'))
-  assert.equal(text.match(/flow-diagram/g)?.length, 1)
-})
-
-test('list_plugins 带信任等级（桌面口径），不暴露包目录', () => {
-  const text = callText('list_plugins', {})
-  assert.ok(text.includes('通用组件包'))
-  assert.ok(text.includes('presentation'))
-  assert.ok(!text.includes('/plugins/base'), '包目录是宿主内部信息，不进 MCP 输出')
-})
-
-test('get_component_docs 经适配层按插件包读 SKILL.md；未知 kind 给可读说明', () => {
-  const found = callText('get_component_docs', { kind: 'merged-table' })
-  assert.ok(found.includes('plugin: extra'))
+test('get_plugin_docs 经适配层按插件包读 SKILL.md；未知包给可读说明', () => {
+  const found = callText('get_plugin_docs', { name: 'extra' })
   assert.ok(found.includes('/plugins/extra 的文档'))
 
   const missing = call({
     jsonrpc: '2.0',
     id: 1,
     method: 'tools/call',
-    params: { name: 'get_component_docs', arguments: { kind: 'nope' } },
+    params: { name: 'get_plugin_docs', arguments: { name: 'nope' } },
   })
-  assert.ok(missing.result.content[0].text.includes('没有活跃实现'))
+  assert.ok(missing.result.content[0].text.includes('不可用'))
   assert.equal(missing.result.isError, false)
 })
 

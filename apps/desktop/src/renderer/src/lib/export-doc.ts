@@ -7,15 +7,7 @@
 import themeCss from '../../../../../../packages/renderer-core/src/styles/theme.css?raw'
 import docCss from '../../../../../../packages/renderer-core/src/styles/doc.css?raw'
 
-import {
-  ComponentRegistry,
-  highlightPass,
-  mermaidPass,
-  mountDeclarativeComponents,
-  mountPluginBlocks,
-  renderMarkdown,
-  type DeclarativeMount,
-} from '@docvi/renderer-core'
+import { highlightPass, mermaidPass, renderMarkdown } from '@docvi/renderer-core'
 
 import type { ExportFormat } from '@docvi/shared'
 
@@ -47,10 +39,6 @@ export interface ExportRenderOptions {
    * 症状是「导出的 HTML 里图片全是裂的」，但导出流程不报任何错。
    */
   assetPrefix: string
-  /** 组件注册表（与阅读视图同一份构造规则） */
-  registry: ComponentRegistry
-  /** 插件声明的结构化块语法（容器或围栏） */
-  containerSyntax: Array<{ name: string; component: string; form?: 'container' | 'fence' }>
   /**
    * 离屏渲染时套用的主题：HTML 用当前文档主题，PDF 固定 `paper`。
    *
@@ -137,21 +125,9 @@ async function renderOffscreen(options: ExportRenderOptions): Promise<{
   }
 
   const result = renderMarkdown(options.text, options.docPath, {
-    containerSyntax: options.containerSyntax,
     assetPrefix: options.assetPrefix,
   })
   surface.innerHTML = result.html
-
-  const mounts: DeclarativeMount[] = [
-    mountDeclarativeComponents(
-      surface,
-      (result.frontmatter.components as Record<string, Record<string, unknown>> | undefined) ??
-        null,
-      options.registry,
-      { onMissing: () => undefined },
-    ),
-    mountPluginBlocks(surface, options.registry, { onMissing: () => undefined }),
-  ]
 
   // 两趟异步渲染都要等：不等的话导出文件里代码块是裸文本、图表是空 div
   try {
@@ -169,7 +145,6 @@ async function renderOffscreen(options: ExportRenderOptions): Promise<{
     host,
     surface,
     dispose: () => {
-      for (const mount of mounts) mount.dispose()
       host.remove()
     },
   }
@@ -377,10 +352,14 @@ ${body.innerHTML}
 }
 
 /**
- * 数出文档里「只有 docvi 能渲染」的组件数。
+ * 数出文档里**已退役的富组件写法**有几处（兼容探测，不是功能）。
  *
- * 三种声明形式都要数：frontmatter 的 `components:` 段、正文 `<at-*>` 引用、
- * `:::` 容器块。少数一种，用户导出后就会遇到没有预警的「打开是源码」。
+ * 组件系统已于 2026-11-24 删除，这里不再有任何渲染动作。保留这个计数是为了
+ * 让导出旧文档时能提醒「这些内容在任何编辑器（包括现在的 docvi）里都是源码」——
+ * 少了这句提醒，用户会以为导出成功、打开才发现大片 YAML。
+ *
+ * 三种写法都要数：frontmatter 的 `components:` 段、正文 `<at-*>` 引用、
+ * `:::` 容器块。数少一种就会漏报。
  */
 export function countRichComponents(text: string): number {
   const lines = text.split(/\r?\n/)

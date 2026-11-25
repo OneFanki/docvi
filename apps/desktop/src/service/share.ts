@@ -275,10 +275,37 @@ function page(
   baseCss: string,
 ): string {
   const tokens = themeTokensCss(options.theme)
+  /*
+   * CSP 是分享页唯一的安全边界。
+   *
+   * 页面正文是用户 Markdown 经 `html: true` 渲染出来的，作者可能（有意或从别处
+   * 抄来）写了 `<script>` / `onerror=` / `javascript:` 链接。分享页在**读者的
+   * 普通浏览器**里打开，不享受 Electron 渲染进程那套 CSP，也不该让一篇文档
+   * 在同域下拿到脚本执行权（那等于拿到 `/share-assets/` 与所有分享路径的读写面）。
+   *
+   * 所以这里显式：
+   *  - `script-src 'self'`：只允许同源的 runtime.js，内联脚本与事件属性一律拒绝；
+   *  - `style-src 'unsafe-inline'`：主题令牌与正文样式都是内联 <style>，这个必须留；
+   *  - `frame-src 'self' data: blob:`：内嵌图解仍要能跑（iframe sandbox 归作者声明）；
+   *  - `object-src 'none'` / `base-uri 'none'`：插件与 <base> 劫持都关掉。
+   */
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "frame-src 'self' data: blob:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join('; ')
   return `<!doctype html>
 <html lang="zh-CN" ${themeAttrs(options.theme)} data-assets="${SHARE_ASSET_PREFIX}">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(options.title)}</title>
 <style>${baseCss}</style>

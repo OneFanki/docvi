@@ -11,10 +11,13 @@ import {
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   ChevronsDown,
   ChevronsDownUp,
   ClockArrowDown,
   FilePlus2,
+  FolderOpen,
   Link2,
   LocateFixed,
   ListOrdered,
@@ -23,15 +26,13 @@ import {
 import type {
   DocPayload,
   ExportFormat,
-  PortalWorkspace,
   TreeNode,
   TreeSortMode,
   UpdateCheckResult,
-  WorkspaceEntry,
   WorkspaceFilesChange,
 } from '@docvi/shared'
 import { isStandaloneDoc } from '@docvi/shared'
-import { ComponentRegistry, type OutlineEntry } from '@docvi/renderer-core'
+import type { OutlineEntry } from '@docvi/renderer-core'
 
 import { useAppStore, useThemeStore } from './stores/app'
 import { isRealScopeLabel, useTabsStore, type DocRef, type TabRecord } from './stores/tabs'
@@ -44,9 +45,9 @@ import { useThemeOptions } from './lib/theme-options'
 import { usePluginStore } from './stores/plugins'
 import { useServiceStore } from './stores/service'
 import { useI18n, applyExternalLocale, migrateLegacyLocale } from './lib/i18n'
-import { isReadOnlyHost, isWebHost } from './lib/host'
 import { MOD_LABEL, TAB_MOD_LABEL } from './lib/shortcuts'
 import { sameDocumentPath } from './lib/external-change'
+import { chooseRestoreStrategy } from './lib/reader-position'
 import { startPerfTimer, setPerfTracing } from './lib/perf'
 import { findShareForDoc } from './lib/share-match'
 import { affectsDocument, affectsTree } from './lib/workspace-change'
@@ -67,30 +68,16 @@ import {
   stateOf,
   takeAnchor,
 } from './lib/view-handoff'
-import {
-  onRouteChange,
-  pushDocUrl,
-  readBranch,
-  readPreviewRoute,
-  readRoute,
-  replaceDocUrl,
-  replaceLibraryUrl,
-  setDefaultBranchLookup,
-  switchBranch,
-} from './lib/web-router'
-import { BUILTIN_KINDS } from './plugins/builtin'
 import TitleBar from './components/TitleBar.vue'
 import TabBar from './components/TabBar.vue'
 import TabSwitcher from './components/TabSwitcher.vue'
 import DocTree, { type TreeFsAction } from './components/DocTree.vue'
 import ContextMenu, { type MenuItem } from './components/ContextMenu.vue'
-import LibraryView from './components/LibraryView.vue'
 import ReaderView from './components/ReaderView.vue'
 import OutlinePanel from './components/OutlinePanel.vue'
 import StatusBar from './components/StatusBar.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import PluginsView from './components/PluginsView.vue'
-import PreviewPage from './components/PreviewPage.vue'
 import SettingsView from './components/SettingsView.vue'
 import ShortcutsPanel from './components/ShortcutsPanel.vue'
 /*
@@ -109,14 +96,10 @@ import ConfirmDialog, { type ConfirmAction } from './components/ConfirmDialog.vu
 import UpdateDialog from './components/UpdateDialog.vue'
 import PromptDialog from './components/PromptDialog.vue'
 import ContentRootDialog from './components/ContentRootDialog.vue'
-import CloneRepoDialog from './components/CloneRepoDialog.vue'
-import BranchDialog from './components/BranchDialog.vue'
-import BranchPicker from './components/BranchPicker.vue'
-import GitBar from './components/GitBar.vue'
 // 相对路径：别名把 @docvi/editor 精确映射到 src/index.ts，'@docvi/editor/editor.css' 会解析失败
 import '../../../../../packages/editor/src/styles/editor.css'
 
-type View = 'library' | 'reader' | 'plugins' | 'settings' | 'preview'
+type View = 'reader' | 'plugins' | 'settings'
 
 /**
  * 应用根。
@@ -136,19 +119,8 @@ const service = useServiceStore()
 const { t, locale } = useI18n()
 const { register } = useCommands()
 
-/**
- * 组件示例预览（容器端整页路由 `/_/preview/<插件>/<组件>`）。
- *
- * 单独一个状态而不是走标签：它是运维面「预览」按钮的落地页，一个临时查看
- * 视图，不该进标签条、也不该被会话恢复。只在容器读者面存在——桌面端没有
- * 这条 URL，插件面板用的是卡片内就地预览。
- */
-const previewRoute = ref<{ plugin: string; kind: string } | null>(null)
-
 const view = computed<View>(() => {
-  if (previewRoute.value) return 'preview'
   const kind = activeTab.value?.kind
-  if (kind === 'library') return 'library'
   if (kind === 'settings') return 'settings'
   if (kind === 'plugins') return 'plugins'
   return 'reader'
@@ -220,7 +192,7 @@ function touched(): void {
 /** 待恢复的源行（编辑器挂载时读一次；阅读侧渲染完成后由 onRendered 消费） */
 const restoreAnchor = computed(() => {
   void handoffEpoch.value
-  return peekAnchor(handoff)
+  return peekAnchor(handoff, activeRef.value?.absolutePath ?? '')
 })
 
 /** 当前文档的编辑器状态快照（含撤销栈）；没有则为 null */
@@ -316,10 +288,13 @@ watch(windowTitle, value => {
   document.title = value
 })
 
-/** 目录树是否可用（工作区标签的阅读视图才有树）；显隐由 showTree 单独控制 */
-const treeAvailable = computed(
-  () => view.value === 'reader' && activeTab.value?.kind === 'workspace',
-)
+/**
+ * 左栏是否**有内容可显示**：只要有工作区就成立（ADR-0008）。
+ *
+ * 不再看活动标签的类型——设置页 / 插件页下左栏必须还在，否则「切去看一眼设置」
+ * 会把导航整个抽走，回来还得重新找位置。这与 VSCode 一致：左侧永远在。
+ */
+const treeAvailable = computed(() => store.workspaces.length > 0)
 
 /** 侧栏实际渲染条件：可用 + 用户没折叠 */
 const showSidebar = computed(() => treeAvailable.value && showTree.value)
@@ -342,16 +317,9 @@ const activeScopeLabel = computed(() => {
 const workspaceNames = computed(() => new Map(store.workspaces.map(item => [item.id, item.name])))
 
 /**
- * 站内链接的前缀（只容器版有）。
- *
- * 容器里内容根的 URL 前缀是 `/<仓库>`，站内链接与图片都在这个命名空间里。
- * 桌面端没有仓库段，链接就是工作区相对路径。
+ * 站内链接前缀：桌面端没有仓库段，链接就是工作区相对路径。
  */
-const docLinkPrefix = computed(() => {
-  if (!isWebHost) return ''
-  const id = activeTab.value?.workspaceId
-  return id ? `/${id}` : ''
-})
+const docLinkPrefix = computed(() => '')
 
 /**
  * 正文内相对图片的前缀。
@@ -366,7 +334,6 @@ const docLinkPrefix = computed(() => {
  */
 const docAssetPrefix = computed(() => {
   const id = activeTab.value?.workspaceId
-  if (isWebHost) return id ? `/${id}` : ''
   if (id) return `docvi://asset/${id}`
   return currentRecord.value?.assetPrefix ?? ''
 })
@@ -508,15 +475,6 @@ onMounted(async () => {
   theme.migrateLegacy()
   migrateLegacyLocale()
 
-  /*
-   * 容器版：地址栏路由必须**在任何标签激活之前**读出来。
-   *
-   * 下面 `ensureLibrary()` 会激活库标签，watcher 随即把地址栏改写成 `/`；
-   * 那时再 `readRoute()` 就只剩空路径——深链与分支切换都会落到空首页。
-   * 先读一次存起来，装载完仓库清单后再应用。
-   */
-  const initialRoute = isWebHost ? readRoute() : null
-
   // 语言可能在运行中切换：索引进度是后台任务的展示文案，必须跟着走
   searchIndex.setLabels({ indexing: t('status.indexing') })
   watch(locale, () => searchIndex.setLabels({ indexing: t('status.indexing') }))
@@ -544,71 +502,42 @@ onMounted(async () => {
     return ref ? documents.isDirty(ref.absolutePath) : false
   })
 
-  tabs.ensureLibrary(t('app.library'))
   // 会话恢复：session.json 优先；没有则沿用 localStorage 迁移结果
   const session = await window.docvi.sessionRead()
   if (session.ok && session.data) tabs.hydrate(session.data)
-  tabs.ensureLibrary(t('app.library'))
 
   await store.loadWorkspaces()
   // 标签上存的作用域名只是快照：旧会话可能是空串或工作区 id，统一按注册表纠正
   tabs.syncWorkspaceNames(new Map(store.workspaces.map(item => [item.id, item.name])))
-  // 切分支时要判断「是不是默认分支」（是就清掉 ?branch= 保持 URL 干净）
-  setDefaultBranchLookup(
-    slug => store.workspaces.find(item => item.id === slug)?.portal?.defaultBranch ?? null,
-  )
 
   await plugins.load()
   await pluginThemes.load(plugins.records)
   theme.dropPluginThemes(key => !pluginThemes.themes.value.some(item => item.id === key))
 
-  // 恢复上次激活的标签（页标签不需要额外装载）
+  /*
+   * 启动落点（ADR-0008）：不再有文档库首屏。
+   *  - 有可恢复的标签 → 直接装载它；
+   *  - 没有（首次启动 / 会话过期）→ 在当前工作区的落地页开一个预览标签，
+   *    「打开应用就看见内容」；
+   *  - 一个工作区都没有 → 右侧显示空态引导（左栏也只有「打开文件夹」）。
+   */
   const tab = activeTab.value
   if (tab && (tab.kind === 'workspace' || tab.kind === 'file')) {
     await ensureTabReady(tab)
-    await restoreScroll()
-  }
-
-  /*
-   * 容器版：地址栏是真入口。
-   *
-   * `/仓库/文档路径` 是分享链接与刷新的唯一依据，优先级高于会话恢复——
-   * 用户点开一条链接，期待看到链接指向的文档，而不是他上次在这台浏览器里
-   * 停在哪（两者是不同的人写下的意图）。
-   */
-  if (isWebHost) {
-    // 用挂载时抢在标签激活之前读到的那一份：此刻地址栏可能已被改写
-    const initialPreview = readPreviewRoute()
-    if (initialPreview) {
-      previewRoute.value = initialPreview
-    } else if (initialRoute) {
-      await openRoute(initialRoute.slug, initialRoute.path)
-    } else {
-      replaceLibraryUrl()
-    }
-    // 初始路由已落定：从此允许标签变化回写地址栏
-    routeSettled = true
-    unregisters.push(
-      onRouteChange(() => {
-        // 预览页是独立视图：地址栏变化时优先看它
-        const nextPreview = readPreviewRoute()
-        if (nextPreview) {
-          previewRoute.value = nextPreview
-          return
-        }
-        previewRoute.value = null
-        const next = readRoute()
-        if (next) void openRoute(next.slug, next.path)
-        else goLibrary()
-      }),
-    )
+  } else if (!tab && store.activeWorkspaceId) {
+    /*
+     * 树必须自己扫一次：`loadWorkspaces` 刻意不预扫（ADR-0008 之前是为了首页卡片），
+     * 而现在左栏恒显示树，落地页也得从树里挑。
+     */
+    const workspaceId = store.activeWorkspaceId
+    if (store.treeWorkspaceId !== workspaceId) await store.openWorkspace(workspaceId)
+    const landing = findLanding(store.tree)
+    if (landing) await openDoc(landing)
   }
 
   // 服务状态要在启动时就拿到：状态栏的 MCP 芯片常驻显示运行与否
-  if (!isWebHost) {
-    void service.load()
-    unregisters.push(service.subscribe())
-  }
+  void service.load()
+  unregisters.push(service.subscribe())
 
   const unsubscribe = window.docvi.onOpenPath(path => void openStandalone(path))
   unregisters.push(unsubscribe)
@@ -734,9 +663,8 @@ async function ensureDocLoaded(ref: DocRef): Promise<boolean> {
  * 找到某个绝对路径对应的标签引用。
  *
  * 读盘必须走 `workspaceId + relPath` 或绝对路径两条之一，取决于这份文档当初
- * 是怎么打开的（工作区文档 / 单文件 / 容器站点）。路径反推归属不可靠——
- * 容器版的 `absolutePath` 是站点内的虚拟路径，磁盘上并不存在——所以从标签
- * 历史里取回原始引用。
+ * 是怎么打开的（工作区文档 / 单文件）。路径反推归属不可靠，所以从标签历史里
+ * 取回原始引用。
  */
 function docRefOf(absolutePath: string): DocRef | null {
   for (const tab of tabs.tabs) {
@@ -747,7 +675,7 @@ function docRefOf(absolutePath: string): DocRef | null {
 }
 
 /**
- * 按磁盘（容器版是服务端）重读一篇已装载文档，交给文档模型裁决。
+ * 按磁盘重读一篇已装载文档，交给文档模型裁决。
  *
  * 三种来源共用这一条路径：主进程 watcher 推送、手动刷新、切回标签时补读。
  * 各写一套必然出现「同一个文件在不同入口下处理不一致」。
@@ -796,7 +724,7 @@ async function onExternalChange(absolutePath: string): Promise<void> {
    * （`ref.scrollY` 在外部改盘这条路径上没有更新过）。编辑态不记，理由同那里。
    */
   if (isVisible && !editing.value) {
-    leaveView(handoff, {
+    leaveView(handoff, absolutePath, {
       topLine: readerRef.value?.getTopLine() ?? -1,
       scrollTop: readerRef.value?.getScroll() ?? 0,
     })
@@ -877,7 +805,7 @@ async function onWorkspaceFilesChanged(change: WorkspaceFilesChange): Promise<vo
        * 编辑器自己维持光标与滚动，抢着记锚点反而会在下次渲染时把它拽走。
        */
       if (isVisible && !editing.value) {
-        leaveView(handoff, {
+        leaveView(handoff, record.absolutePath, {
           topLine: readerRef.value?.getTopLine() ?? -1,
           scrollTop: readerRef.value?.getScroll() ?? 0,
         })
@@ -980,7 +908,6 @@ async function reloadCurrentDoc(): Promise<void> {
  * （`lib/tasks`）；搜索面板在索引未就绪时显示自己的进度文案。
  */
 async function ensureTabReady(tab: TabRecord): Promise<boolean> {
-  if (tab.kind === 'library') return true
   if (tab.kind === 'workspace' && tab.workspaceId) {
     const workspace = store.workspaces.find(item => item.id === tab.workspaceId)
     if (!workspace) return false
@@ -993,10 +920,7 @@ async function ensureTabReady(tab: TabRecord): Promise<boolean> {
       await store.openWorkspace(tab.workspaceId)
     }
     // 顶层目录默认展开（只播种一次；用户手动折叠后不再重置）
-    tabs.seedExpanded(
-      tab.id,
-      store.tree.filter(node => node.type === 'dir').map(node => node.path),
-    )
+    store.ensureTreeExpandedSeeded()
     // 当前工作区优先入队，其余工作区空闲时补；两者都不 await（见上）
     void searchIndex.index(tab.workspaceId).then(() =>
       searchIndex.indexRest(
@@ -1014,19 +938,6 @@ async function ensureTabReady(tab: TabRecord): Promise<boolean> {
 }
 
 /** 按当前标签记录的阅读位置恢复（渲染完成后再调用） */
-/**
- * 记录的位置是否可信到能当主判据。
- *
- * `topLine` 为 0 时多疑一步：老会话文件里这个字段默认就是 0（上一版把
- * 「不知道」也存成 0）。照单全收的话 `scrollToSourceLine(0)` 会把文档滚到
- * 顶部**并返回 true**，压住像素兜底——正是「切标签回顶」的成因。
- * 只有像素也接近顶部时，0 才是真的「用户就在开头」。
- */
-function positionTrustworthy(ref: DocRef): boolean {
-  if (ref.topLine < 0) return false
-  return ref.topLine > 0 || ref.scrollY < 40
-}
-
 /**
  * 当前排版签名：决定「上次记的像素值还算不算数」。
  *
@@ -1049,20 +960,31 @@ function layoutSignature(): string {
  *  2. 签名变了或缺失 → 排版重排过，像素失效，退回源行；
  *  3. 源行也不可用 → 像素兜底。
  */
-function applyRecordedPosition(ref: DocRef): void {
+function applyRecordedPosition(ref: DocRef, early = false): void {
   const reader = readerRef.value
   if (!reader) return
-  const unchanged = Boolean(ref.layoutKey) && ref.layoutKey === layoutSignature()
-  if (!unchanged && positionTrustworthy(ref)) {
-    if (reader.scrollToSourceLine(ref.topLine)) {
-      logPosition({ via: 'source', topLine: ref.topLine, after: Math.round(reader.getScroll()) })
-      return
-    }
+  const strategy = chooseRestoreStrategy({
+    topLine: ref.topLine,
+    scrollY: ref.scrollY,
+    layoutKey: ref.layoutKey,
+    currentLayoutKey: layoutSignature(),
+    early,
+  })
+  if (strategy === 'source' && reader.scrollToSourceLine(ref.topLine)) {
+    logPosition({
+      via: early ? 'source-early' : 'source',
+      topLine: ref.topLine,
+      path: ref.relPath,
+      after: Math.round(reader.getScroll()),
+    })
+    return
   }
   reader.restoreScroll(ref.scrollY)
   logPosition({
-    via: 'pixel',
+    via: early ? 'pixel-early' : 'pixel',
     scrollY: Math.round(ref.scrollY),
+    topLine: ref.topLine,
+    path: ref.relPath,
     after: Math.round(reader.getScroll()),
   })
 }
@@ -1134,9 +1056,6 @@ async function activateTab(id: string): Promise<void> {
   if (!tab) return
   void tabBarRef.value?.revealTab(tab.id)
 
-  if (tab.kind === 'library') {
-    return
-  }
   const ok = await ensureTabReady(tab)
   if (!ok) {
     store.setError(t('error.tabUnavailable'))
@@ -1146,13 +1065,11 @@ async function activateTab(id: string): Promise<void> {
   await restoreScroll()
 }
 
-/** 文档库标签：没有则创建 */
-function goLibrary(): void {
-  const tab = tabs.ensureLibrary(t('app.library'))
-  tabs.activate(tab.id)
-}
-
-/** 从文档库打开工作区 = 新建标签（不去重） */
+/**
+ * 从工作区切换器 / 命令面板进入一个工作区：开一个新标签落到它的落地页。
+ *
+ * 与「切换左栏工作区」是两件事：那个只换树（ADR-0008），这个是真的开一个工作现场。
+ */
 async function openWorkspaceTab(workspaceId: string): Promise<void> {
   const workspace = store.workspaces.find(item => item.id === workspaceId)
   if (!workspace) return
@@ -1167,95 +1084,111 @@ async function openWorkspaceTab(workspaceId: string): Promise<void> {
   if (landing) await navigateInTab(result.tab.id, landing, false)
 }
 
-/* ---------- 容器版：地址栏路由 ---------- */
-
-/** 正在应用地址栏带来的路由：此时的文档切换不再回写地址栏（否则历史里会多一条） */
-let applyingRoute = false
+/* ---------- 左栏：单工作区导航（ADR-0008） ---------- */
 
 /**
- * 容器版：切到某个仓库的某个已发布分支。
+ * 切换左栏显示的工作区。
  *
- * 只影响当前读者（地址带 `?branch=`）：不写服务器、不动仓库，其他读者不受影响。
- * 切完整页重载——分支换了等于整个内容根换了，就地刷新要逐个失效树/索引/正文，
- * 漏一个就会出现「树是新的、正文是旧的」。
+ * **只换树，不碰标签**：标签是工作现场，树是导航。此前「切工作区 = 切标签」
+ * 让多个工作区的标签无法共存，正是这次要修的那件事。
+ *
+ * 已存在的标签原封不动——用户切回来时那些标签还在，包括各自的阅读位置。
  */
-function selectBranch(payload: { slug: string; branch: string }): void {
-  if (!isWebHost) return
-  switchBranch(payload.slug, payload.branch)
+async function switchWorkspace(workspaceId: string): Promise<void> {
+  if (!workspaceId || workspaceId === store.activeWorkspaceId) return
+  await store.openWorkspace(workspaceId)
+}
+
+/** 当前工作区下拉菜单是否展开 */
+const workspaceMenuOpen = ref(false)
+const workspaceMenuAnchor = ref<HTMLElement | null>(null)
+
+function toggleWorkspaceMenu(): void {
+  workspaceMenuOpen.value = !workspaceMenuOpen.value
+}
+
+/** 菜单里选中某个工作区：切树 + 收起菜单 */
+async function chooseWorkspace(workspaceId: string): Promise<void> {
+  workspaceMenuOpen.value = false
+  await switchWorkspace(workspaceId)
+}
+
+/** 当前工作区的显示名（注册表是真相源，快照可能是空串或 id） */
+const currentWorkspaceName = computed(() => {
+  const active = store.workspaces.find(item => item.id === store.activeWorkspaceId)
+  return active?.name ?? ''
+})
+
+/** 左栏顶部「最近打开」区块的展开态（默认收起：它是辅助入口，不是主战场） */
+const recentOpen = ref(false)
+
+/** DocTree 每次展开状态变化：写进「当前工作区」的展开集合（ADR-0008） */
+function onTreeExpandedChange(expanded: string[]): void {
+  store.setTreeExpanded(expanded)
 }
 
 /**
- * 容器版：装载本地 Markdown 预览（内容只在浏览器内存）。
+ * 回到当前工作区的落地页（Ctrl+1）。
  *
- * 装载后立刻进该工作区，落到第一篇文档——用户的动作意图就是「看一眼」，
- * 让他再自己点一次是多余的步骤。
+ * 没有文档库首屏之后，这个键的语义变成「回到这个库的入口那篇」——
+ * 与 VSCode 的 Ctrl+1 一致：跳回第一组，而不是跳回一个项目列表。
  */
-async function loadLocalPreview(payload: {
-  files: Array<{ path: string; text: string }>
-  kind: 'files' | 'dir'
-}): Promise<void> {
-  const result = await window.docvi.localPreview(payload.files, payload.kind)
-  if (!result.ok) {
-    store.setError(result.error.message)
+async function openWorkspaceHome(): Promise<void> {
+  if (!store.activeWorkspaceId) return
+  const landing = findLanding(store.tree)
+  if (landing) await openDoc(landing)
+}
+
+/**
+ * 工作区切换器的菜单项：其他工作区 + 打开文件夹 + 当前工作区的管理动作。
+ *
+ * 「管理」只作用于当前工作区——左栏固定只显示一个，菜单里再选另一个就是切换。
+ * 内建默认工作区不提供移除：它的 id 由主进程固定，移掉会让 MCP 没有落笔处。
+ */
+const workspaceMenuItems = computed<MenuItem[]>(() => {
+  const others = store.workspaces.filter(item => item.id !== store.activeWorkspaceId)
+  const active = store.workspaces.find(item => item.id === store.activeWorkspaceId)
+  const items: MenuItem[] = others.map(item => ({ id: `switch:${item.id}`, label: item.name }))
+  if (others.length) {
+    items.push({ id: 'open-folder', label: t('cmd.openFolder'), separatorBefore: true })
+    items.push({ id: 'open-file', label: t('cmd.openFile') })
+  } else {
+    items.push({ id: 'open-folder', label: t('cmd.openFolder') })
+    items.push({ id: 'open-file', label: t('cmd.openFile') })
+  }
+  if (active) {
+    items.push({ id: 'share', label: t('ws.shareDir'), separatorBefore: true })
+    if (!active.default) items.push({ id: 'remove', label: t('ws.remove'), danger: true })
+  }
+  return items
+})
+
+function onWorkspaceMenuSelect(id: string): void {
+  workspaceMenuOpen.value = false
+  if (id === 'open-folder') {
+    void addWorkspace()
     return
   }
-  if (!result.data) return
-  // 工作区清单要重新拉：新装载的本地预览是列表里的第一项
-  await store.loadWorkspaces()
-  await openWorkspaceTab(result.data.id)
-  store.setError(t('portal.localLoaded', { count: payload.files.length }))
-}
-
-/** 文档库组件暴露的「打开本地文件选择框」——命令面板用，避免两处各写一份 input */
-const libraryRef = ref<{ pickLocalFiles: () => void } | null>(null)
-
-function pickLocalFiles(): void {
-  libraryRef.value?.pickLocalFiles()
-}
-
-/**
- * 按地址栏路由打开文档。
- *
- * 三种情况都要能处理，因为链接可能指向任何地方：
- *  1. 当前标签已是同仓工作区 → 原地换文档；
- *  2. 当前标签是别的仓 / 文档库 → 新开该仓标签（不毁掉当前浏览现场）；
- *  3. 地址里没有文档段（`/<仓库>/`）→ 落到该仓落地页。
- */
-async function openRoute(slug: string, path: string): Promise<void> {
-  const workspace = store.workspaces.find(item => item.id === slug)
-  if (!workspace) {
-    store.setError(t('error.workspaceMissing'))
+  if (id === 'open-file') {
+    void openFileDialog()
     return
   }
-
-  let target = tabs.activeTab
-  if (!target || target.kind !== 'workspace' || target.workspaceId !== slug) {
-    const result = tabs.openWorkspace({ id: workspace.id, name: workspace.name })
-    if (!result.tab) {
-      store.setError(result.rejected ?? t('error.tabLimit'))
-      return
-    }
-    target = result.tab
-    await ensureTabReady(target)
+  if (id === 'share') {
+    if (store.activeWorkspaceId) shareWorkspace(store.activeWorkspaceId)
+    return
   }
-
-  const docPath = path || findLanding(store.tree)
-  if (!docPath) return
-  applyingRoute = true
-  try {
-    await navigateInTab(target.id, docPath, false)
-  } finally {
-    applyingRoute = false
+  if (id === 'remove') {
+    if (store.activeWorkspaceId) void removeWorkspace(store.activeWorkspaceId)
+    return
   }
+  if (id.startsWith('switch:')) void chooseWorkspace(id.slice('switch:'.length))
 }
 
 /**
  * 正文里的站内链接（渲染管线已归一成**根相对路径**）。
  *
- * 两种宿主的根相对路径含义不同，必须分开解析：
- *  - **容器**：`/<仓库>/<内容根内路径>`——第一段是仓库 slug，交给 SPA 路由；
- *  - **桌面**：`/<内容根内路径>`——没有仓库段，就是当前工作区里的相对路径。
- *    早先按容器语义解析，第一段会被当成仓库 id 去查注册表，查不到就报
+ * 根相对路径的语义：`/<内容根内路径>`——没有仓库段，就是当前工作区里的相对路径。
+ * 早先版本根本没接管点击，窗口会直接导航到那个地址、整个界面变白——
  *    「工作区不存在」；而更早版本根本没接管点击，窗口会直接导航到那个地址，
  *    整个界面变白——用户报的「点带跳转的文本，界面直接空掉」就是它。
  *
@@ -1267,50 +1200,25 @@ async function onContentNavigate(href: string): Promise<void> {
   const segments = (rawPath ?? '').split('/').filter(Boolean).map(safeDecode)
   const current = activeTab.value
 
-  if (!isWebHost) {
-    // 桌面：整条路径都是工作区内的相对路径
-    if (current?.kind !== 'workspace' || !current.workspaceId) return
-    const raw = segments.join('/') || findLanding(store.tree)
-    if (!raw) return
-    // 链接是不带扩展名的：换成树里的真实文件名（落地页可能是 索引.md / README.md）
-    const target = resolveDocPath(raw)
-    if (!target) {
-      store.setError(t('error.linkMissing', { path: raw }))
-      return
-    }
-    if (target === activeRef.value?.relPath) {
-      if (hash) readerRef.value?.scrollTo(`#${cssEscape(hash)}`)
-      return
-    }
-    await navigateInTab(current.id, target, false)
-    if (hash) {
-      // 渲染是异步的：等这一轮 DOM 稳定后再滚到锚点
-      await nextTick()
-      window.setTimeout(() => readerRef.value?.scrollTo(`#${cssEscape(hash)}`), 120)
-    }
+  if (current?.kind !== 'workspace' || !current.workspaceId) return
+  const raw = segments.join('/') || findLanding(store.tree)
+  if (!raw) return
+  // 链接是不带扩展名的：换成树里的真实文件名（落地页可能是 索引.md / README.md）
+  const target = resolveDocPath(raw)
+  if (!target) {
+    store.setError(t('error.linkMissing', { path: raw }))
     return
   }
-
-  const slug = segments[0] ?? ''
-  if (!slug) return
-  const path = segments.slice(1).join('/')
-
-  if (current?.workspaceId === slug && current.kind === 'workspace') {
-    const target = path || findLanding(store.tree)
-    if (!target) return
-    if (target === activeRef.value?.relPath) {
-      if (hash) readerRef.value?.scrollTo(`#${cssEscape(hash)}`)
-      return
-    }
-    await navigateInTab(current.id, target, false)
-    if (hash) {
-      // 渲染是异步的：等这一轮 DOM 稳定后再滚到锚点
-      await nextTick()
-      window.setTimeout(() => readerRef.value?.scrollTo(`#${cssEscape(hash)}`), 120)
-    }
+  if (target === activeRef.value?.relPath) {
+    if (hash) readerRef.value?.scrollTo(`#${cssEscape(hash)}`)
     return
   }
-  await openRoute(slug, path)
+  await navigateInTab(current.id, target, false)
+  if (hash) {
+    // 渲染是异步的：等这一轮 DOM 稳定后再滚到锚点
+    await nextTick()
+    window.setTimeout(() => readerRef.value?.scrollTo(`#${cssEscape(hash)}`), 120)
+  }
 }
 
 function safeDecode(text: string): string {
@@ -1325,29 +1233,6 @@ function safeDecode(text: string): string {
 function cssEscape(value: string): string {
   return value.replace(/["\\]/g, '\\$&')
 }
-
-/**
- * 文档切换 → 地址栏。
- *
- * push 由 `navigateInTab` 负责（那是唯一真正「换文档」的入口，浏览器后退才能
- * 回到上一篇）；这里只处理标签激活等**位置变化**，用 replace——标签切换是同一
- * 段浏览里的跳转，在历史里堆一串重复项没有意义。库首页同理。
- *
- * **首帧之前不许写地址栏**：启动时 `ensureLibrary()` 会先激活库标签，watcher
- * 立刻触发并调 `replaceLibraryUrl()`，把深链 `/<仓库>/<文档>?branch=…` 改写成 `/`——
- * 之后 `readRoute()` 读到的已经是空路径，深链与分支切换双双失效（实测：直接
- * 打开一个仓库深链会被丢回空首页）。所以初始路由应用完之前一律不写。
- */
-let routeSettled = !isWebHost
-
-watch(
-  () => [activeTab.value?.workspaceId, activeRef.value?.relPath] as const,
-  ([workspaceId, relPath]) => {
-    if (!isWebHost || applyingRoute || !routeSettled) return
-    if (workspaceId) replaceDocUrl(workspaceId, relPath ?? '')
-    else replaceLibraryUrl()
-  },
-)
 
 /** 目录树里找第一篇可显示的文档（优先目录落地页） */
 function findLanding(nodes: ReturnType<typeof useAppStore>['tree']): string | null {
@@ -1406,23 +1291,32 @@ function resolveDocPath(relPath: string): string | null {
  * 这里只做**展开**，不动用户已展开的其他分支（折叠会打乱浏览现场）。
  *
  * 相对路径逐段前缀就是祖先目录的相对路径（与树节点 path 同口径）。
+ *
+ * 展开态属于工作区（ADR-0008）：跨工作区打开文档时要先把左栏切过去，
+ * 否则这段话会展开另一个工作区的目录。
  */
-function revealInTree(tabId: string, relPath: string): void {
+function revealInTree(relPath: string): void {
   const parts = relPath.split('/').filter(Boolean)
   if (parts.length < 2) return
-  const tab = tabs.tabs.find(item => item.id === tabId)
-  if (!tab) return
   const ancestors: string[] = []
   for (let i = 1; i < parts.length; i += 1) ancestors.push(parts.slice(0, i).join('/'))
-  const merged = new Set([...tab.expanded, ...ancestors])
-  if (merged.size !== tab.expanded.length) tabs.setExpanded(tabId, [...merged])
+  store.expandTreePaths(ancestors)
+}
+
+/** 左栏跟随某个工作区：标签激活后，树必须与正在看的文档同源 */
+async function syncSidebarTo(workspaceId: string | null): Promise<void> {
+  if (!workspaceId || workspaceId === store.activeWorkspaceId) return
+  await store.openWorkspace(workspaceId)
 }
 
 /**
  * 在标签内打开一篇文档。
  *
  * `newTab = true` 时新建标签（右键菜单 / 跨工作区跳转）；
- * 否则替换当前标签的内容（目录树单击、搜索结果）。
+ * 否则替换当前标签的内容并压历史（正文链接、落地页、历史前进）。
+ *
+ * ⚠️ 目录树点击不走这里：那是「打开一篇文档」，要按预览/固定语义去重，
+ * 见 `openDoc`。混淆两者会让单击树把当前标签的历史整条冲掉。
  */
 async function navigateInTab(tabId: string, relPath: string, newTab: boolean): Promise<void> {
   const tab = tabs.tabs.find(item => item.id === tabId)
@@ -1448,7 +1342,8 @@ async function navigateInTab(tabId: string, relPath: string, newTab: boolean): P
       topLine: -1,
       layoutKey: '',
     })
-    revealInTree(result.tab.id, relPath)
+    await syncSidebarTo(workspaceId)
+    revealInTree(relPath)
     await ensureDocLoaded(tabs.currentDocOf(result.tab.id) as DocRef)
     return
   }
@@ -1457,16 +1352,9 @@ async function navigateInTab(tabId: string, relPath: string, newTab: boolean): P
   rememberReadingPosition()
   const record = documents.load(payload)
   record.workspaceId = workspaceId
-  /*
-   * 容器版：地址栏必须先于 tabs.navigate 更新。
-   *
-   * 反过来的顺序会让下面那个 watch 抢先把 URL 改成新文档（它监听 activeRef），
-   * 等这里再 push 时目标地址已经和当前地址相同，push 被当成空操作跳过——
-   * 结果整段浏览只留一条历史，浏览器后退直接退出站点。
-   */
-  if (isWebHost && !applyingRoute) pushDocUrl(workspaceId, relPath)
-  // 深层文档：先展开祖先，再落标签——否则树里看不到刚打开的这一行
-  revealInTree(tabId, relPath)
+  // 深层文档：先同步左栏并展开祖先，再落标签——否则树里看不到刚打开的这一行
+  await syncSidebarTo(workspaceId)
+  revealInTree(relPath)
   tabs.navigate(tabId, {
     key: `workspace:${workspaceId}:${relPath}`,
     workspaceId,
@@ -1488,11 +1376,61 @@ async function navigateInTab(tabId: string, relPath: string, newTab: boolean): P
   readerRef.value?.restoreScroll(0)
 }
 
-/** 目录树单击 / 搜索结果：在当前标签内切换 */
-async function openDoc(path: string): Promise<void> {
-  const tabId = tabs.activeId
-  if (!tabId) return
-  await navigateInTab(tabId, path, false)
+/**
+ * 目录树单击 / 双击 / 搜索结果：打开一篇文档（VSCode 的预览 / 固定语义）。
+ *
+ * - `pin = false`（单击）→ **预览标签**：标签条标题斜体，再点别的文档就替换它，
+ *   标签条不会越点越长；这篇已经在某个标签里则只激活那个标签，不重复开。
+ * - `pin = true`（双击、回车、新建文件后）→ 固定成正式标签。
+ *
+ * 与 `navigateInTab` 的分工：那个是「在同一标签内换内容并压历史」（正文链接、
+ * 历史前进）；这里是「打开文档」，去重与预览复用全部交给 `tabs.openDoc`。
+ *
+ * 打开的是**左栏正在显示的工作区**里的文档，不是当前标签所属工作区的：用户可以
+ * 把左栏切到 B 而继续看着 A 的文档，此时点 B 的树就该开 B 的文件。混用会让
+ * 这个动作变成「在 A 里找 B 的同名路径」——路径存在就打开错文件，不存在就静默失败。
+ *
+ * 阅读位置：只有内容真的换了才回顶。同一篇再点一次是幂等激活，若在这里
+ * 无条件 `restoreScroll(0)`，每次点树都会把人从读到的地方甩回开头。
+ */
+async function openDoc(path: string, pin = false): Promise<void> {
+  const workspaceId = store.activeWorkspaceId
+  const workspace = store.activeWorkspace
+  if (!workspaceId || !workspace) return
+  const payload = await store.readDoc(workspaceId, path)
+  if (!payload) return
+
+  rememberReadingPosition()
+  const record = documents.load(payload)
+  record.workspaceId = workspaceId
+
+  const result = tabs.openDoc(
+    { id: workspace.id, name: workspace.name },
+    {
+      key: `workspace:${workspaceId}:${path}`,
+      workspaceId,
+      relPath: path,
+      absolutePath: payload.absolutePath,
+      title: payload.title,
+      scrollY: 0,
+      topLine: -1,
+      layoutKey: '',
+    },
+    { pin },
+  )
+  if (!result.tab) {
+    store.setError(result.rejected ?? t('error.tabLimit'))
+    return
+  }
+  revealInTree(path)
+  docMode.value = 'read'
+  await store.touchRecent({
+    path: payload.absolutePath,
+    workspaceId,
+    relPath: path,
+    title: payload.title,
+  })
+  await restoreScroll()
 }
 
 /**
@@ -1653,135 +1591,6 @@ async function removeWorkspace(id: string): Promise<void> {
   if (store.activeWorkspaceId) void searchIndex.index(store.activeWorkspaceId)
 }
 
-/* ---------- git 托管工作区 ---------- */
-
-const cloneOpen = ref(false)
-/** 分支对话框当前作用的工作区（null = 关闭） */
-const branchWorkspace = ref<WorkspaceEntry | null>(null)
-/** 正在拉取的工作区 id：按钮转圈用，防重复点击 */
-const pullBusy = ref<string | null>(null)
-
-/** 当前标签所属工作区的 git 信息（侧栏状态条用） */
-const activeWorkspaceGit = computed(() => {
-  const id = activeTab.value?.workspaceId
-  if (!id) return null
-  return store.workspaces.find(item => item.id === id)?.git ?? null
-})
-
-/**
- * 容器读者面：当前标签所属仓库的 portal 状态（分支选择器用）。
- *
- * 本地预览工作区没有 portal（内容在内存里），选择器不应出现；
- * 只有一个分支的仓库也不显示——那没有可选的。
- */
-const activePortalWorkspace = computed<PortalWorkspace | null>(() => {
-  const id = activeTab.value?.workspaceId
-  if (!id) return null
-  const portal = store.workspaces.find(item => item.id === id)?.portal
-  if (!portal || portal.branches.length <= 1) return null
-  return portal
-})
-
-function openClone(): void {
-  cloneOpen.value = true
-  if (!store.gitState) void store.loadGitState()
-}
-
-/** 克隆完成：关对话框 → 直接打开这个工作区（用户的下一步必然是看内容） */
-async function onCloned(entry: WorkspaceEntry): Promise<void> {
-  cloneOpen.value = false
-  await store.adoptWorkspace(entry)
-  await openWorkspaceTab(entry.id)
-}
-
-function openBranchDialog(id: string): void {
-  branchWorkspace.value = store.workspaces.find(item => item.id === id) ?? null
-}
-
-/**
- * 切分支完成：工作区换了 id，标签、命令面板与搜索索引都要跟着换身份。
- *
- * 顺序很重要——先把标签引用改到新 id，再重扫目录树；反过来会让「恢复当前文档」
- * 用旧 id 去读新工作区，直接读不到。
- */
-async function onBranchSwitched(entry: WorkspaceEntry): Promise<void> {
-  const previous = branchWorkspace.value
-  branchWorkspace.value = null
-  if (!previous) return
-  tabs.replaceWorkspace(previous.id, { id: entry.id, name: entry.name, root: entry.root })
-  tabs.syncWorkspaceNames(new Map(store.workspaces.map(item => [item.id, item.name])))
-  // 旧 id 的索引作废、新 id 重新建：切分支后搜索必须查到新分支的内容
-  searchIndex.invalidate(previous.id)
-  void searchIndex.index(entry.id)
-  showNotice(t('git.switchedTo', { branch: entry.git?.branch ?? '' }))
-
-  /*
-   * 标签里记的绝对路径指的仍是旧工作树：必须按新根重读，否则阅读区会空白
-   * （文档模型按绝对路径索引，旧路径在新根下不存在）。当前文档在新分支上不存在
-   * 时退到落地页——分支之间文档集合本来就可能不同。
-   */
-  const tab = activeTab.value
-  if (tab?.kind !== 'workspace' || tab.workspaceId !== entry.id) return
-  const loaded = await ensureTabReady(tab)
-  if (!loaded) {
-    const landing = findLanding(store.tree)
-    if (landing) await navigateInTab(tab.id, landing, false)
-    else store.setError(t('git.docMissingOnBranch', { branch: entry.git?.branch ?? '' }))
-    return
-  }
-  await restoreScroll()
-}
-
-async function pullWorkspace(id: string): Promise<void> {
-  if (!id) return
-  const target = store.workspaces.find(item => item.id === id)
-  if (!target?.git) {
-    if (target) store.setError(t('git.notManaged'))
-    return
-  }
-  if (pullBusy.value) return
-  pullBusy.value = id
-  try {
-    const result = await store.pullWorkspace(id)
-    if (!result) return
-    if (!result.changed) {
-      showNotice(t('git.upToDate', { branch: result.branch }))
-      return
-    }
-    showNotice(t('git.pulled', { branch: result.branch, count: result.commits }))
-    // 工作树被 reset 过：已装载的文档缓冲区必须按磁盘重读，否则编辑旧内容再保存会覆盖云端
-    await reloadOpenDocs(id)
-    searchIndex.invalidate(id)
-    void searchIndex.index(id)
-  } finally {
-    pullBusy.value = null
-  }
-}
-
-/** 拉取后重读该工作区里所有已装载文档（干净的直接采用，脏的标记冲突交给编辑器提示） */
-async function reloadOpenDocs(workspaceId: string): Promise<void> {
-  const refs = new Map<string, string>()
-  for (const tab of tabs.tabs) {
-    for (const ref of tab.history) {
-      if (ref.workspaceId === workspaceId) refs.set(ref.relPath, ref.title)
-    }
-  }
-  const missing: string[] = []
-  for (const relPath of refs.keys()) {
-    const payload = await store.readDoc(workspaceId, relPath)
-    if (!payload) {
-      missing.push(refs.get(relPath) || relPath)
-      continue
-    }
-    const record = documents.load(payload)
-    record.workspaceId = workspaceId
-  }
-  // 云端删掉的文档：必须说一句，否则用户面对的是「标签还在、内容还是旧的」的假象
-  if (missing.length) {
-    store.setError(t('git.docsGone', { list: missing.slice(0, 3).join('、') }))
-  }
-}
-
 /* ---------- 临时分享（工作区目录 / 当前文档） ---------- */
 
 /** 分享结果提示条：带链接与复制按钮，不跳走页面 */
@@ -1857,7 +1666,7 @@ function shareCurrentDoc(): void {
  */
 const currentDocShare = computed(() => {
   const ref = activeRef.value
-  if (!ref || isWebHost) return null
+  if (!ref) return null
   const hit = findShareForDoc(service.shares, ref.absolutePath)
   if (!hit) return null
   return { id: hit.share.id, url: hit.share.url, kind: hit.share.kind }
@@ -1897,7 +1706,7 @@ function shareWorkspace(id: string): void {
 
 async function stepHistory(delta: number): Promise<void> {
   const tabId = tabs.activeId
-  if (!tabId || !activeTab.value || activeTab.value.kind === 'library') return
+  if (!tabId || !activeTab.value) return
   rememberReadingPosition()
   const next = tabs.step(tabId, delta)
   if (!next) return
@@ -1912,7 +1721,7 @@ async function stepHistory(delta: number): Promise<void> {
 /** 关闭标签：脏标签先问；取消返回 false */
 async function closeTab(id: string): Promise<boolean> {
   const tab = tabs.tabs.find(item => item.id === id)
-  if (!tab || tab.kind === 'library') return false
+  if (!tab) return false
   const ref = tabs.currentDocOf(id)
   const isDirty = ref ? documents.isDirty(ref.absolutePath) : false
   if (isDirty && ref) {
@@ -1966,13 +1775,12 @@ async function closeTab(id: string): Promise<boolean> {
   if (closingActive) {
     const next = tabs.activeTab
     if (next) await activateTab(next.id)
-    else goLibrary()
   }
   return true
 }
 
 async function closeOthers(tabId: string): Promise<void> {
-  const victims = tabs.tabs.filter(tab => tab.kind !== 'library' && tab.id !== tabId)
+  const victims = tabs.tabs.filter(tab => tab.id !== tabId)
   for (const tab of victims) {
     if (tab.id === tabs.activeId) continue
     await closeTab(tab.id)
@@ -1982,25 +1790,24 @@ async function closeOthers(tabId: string): Promise<void> {
 async function closeRight(tabId: string): Promise<void> {
   const index = tabs.tabs.findIndex(tab => tab.id === tabId)
   if (index < 0) return
-  const victims = tabs.tabs.filter((tab, at) => at > index && tab.kind !== 'library')
+  const victims = tabs.tabs.filter((tab, at) => at > index)
   for (const tab of victims) await closeTab(tab.id)
 }
 
 /**
- * 关闭全部标签页（文档库除外）。
+ * 关闭全部标签页。
  *
  * 逐个走 closeTab：脏标签会弹「保存 / 丢弃 / 取消」，用户取消时立刻停手——
  * 批量关闭最怕「问了第一个说不，后面还是被关掉」。
  */
 async function closeAllTabs(): Promise<void> {
-  const victims = tabs.tabs.filter(tab => tab.kind !== 'library')
+  const victims = [...tabs.tabs]
   for (const tab of victims) {
     // 每关一个都要重新取一次：closeTab 会改数组，闭包里的旧引用会失效
     if (!tabs.tabs.some(item => item.id === tab.id)) continue
     const ok = await closeTab(tab.id)
     if (!ok) return
   }
-  goLibrary()
 }
 
 /**
@@ -2081,6 +1888,39 @@ function cancelSwitcher(): void {
 
 /* ---------- 保存回调 ---------- */
 
+/**
+ * 正文壳已插入 DOM：抢在异步渲染（高亮 / 图表）之前把阅读位置放好。
+ *
+ * 为什么需要这个早于 onRendered 的落位：ReaderView 插入 DOM 之后还要
+ * await 两次动态导入，那一刻已经让出事件循环、浏览器把「顶部」画到屏幕上了。
+ * 等 rendered 再恢复，用户看到的就是「先回顶、再闪回原处」。
+ *
+ * 这里只按**已测量的 DOM** 定位，高亮 / 图表跑完还会由 onRendered 校正一次
+ * （图表展开会改变高度）。两次都要保留，不是重复。
+ */
+function onContentReady(payload: { path: string }): void {
+  const tab = activeTab.value
+  const ref = activeRef.value
+  if (!tab || !ref) return
+  if (payload.path !== currentDoc.value?.path) return
+  const reader = readerRef.value
+  if (!reader) return
+
+  // 视图切换带过来的锚点最准（用户正在看的那一段必须还在视野里）
+  const anchor = peekAnchor(handoff, ref.absolutePath)
+  if (anchor !== null && reader.scrollToSourceLine(anchor)) {
+    logPosition({
+      via: 'content-ready-anchor',
+      topLine: anchor,
+      path: payload.path,
+      refPath: ref.absolutePath,
+    })
+    return
+  }
+  applyRecordedPosition(ref, true)
+  logPosition({ via: 'content-ready', path: payload.path, after: Math.round(reader.getScroll()) })
+}
+
 function onRendered(payload: { path: string; title: string }): void {
   const tab = activeTab.value
   const ref = activeRef.value
@@ -2107,7 +1947,7 @@ function onRendered(payload: { path: string; title: string }): void {
    * 锚点在 takeAnchor 里取完即清：渲染完毕会触发多次（高亮 / Mermaid / 组件
    * 挂载各一次），留着会被重放成「页面老是弹回原处」。
    */
-  const anchor = takeAnchor(handoff)
+  const anchor = takeAnchor(handoff, ref.absolutePath)
   if (anchor !== null && readerRef.value?.scrollToSourceLine(anchor)) return
   applyRecordedPosition(ref)
   logPosition({ via: 'rendered-done', scrollY: Math.round(readerRef.value?.getScroll() ?? -1) })
@@ -2142,7 +1982,7 @@ function rememberEditorState(payload: { absolutePath: string; state: unknown }):
 
 /** 编辑器已按锚点落位：清掉锚点，避免下一次普通渲染再被拽回原处 */
 function consumeAnchor(): void {
-  takeAnchor(handoff)
+  takeAnchor(handoff, activeRef.value?.absolutePath ?? '')
   touched()
 }
 
@@ -2161,6 +2001,8 @@ function consumeAnchor(): void {
 function setDocMode(mode: DocMode): void {
   if (docMode.value === mode) return
   const from = docMode.value
+  // 动手改就固定：预览标签是「只是看一眼」的临时态，一编辑就该留在标签条上
+  if (mode !== 'read' && tabs.activeId) tabs.pin(tabs.activeId)
   /*
    * 埋点：只在开关打开时计时（startPerfTimer 在关闭时返回空函数，零开销）。
    * 这条记录的判据是「切完到正文/编辑器落地」——比 longtask 更贴近
@@ -2183,7 +2025,7 @@ function setDocMode(mode: DocMode): void {
           topLine: editorRef.value?.getTopLine() ?? 0,
           scrollTop: editorRef.value?.getScroll() ?? 0,
         }
-  leaveView(handoff, position)
+  leaveView(handoff, activeRef.value?.absolutePath ?? '', position)
   touched()
 
   // 编辑态 → 任何视图：先把状态快照留下（含撤销栈），供下次进编辑态复用
@@ -2256,17 +2098,19 @@ function confirmPrompt(value: string): void {
   run?.(value)
 }
 
-/** 当前工作区 id：树操作只在这个工作区内生效 */
+/**
+ * 当前工作区 id：树操作只在这个工作区内生效。
+ *
+ * 取左栏正在显示的那个工作区，**不是**当前标签所属的：用户可以把左栏切到 B
+ * 而继续看着 A 的文档，此时树上的新建 / 重命名 / 删除 / 拖拽都必须落在 B 上。
+ */
 function treeWorkspaceId(): string | null {
-  return activeTab.value?.workspaceId ?? null
+  return store.activeWorkspaceId
 }
 
-/** 把一组目录并进当前标签的展开集合（已展开的不动） */
+/** 把一组目录并进当前工作表区的展开集合（已展开的不动） */
 function expandDirs(dirs: string[]): void {
-  const tab = activeTab.value
-  if (!tab) return
-  const merged = new Set([...tab.expanded, ...dirs])
-  if (merged.size !== tab.expanded.length) tabs.setExpanded(tab.id, [...merged])
+  store.expandTreePaths(dirs)
 }
 
 /**
@@ -2294,7 +2138,8 @@ function newEntry(kind: 'file' | 'dir', dirRelPath = ''): void {
       }
       // 展开到新文件所在目录，否则它会出现折叠着的父目录里、看不见
       expandDirs(ancestorDirs(relPath))
-      await openDoc(relPath)
+      // 新建是显式动作，直接固定成正式标签（预览标签会被下一次单击替换掉）
+      await openDoc(relPath, true)
     },
   })
 }
@@ -2509,9 +2354,9 @@ const treeSelection = ref<string[]>([])
 /** 「定位当前文档」的滚动信号：路径没变时 DocTree 的 watch 不触发，用递增数驱动 */
 const revealTick = ref(0)
 
-// 切换工作区标签：树换了，选区必然失效
+// 左栏切了工作区：树换了，选区必然失效
 watch(
-  () => activeTab.value?.workspaceId,
+  () => store.activeWorkspaceId,
   () => {
     treeSelection.value = []
   },
@@ -2537,10 +2382,9 @@ watch(
 
 /** 定位当前文档：展开祖先 + 滚动到行（全部收起后找回自己在哪） */
 function revealActive(): void {
-  const tab = activeTab.value
   const relPath = activeRef.value?.relPath
-  if (!tab || !relPath) return
-  revealInTree(tab.id, relPath)
+  if (!relPath) return
+  revealInTree(relPath)
   revealTick.value += 1
 }
 
@@ -2552,9 +2396,7 @@ function expandChecked(): void {
 
 /** 全部收起：顶层行保留，其余折叠（配合「定位当前文档」随时找回） */
 function collapseAll(): void {
-  const tab = activeTab.value
-  if (!tab) return
-  tabs.setExpanded(tab.id, [])
+  store.collapseTree()
 }
 
 /** 当前工作区的目录树排序方式（缺省 manual，与主进程口径一致） */
@@ -2743,46 +2585,15 @@ async function onDrop(event: DragEvent): Promise<void> {
 /* ---------- 命令 ---------- */
 
 function registerCommands(): void {
-  /**
-   * 容器版不可用的命令 id。
-   *
-   * 这些动作全部依赖本地磁盘 / git / 本地服务进程，在读者面按了只会拿到
-   * E_FORBIDDEN。不是「先隐藏再说」——命令面板是入口，留下一条必然失败的
-   * 命令会让用户以为容器坏了。
-   */
-  const webHidden = new Set([
-    'file.open',
-    'workspace.add',
-    'workspace.clone',
-    'workspace.pull',
-    'workspace.switchBranch',
-    'doc.editLive',
-    'doc.editSource',
-    'doc.split',
-    'doc.save',
-    'doc.share',
-    'doc.exportMarkdown',
-    'doc.exportHtml',
-    'doc.exportPdf',
-    'app.service',
-    'tab.copyPath',
-  ])
-
-  /**
-   * 只在容器读者面出现的命令 id。
-   *
-   * 平台运维页、MCP 端点、本地 Markdown 预览都是部署器侧的入口，桌面端没有
-   * 对应物——反过来隐藏，桌面版不该出现点了没反应的入口。
-   */
-  const webOnly = new Set(['app.ops', 'app.mcpCopy', 'app.localPreview'])
   const list = [
     {
-      id: 'library.open',
-      title: t('app.library'),
-      keywords: 'library home 首页',
+      // 没有文档库首屏了：这条改成「回到当前工作区的落地页」（VSCode 的 Ctrl+1 语义）
+      id: 'workspace.home',
+      title: t('cmd.workspaceHome'),
+      keywords: 'home landing 首页 落地页',
       group: t('group.general'),
       hint: `${MOD_LABEL}+1`,
-      run: () => goLibrary(),
+      run: () => openWorkspaceHome(),
     },
     {
       id: 'file.open',
@@ -2798,33 +2609,6 @@ function registerCommands(): void {
       keywords: 'workspace folder 工作区 目录 文件夹',
       group: t('group.general'),
       run: () => addWorkspace(),
-    },
-    {
-      id: 'workspace.clone',
-      title: t('cmd.cloneRepo'),
-      keywords: 'git clone repo clone 克隆 仓库',
-      group: t('group.general'),
-      run: () => openClone(),
-    },
-    {
-      id: 'workspace.pull',
-      title: t('cmd.pullWorkspace'),
-      keywords: 'git pull fetch sync 拉取 更新 同步',
-      group: t('group.general'),
-      run: () => {
-        const id = activeTab.value?.workspaceId ?? store.activeWorkspaceId
-        if (id) void pullWorkspace(id)
-      },
-    },
-    {
-      id: 'workspace.switchBranch',
-      title: t('cmd.switchBranch'),
-      keywords: 'git branch checkout 分支 切换',
-      group: t('group.general'),
-      run: () => {
-        const id = activeTab.value?.workspaceId ?? store.activeWorkspaceId
-        if (id) openBranchDialog(id)
-      },
     },
     {
       id: 'tab.close',
@@ -3034,21 +2818,18 @@ function registerCommands(): void {
       run: () => openSettings('service'),
     },
     {
-      // 容器读者面：平台级运维页在站点根下，与壳同源；开新窗口不打断阅读
-      id: 'app.ops',
-      title: t('portal.ops'),
-      keywords: 'ops admin deploy 运维 管理 仓库',
-      group: t('group.general'),
-      run: () => window.open('/_/admin', '_blank', 'noopener'),
-    },
-    {
       id: 'app.mcpCopy',
       title: t('portal.mcpTitle'),
       keywords: 'mcp ai client 接入 复制 地址',
       group: t('group.general'),
+      // 端点由本地服务给出（含端口与 /mcp 路径）；服务没起来时提示去设置页，不复制半截地址
       run: async () => {
+        if (!service.endpoint) {
+          openSettings('service')
+          return
+        }
         try {
-          await navigator.clipboard.writeText(`${location.origin}/mcp`)
+          await navigator.clipboard.writeText(service.endpoint)
           store.setError(t('portal.mcpCopied'))
         } catch {
           store.setError(t('error.clipboard'))
@@ -3056,15 +2837,12 @@ function registerCommands(): void {
       },
     },
     {
-      // 本地预览的装载入口在文档库卡片上；命令面板给一条等价入口，方便键盘操作
+      // 单文件打开（不进工作区）：与 Ctrl+O 同一条路径
       id: 'app.localPreview',
       title: t('portal.localTitle'),
       keywords: 'local preview markdown 本地 预览 拖入',
       group: t('group.general'),
-      run: () => {
-        goLibrary()
-        nextTick(() => pickLocalFiles())
-      },
+      run: () => openFileDialog(),
     },
     {
       id: 'doc.find',
@@ -3085,8 +2863,6 @@ function registerCommands(): void {
     },
   ]
   for (const command of list) {
-    if (isWebHost && webHidden.has(command.id)) continue
-    if (!isWebHost && webOnly.has(command.id)) continue
     unregisters.push(register(command))
   }
   syncThemeCommands()
@@ -3122,28 +2898,6 @@ watch(themeOptions, syncThemeCommands)
 watch(locale, syncThemeCommands)
 
 /* ---------- 导出 ---------- */
-
-/**
- * 导出构建期注册表：与阅读视图同一套构造规则。
- *
- * 不复用 ReaderView 里那份实例——它随标签重建、且只包含当前文档相关的状态；
- * 导出需要的是一个干净的注册表。构造开销很小（只是 Map 填充）。
- */
-function exportRegistry(): ComponentRegistry {
-  const registry = new ComponentRegistry()
-  const disabled = new Set(
-    plugins.records.filter(record => !record.enabled || record.error).map(record => record.name),
-  )
-  for (const item of BUILTIN_KINDS) {
-    if (disabled.has(item.plugin)) continue
-    registry.register(item.kind, item.component, {
-      title: item.title,
-      description: item.description,
-      packageName: item.plugin,
-    })
-  }
-  return registry
-}
 
 /**
  * 导出当前文档。
@@ -3186,12 +2940,6 @@ async function exportDoc(format: ExportFormat): Promise<void> {
       // PDF 抹掉整页底色，纸张颜色交给阅读器（深色阅读器看到深色）；
       // HTML 必须有底色，独立文件没有可继承的背景
       transparentPage: format === 'pdf',
-      registry: exportRegistry(),
-      containerSyntax: plugins.syntax.map(item => ({
-        name: item.name,
-        component: item.component,
-        form: item.form,
-      })),
       title,
       locale: locale.value,
     })
@@ -3273,7 +3021,7 @@ function toggleEditorWrap(): void {
   theme.editorWrap = theme.editorWrap === 'wrap' ? 'nowrap' : 'wrap'
 }
 
-/** 插件启停代数：变化时强制重建 ReaderView，让组件注册表按新状态重建 */
+/** 插件启停代数：变化时强制重建 ReaderView（主题等插件贡献要重新装配） */
 const pluginEpoch = ref(0)
 
 watch(
@@ -3335,6 +3083,19 @@ function isMod(event: KeyboardEvent): boolean {
   return event.ctrlKey || event.metaKey
 }
 
+/**
+ * 事件是否发生在 CodeMirror 编辑器内部。
+ *
+ * ⚠️ 不能写成 `(event.target as HTMLElement)?.closest(...)`：`KeyboardEvent.target`
+ * 的类型是 `EventTarget | null`，不保证是 Element——事件若在 `document` /
+ * `window` 上派发（程序化触发、测试探针、某些 IME 路径），target 就是 Document，
+ * 没有 `.closest`，整个全局快捷键处理器会抛 TypeError 并吞掉这一次按键。
+ */
+function isInEditor(event: KeyboardEvent): boolean {
+  const target = event.target
+  return target instanceof Element && target.closest('.cm-editor') !== null
+}
+
 function onKeydown(event: KeyboardEvent): void {
   // Ctrl+Tab / Ctrl+Shift+Tab：浮层切换（按住期间循环，松手落地）
   if (event.ctrlKey && event.key === 'Tab') {
@@ -3363,7 +3124,7 @@ function onKeydown(event: KeyboardEvent): void {
 
   if (isMod(event) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'b') {
     // 编辑器内的 Ctrl+B 是加粗，不能被面板开关抢走
-    if ((event.target as HTMLElement | null)?.closest('.cm-editor')) return
+    if (isInEditor(event)) return
     event.preventDefault()
     if (treeAvailable.value) showTree.value = !showTree.value
     return
@@ -3443,16 +3204,14 @@ function onKeydown(event: KeyboardEvent): void {
   }
   if (isMod(event) && event.key.toLowerCase() === 's') {
     if (!editing.value) return
-    const target = event.target as HTMLElement | null
-    if (target?.closest('.cm-editor')) return
+    // 编辑器内由 CM 自己的 keymap 处理（见 packages/editor 的 Mod-s 绑定）
+    if (isInEditor(event)) return
     event.preventDefault()
     void editorRef.value?.save()
     return
   }
   if (isMod(event) && event.key.toLowerCase() === 'w') {
     if (!tabs.activeId) return
-    const tab = tabs.tabs.find(item => item.id === tabs.activeId)
-    if (tab?.kind === 'library') return
     event.preventDefault()
     void closeTab(tabs.activeId)
   }
@@ -3520,13 +3279,7 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
       @toggle-outline="showOutline = !showOutline"
     />
 
-    <!--
-      组件预览是独立视图：不挂标签栏。它不属于任何标签（从运维页跳进来、看完
-      就回），把整条标签栏摆在上面会让读者以为这是「又一个文档标签」，还会
-      顶掉本来就有的标签高亮。
-    -->
     <TabBar
-      v-if="view !== 'preview'"
       ref="tabBarRef"
       :tabs="tabs.tabs"
       :active-id="tabs.activeId"
@@ -3535,6 +3288,7 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
       :overflow-x="tabs.preferences.overflowX"
       :dirty="dirty"
       @activate="activateTab"
+      @pin="tabs.pin"
       @close="closeTab"
       @command="onTabCommand"
       @switcher="openSwitcher"
@@ -3543,150 +3297,186 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
 
     <div class="shell__body">
       <aside v-if="showSidebar" class="sidebar">
-        <GitBar
-          v-if="activeWorkspaceGit && !isWebHost"
-          :git="activeWorkspaceGit"
-          :busy="pullBusy === activeTab?.workspaceId"
-          @switch-branch="openBranchDialog(activeTab?.workspaceId ?? '')"
-          @pull="pullWorkspace(activeTab?.workspaceId ?? '')"
-        />
         <!--
-          容器读者面：分支选择器放在侧栏顶部。
-          读者翻到一半想换个分支对照着看，不该被赶回首页——这里与文档库卡片
-          上是同一个组件、同一份数据。
+          工作区切换器（ADR-0008）：左栏固定只显示**一个**工作区，这里换的是树，
+          不是标签。多工作区的标签共存，标签属于哪个工作区与左栏显示谁无关。
         -->
-        <div v-if="isWebHost && activePortalWorkspace" class="sidebar__branch">
-          <BranchPicker
-            :workspace="activePortalWorkspace"
-            :current="readBranch()"
-            @select="selectBranch({ slug: activeTab?.workspaceId ?? '', branch: $event })"
+        <div class="sidebar__ws" :class="{ 'is-open': workspaceMenuOpen }">
+          <button
+            ref="workspaceMenuAnchor"
+            class="sidebar__ws-btn"
+            type="button"
+            :aria-expanded="workspaceMenuOpen"
+            aria-haspopup="menu"
+            :title="currentWorkspaceName || t('ws.empty')"
+            @click="toggleWorkspaceMenu"
+          >
+            <FolderOpen :size="13" :stroke-width="1.8" aria-hidden="true" />
+            <span class="sidebar__ws-name">{{ currentWorkspaceName || t('ws.empty') }}</span>
+            <ChevronDown :size="13" :stroke-width="1.8" aria-hidden="true" />
+          </button>
+          <ContextMenu
+            :open="workspaceMenuOpen"
+            :x="workspaceMenuAnchor?.getBoundingClientRect().left ?? 0"
+            :y="(workspaceMenuAnchor?.getBoundingClientRect().bottom ?? 0) + 4"
+            :items="workspaceMenuItems"
+            @close="workspaceMenuOpen = false"
+            @select="onWorkspaceMenuSelect"
           />
         </div>
         <!--
-          新建入口只有右键菜单（目标跟随右键节点）；空工作区没有节点可右键，
-          由树内空状态里的按钮兜底。定位 / 展开所选 / 全部收起在 DocTree 头部。
+          当前工作区的文档层。新建入口只有右键菜单（目标跟随右键节点）；空工作区
+          没有节点可右键，由树内空状态里的按钮兜底。定位 / 展开所选 / 全部收起在
+          DocTree 头部。
         -->
-        <DocTree
-          :nodes="store.tree"
-          :selected-path="activeRef?.relPath ?? null"
-          :expanded="activeTab?.expanded ?? []"
-          :checked-paths="treeSelection"
-          :reveal-signal="revealTick"
-          :scope-label="activeScopeLabel"
-          :can-paste="clipboard !== null"
-          :readonly="isReadOnlyHost"
-          @open="openDoc"
-          @open-new-tab="openDocNewTab"
-          @update-expanded="tabs.setExpanded(activeTab?.id ?? '', $event)"
-          @select="treeSelection = $event"
-          @move-requests="onTreeMove"
-          @fs-action="onTreeFsAction"
-        >
-          <template #tools>
-            <!--
-              排序切换放在定位按钮之前：它改的是「整棵树的呈现顺序」，
-              优先级高于下面三个「在树里找位置」的动作。
-            -->
-            <!--
-              排序：点开一个带勾选态的面板，而不是「点一下翻转」。
-              翻转在只有两个选项时勉强够用，但用户看不出当前是哪一种。
-              图标反映当前方式，作为面板之外的辅助提示。
-            -->
-            <button
-              ref="treeSortButton"
-              v-tooltip="t('tree.sort')"
-              class="tree-tools__btn"
-              :class="{ 'is-on': treeSortMode === 'mtime' }"
-              type="button"
-              :aria-label="t('tree.sort')"
-              :aria-haspopup="true"
-              :aria-expanded="treeSortMenu.open"
-              @click="toggleTreeSortMenu"
-            >
-              <ClockArrowDown v-if="treeSortMode === 'mtime'" :size="13" :stroke-width="1.8" />
-              <ListOrdered v-else :size="13" :stroke-width="1.8" />
-            </button>
-            <button
-              v-tooltip="t('tree.reveal')"
-              class="tree-tools__btn"
-              type="button"
-              :disabled="!activeRef?.relPath"
-              :aria-label="t('tree.reveal')"
-              @click="revealActive"
-            >
-              <LocateFixed :size="13" :stroke-width="1.8" />
-            </button>
-            <button
-              v-if="!isReadOnlyHost"
-              v-tooltip="t('tree.expandChecked')"
-              class="tree-tools__btn"
-              type="button"
-              :disabled="!treeSelection.length"
-              :aria-label="t('tree.expandChecked')"
-              @click="expandChecked"
-            >
-              <ChevronsDown :size="13" :stroke-width="1.8" />
-            </button>
-            <button
-              v-tooltip="t('tree.collapseAll')"
-              class="tree-tools__btn"
-              type="button"
-              :disabled="!activeTab?.expanded.length"
-              :aria-label="t('tree.collapseAll')"
-              @click="collapseAll"
-            >
-              <ChevronsDownUp :size="13" :stroke-width="1.8" />
-            </button>
-          </template>
-          <template #empty>
-            {{ t('empty.tree') }}
-            <button
-              v-if="activeTab?.workspaceId && !isReadOnlyHost"
-              class="sidebar__empty-btn"
-              type="button"
-              @click="newEntry('file')"
-            >
-              <FilePlus2 :size="13" :stroke-width="1.8" />
-              {{ t('tree.newFile') }}
-            </button>
-          </template>
-        </DocTree>
+        <div v-if="store.activeWorkspaceId" class="sidebar__tree">
+          <DocTree
+            :nodes="store.tree"
+            :selected-path="activeRef?.relPath ?? null"
+            :expanded="store.currentExpanded"
+            :checked-paths="treeSelection"
+            :reveal-signal="revealTick"
+            :can-paste="clipboard !== null"
+            @open="openDoc"
+            @open-new-tab="openDocNewTab"
+            @update-expanded="onTreeExpandedChange"
+            @select="treeSelection = $event"
+            @move-requests="onTreeMove"
+            @fs-action="onTreeFsAction"
+          >
+            <template #tools>
+              <!--
+                排序切换放在定位按钮之前：它改的是「整棵树的呈现顺序」，
+                优先级高于下面三个「在树里找位置」的动作。
+              -->
+              <!--
+                排序：点开一个带勾选态的面板，而不是「点一下翻转」。
+                翻转在只有两个选项时勉强够用，但用户看不出当前是哪一种。
+                图标反映当前方式，作为面板之外的辅助提示。
+              -->
+              <button
+                ref="treeSortButton"
+                v-tooltip="t('tree.sort')"
+                class="tree-tools__btn"
+                :class="{ 'is-on': treeSortMode === 'mtime' }"
+                type="button"
+                :aria-label="t('tree.sort')"
+                :aria-haspopup="true"
+                :aria-expanded="treeSortMenu.open"
+                @click="toggleTreeSortMenu"
+              >
+                <ClockArrowDown v-if="treeSortMode === 'mtime'" :size="13" :stroke-width="1.8" />
+                <ListOrdered v-else :size="13" :stroke-width="1.8" />
+              </button>
+              <button
+                v-tooltip="t('tree.reveal')"
+                class="tree-tools__btn"
+                type="button"
+                :disabled="!activeRef?.relPath"
+                :aria-label="t('tree.reveal')"
+                @click="revealActive"
+              >
+                <LocateFixed :size="13" :stroke-width="1.8" />
+              </button>
+              <button
+                v-if="true"
+                v-tooltip="t('tree.expandChecked')"
+                class="tree-tools__btn"
+                type="button"
+                :disabled="!treeSelection.length"
+                :aria-label="t('tree.expandChecked')"
+                @click="expandChecked"
+              >
+                <ChevronsDown :size="13" :stroke-width="1.8" />
+              </button>
+              <button
+                v-tooltip="t('tree.collapseAll')"
+                class="tree-tools__btn"
+                type="button"
+                :disabled="!store.currentExpanded.length"
+                :aria-label="t('tree.collapseAll')"
+                @click="collapseAll"
+              >
+                <ChevronsDownUp :size="13" :stroke-width="1.8" />
+              </button>
+            </template>
+            <template #empty>
+              {{ t('empty.tree') }}
+              <button
+                v-if="store.activeWorkspaceId"
+                class="sidebar__empty-btn"
+                type="button"
+                @click="newEntry('file')"
+              >
+                <FilePlus2 :size="13" :stroke-width="1.8" />
+                {{ t('tree.newFile') }}
+              </button>
+            </template>
+          </DocTree>
+        </div>
+
+        <!--
+          最近打开：**跨工作区的文件集合**，所以放在底部独立区块，不与工作区并列
+          （并列会让人以为它也是个根）。默认收起——它是辅助入口，主战场是上面的树。
+        -->
+        <div v-if="store.recent.length" class="sidebar__recent">
+          <button
+            class="sidebar__recent-head"
+            type="button"
+            :aria-expanded="recentOpen"
+            @click="recentOpen = !recentOpen"
+          >
+            <ChevronRight
+              :size="12"
+              :stroke-width="2"
+              class="sidebar__recent-caret"
+              :class="{ 'is-open': recentOpen }"
+              aria-hidden="true"
+            />
+            <span>{{ t('ws.recent') }}</span>
+          </button>
+          <ul v-if="recentOpen" class="sidebar__recent-list">
+            <li v-for="entry in store.recent.slice(0, 12)" :key="entry.path">
+              <button
+                class="sidebar__recent-item"
+                type="button"
+                :title="entry.path"
+                @click="openRecent(entry)"
+              >
+                {{ entry.title || entry.path.split(/[/\\]/).pop() }}
+              </button>
+            </li>
+          </ul>
+        </div>
       </aside>
 
       <main class="canvas">
-        <PreviewPage
-          v-if="view === 'preview' && previewRoute"
-          :plugin="previewRoute.plugin"
-          :kind="previewRoute.kind"
-        />
-        <LibraryView
-          v-else-if="view === 'library'"
-          ref="libraryRef"
-          :workspaces="store.workspaces"
-          :active-id="store.activeWorkspaceId"
-          :recent="store.recent"
-          :readonly="isReadOnlyHost"
-          :loading="store.loading"
-          :branch-of="readBranch"
-          @add="addWorkspace"
-          @clone="openClone"
-          @open="openWorkspaceTab"
-          @remove="removeWorkspace"
-          @switch-branch="openBranchDialog"
-          @pull="pullWorkspace"
-          @share="shareWorkspace"
-          @open-file="openFileDialog"
-          @open-recent="openRecent"
-          @clear-recent="store.clearRecent()"
-          @select-branch="selectBranch"
-          @local-preview="loadLocalPreview"
-          @copy-mcp="() => undefined"
-        />
-        <PluginsView v-else-if="view === 'plugins'" :readonly="isReadOnlyHost" />
+        <!--
+          没有工作区：唯一入口是「打开文件夹」。这里不列任何示例路径——
+          第一次打开应用时该看到的是明确的下一步，不是一张空卡片。
+        -->
+        <div
+          v-if="!store.workspaces.length && !store.loading"
+          class="canvas__empty canvas__empty--welcome"
+        >
+          <p class="canvas__empty-title">{{ t('empty.welcome.title') }}</p>
+          <p class="canvas__empty-hint">{{ t('empty.welcome.hint') }}</p>
+          <button class="canvas__empty-action" type="button" @click="addWorkspace">
+            <FolderOpen :size="14" :stroke-width="1.8" aria-hidden="true" />
+            {{ t('cmd.openFolder') }}
+          </button>
+          <button class="canvas__empty-link" type="button" @click="openFileDialog">
+            {{ t('cmd.openFile') }}
+          </button>
+        </div>
+        <!-- 有工作区但没有打开的标签：提示从左侧选一篇 -->
+        <div v-else-if="!activeTab" class="canvas__empty">
+          {{ t('empty.noTab') }}
+        </div>
+        <PluginsView v-else-if="view === 'plugins'" />
         <SettingsView
           v-else-if="view === 'settings'"
           :section="settingsSection"
-          :readonly="isReadOnlyHost"
           @open-section="settingsSection = $event"
         />
         <div v-else-if="activeTab?.kind === 'file' && !currentDoc" class="canvas__empty">
@@ -3702,7 +3492,7 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
           <div class="split__pane" :style="{ flexBasis: `${splitRatio * 100}%` }">
             <EditorView
               ref="editorRef"
-              :absolute-path="currentDoc.absolutePath"
+              :absolute-path="currentDoc?.absolutePath ?? ''"
               mode="source"
               :doc-theme="theme.theme"
               :wrap="theme.editorWrap === 'wrap'"
@@ -3745,7 +3535,7 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
         </div>
         <ReaderView
           v-else-if="!editing"
-          :key="`${pluginEpoch}-${activeTab?.id ?? ''}`"
+          :key="pluginEpoch"
           ref="readerRef"
           :doc="currentDoc"
           :doc-theme="theme.theme"
@@ -3761,13 +3551,14 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
           @copy-share-link="copySharedLink"
           @export="exportDoc"
           @navigate="onContentNavigate"
+          @content-ready="onContentReady"
           @rendered="onRendered"
           @scrolled="onReaderScrolled"
         />
         <EditorView
           v-else-if="currentDoc"
           ref="editorRef"
-          :absolute-path="currentDoc.absolutePath"
+          :absolute-path="currentDoc?.absolutePath ?? ''"
           :mode="docMode === 'source' ? 'source' : 'live'"
           :doc-theme="theme.theme"
           :wrap="theme.editorWrap === 'wrap'"
@@ -3797,7 +3588,6 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
       :service-port="service.state?.port ?? null"
       :content-width="theme.contentWidth"
       :editor-wrap="theme.editorWrap"
-      :readonly="isReadOnlyHost"
       :reloading="reloading"
       @select-theme="theme.setTheme($event)"
       @set-mode="setDocMode"
@@ -3809,7 +3599,7 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
 
     <CommandPalette
       :open="paletteOpen"
-      :active-workspace-id="activeTab?.workspaceId ?? store.activeWorkspaceId"
+      :active-workspace-id="store.activeWorkspaceId"
       :workspace-names="workspaceNames"
       @close="paletteOpen = false"
       @open-doc="openDoc"
@@ -3862,20 +3652,6 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
       @choose="pickCandidate"
       @keep="keepPickedRoot"
       @close="candidateState = { open: false, root: '', candidates: [] }"
-    />
-
-    <CloneRepoDialog
-      :open="cloneOpen"
-      :git="store.gitState"
-      @done="onCloned"
-      @close="cloneOpen = false"
-    />
-
-    <BranchDialog
-      :open="!!branchWorkspace"
-      :workspace="branchWorkspace"
-      @switched="onBranchSwitched"
-      @close="branchWorkspace = null"
     />
 
     <!--
@@ -3965,10 +3741,72 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
   flex: none;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  min-height: 0;
   background: var(--dv-ui-surface-1);
   border-right: 1px solid var(--dv-ui-line-soft);
+}
+
+/*
+ * 工作区切换器（ADR-0008）：左栏固定只显示一个工作区，这里是它唯一的「身份」。
+ *
+ * 一条细线与下方树分隔：上面是「当前在哪个库」，下面是「库里有什么」。
+ * 没有这条线，切换器会被读成树的第一行。
+ */
+.sidebar__ws {
+  flex: none;
+  padding: 6px;
+  border-bottom: 1px solid var(--dv-ui-line-soft);
+}
+
+.sidebar__ws-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: none;
+  border-radius: var(--dv-ui-radius-sm);
+  background: transparent;
+  color: var(--dv-ui-text-2);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--dv-ui-dur-1) var(--dv-ui-ease),
+    color var(--dv-ui-dur-1) var(--dv-ui-ease);
+}
+
+.sidebar__ws-btn:hover,
+.sidebar__ws.is-open .sidebar__ws-btn {
+  background: var(--dv-ui-surface-2);
+  color: var(--dv-ui-text);
+}
+
+.sidebar__ws-btn svg {
+  flex: none;
+  color: var(--dv-ui-text-dim);
+}
+
+.sidebar__ws-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 树单独一层滚动：底部「最近打开」要是常驻的，不能跟着树一起被滚走 */
+.sidebar__tree {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* 树为空时的新建入口：空状态由 DocTree 的 #empty 插槽渲染，这里只给按钮样式 */
@@ -3994,12 +3832,75 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
   color: var(--dv-ui-text);
 }
 
-/* 容器读者面的分支条：贴在侧栏顶部，与目录树共用一条分隔线 */
-.sidebar__branch {
+/*
+ * 最近打开：**跨工作区的文件集合**，所以钉在侧栏底部，不与树并列
+ * （并列会让人以为它也是个根）。收起时只占一行标题。
+ */
+.sidebar__recent {
+  flex: none;
+  max-height: 40%;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--dv-ui-line-soft);
+}
+
+.sidebar__recent-head {
   display: flex;
   align-items: center;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--dv-ui-line-soft);
+  gap: 4px;
+  padding: 7px 12px 7px 8px;
+  border: none;
+  background: transparent;
+  color: var(--dv-ui-text-dim);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar__recent-head:hover {
+  color: var(--dv-ui-text);
+}
+
+.sidebar__recent-caret {
+  flex: none;
+  transition: transform var(--dv-ui-dur-1) var(--dv-ui-ease);
+}
+
+.sidebar__recent-caret.is-open {
+  transform: rotate(90deg);
+}
+
+.sidebar__recent-list {
+  margin: 0 0 6px;
+  padding: 0 6px;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sidebar__recent-item {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--dv-ui-radius-sm);
+  background: transparent;
+  color: var(--dv-ui-text-2);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sidebar__recent-item:hover {
+  background: var(--dv-ui-surface-2);
+  color: var(--dv-ui-text);
 }
 
 /*
@@ -4103,6 +4004,68 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
   place-items: center;
   font-size: 12.5px;
   color: var(--dv-ui-text-dim);
+}
+
+/* 一个工作区都没有时的首屏：给下一步，不给一堆说明 */
+.canvas__empty--welcome {
+  align-content: center;
+  gap: 12px;
+  text-align: center;
+  padding: 32px;
+}
+
+.canvas__empty-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dv-ui-text);
+}
+
+.canvas__empty-hint {
+  margin: 0;
+  max-width: 34ch;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--dv-ui-text-dim);
+}
+
+.canvas__empty-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 6px 14px;
+  border: 1px solid var(--dv-ui-line);
+  border-radius: var(--dv-ui-radius-sm);
+  background: var(--dv-ui-surface-2);
+  color: var(--dv-ui-text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    background var(--dv-ui-dur-1) var(--dv-ui-ease),
+    border-color var(--dv-ui-dur-1) var(--dv-ui-ease);
+}
+
+.canvas__empty-action:hover {
+  background: var(--dv-ui-surface-3);
+  border-color: var(--dv-ui-text-dim);
+}
+
+/* 次要入口：单文件不构成「库」，视觉上不能和打开文件夹抢同一档权重 */
+.canvas__empty-link {
+  border: none;
+  background: transparent;
+  color: var(--dv-ui-text-dim);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.canvas__empty-link:hover {
+  color: var(--dv-ui-text-2);
 }
 
 .toast {

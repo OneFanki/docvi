@@ -1,29 +1,28 @@
-import { defineStore } from 'pinia'
+/**
+ * 标签模型：**一个标签 = 一个工作现场**（ADR-0008）。
+ *
+ * 三种标签：
+ *  - `workspace`：某个工作区里的文档，带文档历史（Alt+←/→）；
+ *  - `file`：工作区之外的单文件（拖入 / 关联打开 / 最近打开）；
+ *  - `settings` / `plugins`：应用页面，单例。
+ *
+ * 1.0 起没有「文档库」标签——启动不再经过首屏，左栏是常驻的工作区导航。
+ *
+ * 树（目录展开态）**不属于标签**：它是工作区的属性，切标签时不该重排。
+ * 这条是 ADR-0008 的核心解耦，别把 `expanded` 加回 `TabRecord`。
+ */
 import { computed, ref, watch } from 'vue'
+import { defineStore } from 'pinia'
 
 import type { TabPreferences } from '@docvi/shared'
 
 /**
- * 标签页模型 v2：一个标签 = 一个独立工作现场。
- *
- * 三条与旧模型（全局扁平文档标签）的本质区别：
- *  1. 标签属于**工作区**（或单文件），标签内部的文档切换不会跨到别的工作区；
- *  2. 标签内部有自己的**文档历史**，所以「点两篇文档」是替换而不是堆标签，
- *     同时还能前后来回（Alt+←/→）；
- *  3. 文档库是钉住的首页标签，从它打开工作区 = 新建标签（点两次 = 两个标签，不去重）。
- *
- * 持久化到 `session.json`（不是 settings.json）：标签是窗口状态，不该进配置导出。
- */
-
-/**
  * 标签类型。
  *
- * library / workspace / file 是「文档现场」；settings / plugins 是**应用页面**。
- * 应用页面也走标签，而不是像旧版那样用一个独立视图状态：
- *  - 否则标签条会高亮着「文档库」而画布显示设置页，等于两处都说自己是对的；
- *  - 页面标签是**单例**（同一页面只会有一个），点第二次就激活它。
+ * workspace / file 是「文档现场」；settings / plugins 是**应用页面**。
+ * 应用页面也走标签：页面标签是**单例**（同一页面只会有一个），点第二次就激活它。
  */
-export type TabKind = 'library' | 'workspace' | 'file' | 'settings' | 'plugins'
+export type TabKind = 'workspace' | 'file' | 'settings' | 'plugins'
 
 /** 应用页面标签（不属于任何工作区、没有文档历史） */
 export type PageTabKind = 'settings' | 'plugins'
@@ -67,25 +66,35 @@ export interface DocRef {
 export interface TabRecord {
   id: string
   kind: TabKind
-  /** workspace 标签所属工作区；library / file / 应用页面 为 null */
+  /** workspace 标签所属工作区；file / 应用页面 为 null */
   workspaceId: string | null
   /** 显示用的作用域名：工作区名或文件名（应用页面用固定文案） */
   scopeLabel: string
-  /** 文档历史（library 与应用页面标签恒为空） */
+  /** 文档历史（应用页面标签恒为空） */
   history: DocRef[]
   /** 当前在历史的哪一项；-1 表示还没打开任何文档 */
   historyIndex: number
   /** file 标签的绝对路径（其余为 null） */
   absolutePath: string | null
-  /** 目录树展开状态（每个标签独立） */
-  expanded: string[]
-  /** 是否已按「顶层目录默认展开」播种过（用户手动折叠后不再重置） */
-  expandedSeeded: boolean
+  /**
+   * 预览标签（斜体标题）：单击文档时打开，下一次单击别的文档就**替换**它。
+   *
+   * 这是 VSCode 的「预览 → 固定」模型：单击只表示「我想看一眼」，
+   * 不该在标签条上堆积；双击（或编辑、拖动、手动固定）才升格为正式标签。
+   * 应用页面标签恒为 false。
+   */
+  preview: boolean
   createdAt: number
   lastActiveAt: number
 }
 
-export const TAB_SESSION_VERSION = 2
+/*
+ * 会话版本 3：v2 的标签里带 `expanded` / `expandedSeeded`（树挂在标签上），
+ * 且可能含 `library` 标签。两者都在 v3 被移除。旧版本会话直接丢弃标签列表
+ * （只保留能解析出的文档位置意义不大——用户重启后重新打开一两篇即可），
+ * 所以这里不做迁移，`restoreSession` 只认 v3。
+ */
+export const TAB_SESSION_VERSION = 3
 const LEGACY_KEY = 'docvi.tabs.v1'
 const MAX_HISTORY = 50
 
@@ -110,7 +119,6 @@ function currentDocOf(tab: TabRecord): DocRef | null {
 
 /** 标签标题需要的固定文案（由视图层按当前语言传入） */
 export interface TabLabels {
-  library: string
   settings: string
   plugins: string
 }
@@ -119,7 +127,7 @@ export interface TabLabels {
  * 标签标题。
  *
  * 标签上只显示**文档名**：标签是拿来扫读「我在看哪篇」的，前面再挂一段工作区名
- * （或更糟，工作区 id）会把真正要找的信息挤掉。工作区身份显示在标签内的树顶部。
+ * （或更糟，工作区 id）会把真正要找的信息挤掉。工作区身份由左栏的切换器承担。
  *
  * `scope` 仍然返回给 tooltip 与切换浮层用，但绝不参与主标题——尤其不能拿
  * workspaceId 当兜底文本：那串 12 位哈希曾原样出现在标签上。
@@ -128,9 +136,6 @@ export function tabTitleOf(
   tab: TabRecord,
   labels: TabLabels,
 ): { scope: string; doc: string | null; label: string } {
-  if (tab.kind === 'library') {
-    return { scope: labels.library, doc: null, label: labels.library }
-  }
   if (tab.kind === 'settings' || tab.kind === 'plugins') {
     const label = tab.kind === 'settings' ? labels.settings : labels.plugins
     return { scope: label, doc: null, label }
@@ -186,13 +191,8 @@ function normalizeTab(value: unknown): TabRecord | null {
   const raw = value as Record<string, unknown>
   if (typeof raw.id !== 'string') return null
   const kind = raw.kind
-  if (
-    kind !== 'library' &&
-    kind !== 'workspace' &&
-    kind !== 'file' &&
-    kind !== 'settings' &&
-    kind !== 'plugins'
-  ) {
+  // v2 会话里的 `library` 落到这里，一律丢弃（1.0 不再有文档库标签）
+  if (kind !== 'workspace' && kind !== 'file' && kind !== 'settings' && kind !== 'plugins') {
     return null
   }
   const history = Array.isArray(raw.history)
@@ -210,10 +210,12 @@ function normalizeTab(value: unknown): TabRecord | null {
         ? -1
         : Math.min(Math.max(0, Number.isFinite(index) ? index : 0), history.length - 1),
     absolutePath: typeof raw.absolutePath === 'string' ? raw.absolutePath : null,
-    expanded: Array.isArray(raw.expanded)
-      ? raw.expanded.filter((item): item is string => typeof item === 'string')
-      : [],
-    expandedSeeded: raw.expandedSeeded === true,
+    /*
+     * 预览标签不跨重启存活：它是「临时看一眼」的语义，重启后还把上次的
+     * 临时页恢复成临时页，用户下一次单击就会把它顶掉，等于什么都没留住。
+     * 所以这里恒为 false，不读 `raw.preview`。
+     */
+    preview: false,
     createdAt: Number(raw.createdAt) || Date.now(),
     lastActiveAt: Number(raw.lastActiveAt) || Date.now(),
   }
@@ -222,26 +224,25 @@ function normalizeTab(value: unknown): TabRecord | null {
 /**
  * 恢复会话。
  *
- * v1（全局文档标签）→ v2 迁移：把每个 doc 标签转成一个 workspace 标签
- * （各自带一篇文档），这样升级后原来的阅读现场还在，只是变成了「每文档一标签」——
- * 这是旧模型语义下能还原的最大信息量。
+ * 只认当前版本：v2 及更早的会话带着已删除的 `expanded` / `library` 概念，
+ * 强行迁移只会把「模型已变」这件事藏起来。用户重启后重新打开一两篇即可，
+ * 而 `recent.json` 里的最近打开列表仍然完整。
  */
 function restoreSession(raw: unknown): Persisted | null {
   if (!raw || typeof raw !== 'object') return null
   const data = raw as Record<string, unknown>
-  if (Number(data.schemaVersion) === TAB_SESSION_VERSION && Array.isArray(data.tabs)) {
-    const tabs = data.tabs.map(normalizeTab).filter((item): item is TabRecord => item !== null)
-    if (!tabs.length) return null
-    const mru = Array.isArray(data.mru)
-      ? data.mru.filter((item): item is string => typeof item === 'string')
-      : []
-    const activeId =
-      typeof data.activeId === 'string' && tabs.some(tab => tab.id === data.activeId)
-        ? data.activeId
-        : (tabs[0]?.id ?? null)
-    return { schemaVersion: TAB_SESSION_VERSION, activeId, tabs, mru }
-  }
-  return null
+  if (Number(data.schemaVersion) !== TAB_SESSION_VERSION) return null
+  if (!Array.isArray(data.tabs)) return null
+  const tabs = data.tabs.map(normalizeTab).filter((item): item is TabRecord => item !== null)
+  if (!tabs.length) return null
+  const mru = Array.isArray(data.mru)
+    ? data.mru.filter((item): item is string => typeof item === 'string')
+    : []
+  const activeId =
+    typeof data.activeId === 'string' && tabs.some(tab => tab.id === data.activeId)
+      ? data.activeId
+      : (tabs[0]?.id ?? null)
+  return { schemaVersion: TAB_SESSION_VERSION, activeId, tabs, mru }
 }
 
 function migrateLegacy(): Persisted | null {
@@ -279,8 +280,7 @@ function migrateLegacy(): Persisted | null {
         history: [ref],
         historyIndex: 0,
         absolutePath: isFile ? ref.absolutePath : null,
-        expanded: [],
-        expandedSeeded: false,
+        preview: false,
         createdAt: Date.now(),
         lastActiveAt: Date.now(),
       })
@@ -333,9 +333,6 @@ export const useTabsStore = defineStore('tabs', () => {
     const tab = activeTab.value
     return tab ? currentDocOf(tab) : null
   })
-  /** 文档库标签：恒在首位 */
-  const libraryTab = computed(() => tabs.value.find(tab => tab.kind === 'library') ?? null)
-  const workspaceTabs = computed(() => tabs.value.filter(tab => tab.kind !== 'library'))
 
   function setDirtyCheck(check: (tab: TabRecord) => boolean): void {
     dirtyCheck = check
@@ -354,37 +351,7 @@ export const useTabsStore = defineStore('tabs', () => {
     if (!tab) return
     tab.lastActiveAt = Date.now()
     activeId.value = id
-    if (tab.kind !== 'library') touchMru(id)
-  }
-
-  /** 文档库标签：不存在则创建（启动调用一次），永远第一位 */
-  function ensureLibrary(label = '文档库'): TabRecord {
-    const existing = tabs.value.find(tab => tab.kind === 'library')
-    if (existing) {
-      if (existing.scopeLabel !== label) existing.scopeLabel = label
-      // 文档库必须在首位：从会话恢复的顺序可能被打乱
-      if (tabs.value[0]?.id !== existing.id) {
-        tabs.value = [existing, ...tabs.value.filter(tab => tab.id !== existing.id)]
-      }
-      if (!activeId.value) activeId.value = existing.id
-      return existing
-    }
-    const tab: TabRecord = {
-      id: newId(),
-      kind: 'library',
-      workspaceId: null,
-      scopeLabel: label,
-      history: [],
-      historyIndex: -1,
-      absolutePath: null,
-      expanded: [],
-      expandedSeeded: true,
-      createdAt: Date.now(),
-      lastActiveAt: Date.now(),
-    }
-    tabs.value = [tab, ...tabs.value]
-    if (!activeId.value) activeId.value = tab.id
-    return tab
+    touchMru(id)
   }
 
   /**
@@ -405,7 +372,7 @@ export const useTabsStore = defineStore('tabs', () => {
         rejected: `已达到标签页上限（${limit}），可在设置中调整`,
       }
     }
-    const candidates = tabs.value.filter(tab => tab.kind !== 'library' && !dirtyCheck(tab))
+    const candidates = tabs.value.filter(tab => !dirtyCheck(tab))
     if (!candidates.length) {
       return {
         allowed: false,
@@ -422,7 +389,7 @@ export const useTabsStore = defineStore('tabs', () => {
     tabs.value = tabs.value.filter(tab => tab.id !== victim.id)
     mru.value = mru.value.filter(item => item !== victim.id)
     if (activeId.value === victim.id) {
-      activeId.value = libraryTab.value?.id ?? tabs.value[0]?.id ?? null
+      activeId.value = mru.value.find(id => tabs.value.some(tab => tab.id === id)) ?? null
     }
     return { allowed: true, evicted: [victim.id] }
   }
@@ -451,8 +418,7 @@ export const useTabsStore = defineStore('tabs', () => {
       history: [],
       historyIndex: -1,
       absolutePath: null,
-      expanded: [],
-      expandedSeeded: true,
+      preview: false,
       createdAt: Date.now(),
       lastActiveAt: Date.now(),
     }
@@ -460,6 +426,81 @@ export const useTabsStore = defineStore('tabs', () => {
     activate(tab.id)
     return { tab, evicted: room.evicted }
   }
+
+  /**
+   * 打开一篇文档，按 VSCode 的「预览 / 固定」语义决定落在哪。
+   *
+   * 三种情况，顺序不能换：
+   *  1. 这篇已经在某个标签里 → 激活那个标签，不新建（VSCode 也是这样：
+   *     要同一文件开两份得走「在新标签页打开」）；
+   *  2. `pin` 为真（双击 / 编辑 / 显式固定）→ 新建固定标签；
+   *  3. 否则（单击）→ 复用**当前激活的预览标签**，没有就新建一个预览标签。
+   *
+   * 为什么第 3 步要复用：不复用的话连点十篇就是十个标签，跟固定标签没区别，
+   * 预览语义白设计。复用后标签条上最多只有一个斜体标签在跳。
+   */
+  function openDoc(
+    workspace: { id: string; name: string },
+    ref: DocRef,
+    options: { pin?: boolean } = {},
+  ): OpenResult {
+    const existing = tabs.value.find(
+      tab =>
+        (tab.kind === 'workspace' || tab.kind === 'file') && currentDocOf(tab)?.key === ref.key,
+    )
+    if (existing) {
+      // 已打开的文档再点一次：只激活。若这次是双击，顺手升格为固定。
+      if (options.pin && existing.preview) existing.preview = false
+      activate(existing.id)
+      return { tab: existing, evicted: [] }
+    }
+
+    const room = makeRoom()
+    if (!room.allowed) return { tab: null, rejected: room.rejected, evicted: room.evicted }
+
+    if (!options.pin) {
+      // 复用激活中的预览标签：同一个标签换内容，标签条不增长
+      const reusable = tabs.value.find(tab => tab.preview && tab.id === activeId.value)
+      if (reusable && reusable.workspaceId === workspace.id) {
+        reusable.history = [ref]
+        reusable.historyIndex = 0
+        reusable.scopeLabel = workspace.name
+        activate(reusable.id)
+        return { tab: reusable, evicted: room.evicted }
+      }
+    }
+
+    const tab: TabRecord = {
+      id: newId(),
+      kind: 'workspace',
+      workspaceId: workspace.id,
+      scopeLabel: workspace.name,
+      history: [ref],
+      historyIndex: 0,
+      absolutePath: null,
+      preview: !options.pin,
+      createdAt: Date.now(),
+      lastActiveAt: Date.now(),
+    }
+    tabs.value = [...tabs.value, tab]
+    activate(tab.id)
+    return { tab, evicted: room.evicted }
+  }
+
+  /**
+   * 把预览标签升格为固定标签。
+   *
+   * 用户开始编辑、拖动标签或显式「固定」时调用；返回是否真的改了状态。
+   */
+  function pin(id: string): boolean {
+    const tab = tabs.value.find(item => item.id === id)
+    if (!tab || !tab.preview) return false
+    tab.preview = false
+    return true
+  }
+
+  /** 当前预览标签（标签条据此把标题画成斜体） */
+  const previewTab = computed(() => tabs.value.find(tab => tab.preview) ?? null)
 
   /** 新开 workspace 标签（不去重：同一工作区点两次就是两个标签） */
   function openWorkspace(workspace: { id: string; name: string }): OpenResult {
@@ -473,8 +514,7 @@ export const useTabsStore = defineStore('tabs', () => {
       history: [],
       historyIndex: -1,
       absolutePath: null,
-      expanded: [],
-      expandedSeeded: false,
+      preview: false,
       createdAt: Date.now(),
       lastActiveAt: Date.now(),
     }
@@ -505,8 +545,7 @@ export const useTabsStore = defineStore('tabs', () => {
       history: [ref],
       historyIndex: 0,
       absolutePath: input.absolutePath,
-      expanded: [],
-      expandedSeeded: false,
+      preview: false,
       createdAt: Date.now(),
       lastActiveAt: Date.now(),
     }
@@ -542,13 +581,6 @@ export const useTabsStore = defineStore('tabs', () => {
     return currentDocOf(tab)
   }
 
-  function canStep(tabId: string, delta: number): boolean {
-    const tab = tabs.value.find(item => item.id === tabId)
-    if (!tab) return false
-    const next = tab.historyIndex + delta
-    return next >= 0 && next < tab.history.length
-  }
-
   /**
    * 回写某篇的阅读位置。
    *
@@ -576,35 +608,6 @@ export const useTabsStore = defineStore('tabs', () => {
     if (ref && title && ref.title !== title) ref.title = title
   }
 
-  /**
-   * 首次装载某个工作区标签的树时，把顶层目录展开。
-   *
-   * 为什么放在 App 而不是 store：store 不知道树的结构。用 expandedSeeded
-   * 区分「还没播种」和「用户主动全折叠」，否则用户每次切回来都会被打回展开态。
-   */
-  function seedExpanded(tabId: string, topLevel: string[]): void {
-    const tab = tabs.value.find(item => item.id === tabId)
-    if (!tab || tab.expandedSeeded) return
-    tab.expanded = topLevel
-    tab.expandedSeeded = true
-  }
-
-  function setExpanded(tabId: string, expanded: string[]): void {
-    const tab = tabs.value.find(item => item.id === tabId)
-    if (tab) tab.expanded = expanded
-  }
-
-  function setScopeLabel(tabId: string, label: string): void {
-    const tab = tabs.value.find(item => item.id === tabId)
-    if (tab && label) tab.scopeLabel = label
-  }
-
-  /**
-   * 用工作区注册表校正所有标签上的作用域名。
-   *
-   * 名字的真实来源永远是注册表；标签里存的只是快照，可能来自旧会话文件（空串）
-   * 或早期「用 id 兜底」的代码（12 位哈希）。启动装载后调一次即可全部对齐。
-   */
   function syncWorkspaceNames(names: Map<string, string>): void {
     for (const tab of tabs.value) {
       if (tab.kind !== 'workspace' || !tab.workspaceId) continue
@@ -614,125 +617,46 @@ export const useTabsStore = defineStore('tabs', () => {
     }
   }
 
-  /** 关闭：文档库不可关；关掉激活项后落到 MRU 里最近用过的 */
+  /** 关闭：关掉激活项后落到 MRU 里最近用过的 */
   function close(id: string): void {
     const index = tabs.value.findIndex(tab => tab.id === id)
     const tab = tabs.value[index]
-    if (!tab || tab.kind === 'library') return
+    if (!tab) return
     tabs.value = tabs.value.filter(item => item.id !== id)
     mru.value = mru.value.filter(item => item !== id)
     if (activeId.value !== id) return
     const recent = mru.value.find(item => tabs.value.some(candidate => candidate.id === item))
-    const neighbour = tabs.value[index] ?? tabs.value[index - 1] ?? libraryTab.value
+    const neighbour = tabs.value[index] ?? tabs.value[index - 1] ?? null
     activeId.value = recent ?? neighbour?.id ?? null
   }
 
-  function closeOthers(id: string): string[] {
-    const keep = tabs.value.filter(tab => tab.kind === 'library' || tab.id === id)
-    const removed = tabs.value
-      .filter(tab => !keep.some(item => item.id === tab.id))
-      .map(tab => tab.id)
-    tabs.value = keep
-    mru.value = mru.value.filter(item => keep.some(tab => tab.id === item))
-    activeId.value = id
-    return removed
-  }
-
-  /**
-   * 关闭全部标签页。
-   *
-   * 文档库是钉住的首页，不参与关闭——全关之后落回文档库，而不是留一个空白窗口。
-   * 有未保存修改的标签不在这里拦：调用方（App）已经在关闭前逐个确认过。
-   */
-  function closeAll(): string[] {
-    const removed = tabs.value.filter(tab => tab.kind !== 'library').map(tab => tab.id)
-    tabs.value = tabs.value.filter(tab => tab.kind === 'library')
-    mru.value = []
-    const library = libraryTab.value
-    if (library) {
-      activate(library.id)
-    } else {
-      activeId.value = null
-    }
-    return removed
-  }
-
-  /**
-   * 拖动排序：把 fromId 移到 toId 的位置。
-   *
-   * 文档库固定在首位，不参与排序——它是「永远在第一眼」的锚点，
-   * 允许它被拖走会让用户下次找不到回首页的路。`toId` 为 null 表示拖到末尾。
-   */
   function reorder(fromId: string, toId: string | null): void {
     const list = tabs.value
     const fromIndex = list.findIndex(tab => tab.id === fromId)
     const moving = list[fromIndex]
-    if (!moving || moving.kind === 'library') return
+    if (!moving) return
     const without = list.filter(tab => tab.id !== fromId)
     const toIndex = toId === null ? without.length : without.findIndex(tab => tab.id === toId)
     if (toIndex < 0) return
-    // 文档库恒在首位：落点最小为 1
-    const insertAt = Math.max(1, toIndex)
-    without.splice(insertAt, 0, moving)
+    without.splice(toIndex, 0, moving)
     tabs.value = without
   }
 
-  function closeRight(id: string): string[] {
-    const index = tabs.value.findIndex(tab => tab.id === id)
-    if (index < 0) return []
-    const removed: string[] = []
-    tabs.value = tabs.value.filter((tab, at) => {
-      if (at <= index || tab.kind === 'library') return true
-      removed.push(tab.id)
-      return false
-    })
-    mru.value = mru.value.filter(item => tabs.value.some(tab => tab.id === item))
-    if (activeId.value && removed.includes(activeId.value)) activeId.value = id
-    return removed
-  }
-
-  /** 工作区被移除：关掉它的所有标签 */
   function closeByWorkspace(workspaceId: string): string[] {
     const removed = tabs.value.filter(tab => tab.workspaceId === workspaceId).map(tab => tab.id)
     if (!removed.length) return []
     tabs.value = tabs.value.filter(tab => !removed.includes(tab.id))
     mru.value = mru.value.filter(item => !removed.includes(item))
     if (activeId.value && removed.includes(activeId.value)) {
-      activeId.value = libraryTab.value?.id ?? tabs.value[0]?.id ?? null
+      activeId.value = mru.value.find(id => tabs.value.some(tab => tab.id === id)) ?? null
     }
     return removed
   }
 
-  /**
-   * 工作区身份变了：把标签与历史里的引用原地换到新 id。
-   *
-   * 只有一个场景会走到这里——git 工作区切分支。切分支换了一棵工作树，工作区
-   * 的 id 与 root 都变了，但「用户正在看的是一篇叫 guide.md 的文档」这件事没变。
-   * 直接关标签再重开会把浏览现场丢掉；所以重写引用而不是重建标签。
-   */
-  function replaceWorkspace(oldId: string, next: { id: string; name: string; root: string }): void {
-    const root = next.root.replace(/[/\\]+$/, '')
-    const sep = root.includes('\\') ? '\\' : '/'
-    for (const tab of tabs.value) {
-      if (tab.workspaceId === oldId) {
-        tab.workspaceId = next.id
-        tab.scopeLabel = next.name
-      }
-      for (const ref of tab.history) {
-        if (ref.workspaceId !== oldId) continue
-        ref.workspaceId = next.id
-        ref.key = `workspace:${next.id}:${ref.relPath}`
-        if (ref.relPath) ref.absolutePath = `${root}${sep}${ref.relPath.replace(/[\\/]+/g, sep)}`
-      }
-    }
-  }
-
-  /** MRU 列表（不含文档库），供 Ctrl+Tab 浮层使用 */
+  /** MRU 顺序（Ctrl+Tab 浮层用） */
   const mruTabs = computed(() => {
     const byId = new Map(tabs.value.map(tab => [tab.id, tab]))
-    return mru.value
-      .map(id => byId.get(id))
-      .filter((tab): tab is TabRecord => tab !== undefined && tab.kind !== 'library')
+    return mru.value.map(id => byId.get(id)).filter((tab): tab is TabRecord => tab !== undefined)
   })
 
   /**
@@ -802,7 +726,7 @@ export const useTabsStore = defineStore('tabs', () => {
   /**
    * 文件被删除后，把标签历史里指向它的条目移除。
    *
-   * 当前停在被删文档上的标签，历史会被截断；已经空了就退回文档库，
+   * 当前停在被删文档上的标签，历史会被截断；已经空了就激活 MRU 里的下一个，
    * 而不是留下一个打开着「文件不存在」的标签。
    */
   function dropPath(workspaceId: string, relPath: string): void {
@@ -812,8 +736,9 @@ export const useTabsStore = defineStore('tabs', () => {
       tab.history = tab.history.filter(ref => ref.relPath !== relPath)
       if (tab.history.length === before) continue
       tab.historyIndex = Math.min(tab.historyIndex, tab.history.length - 1)
-      if (!tab.history.length && tab.kind !== 'library') {
-        activate(libraryTab.value?.id ?? tabs.value[0]?.id ?? '')
+      if (!tab.history.length) {
+        const next = mru.value.find(id => tabs.value.some(item => item.id === id && item !== tab))
+        if (next) activate(next)
       }
     }
   }
@@ -823,31 +748,23 @@ export const useTabsStore = defineStore('tabs', () => {
     activeId,
     activeTab,
     activeDoc,
-    libraryTab,
-    workspaceTabs,
     mruTabs,
     preferences,
-    ensureLibrary,
     openWorkspace,
+    openDoc,
+    pin,
+    previewTab,
     openPage,
     openFile,
     navigate,
     step,
-    canStep,
     setScroll,
     setDocTitle,
-    setExpanded,
-    seedExpanded,
-    setScopeLabel,
     syncWorkspaceNames,
     activate,
     close,
-    closeOthers,
-    closeRight,
-    closeAll,
     reorder,
     closeByWorkspace,
-    replaceWorkspace,
     replacePath,
     dropPath,
     setDirtyCheck,
