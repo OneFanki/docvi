@@ -23,6 +23,8 @@ const checks = [
   { name: '分享页读者侧验证', args: ['run', 'verify:share'] },
   // 公式排版只有在真实浏览器里才成立（MathML 尺寸为 0 是「有标签看不见」的唯一信号）
   { name: '数学公式渲染验证', args: ['run', 'verify:math'] },
+  // 布局几何：大纲掉到下方、工具条挤到左边这类问题只有坐标能发现
+  { name: 'UI 几何回归', args: ['run', 'verify:ui'] },
   { name: 'docvi 文案校验', args: ['run', 'docvi:i18n:check'] },
   { name: '文档校验', args: ['run', 'docs:check'] },
   { name: '技能治理校验', args: ['run', 'skills:check'] },

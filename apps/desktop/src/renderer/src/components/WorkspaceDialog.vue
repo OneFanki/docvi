@@ -101,6 +101,11 @@ function pick(id: string): void {
           </li>
         </ul>
 
+        <!--
+          底栏分两组：左边是「加东西进来」（开目录 / 开文件 / 分享），右边是「移出去」。
+          两组之间推开，坏操作永远落在最右——它不该跟正向动作混成一排。
+          不换行：换行时退出按钮会单独掉到第二行、靠右对齐，看起来像排版错了。
+        -->
         <div class="wsdialog__actions">
           <button class="wsaction" type="button" @click="emit('addFolder')">
             <FolderOpen :size="13" :stroke-width="1.8" aria-hidden="true" />
@@ -114,6 +119,7 @@ function pick(id: string): void {
             <Share2 :size="13" :stroke-width="1.8" aria-hidden="true" />
             {{ t('ws.shareDir') }}
           </button>
+          <span class="wsaction__spacer" />
           <button
             v-if="activeId && !workspaces.find(item => item.id === activeId)?.default"
             class="wsaction wsaction--danger"
@@ -256,11 +262,17 @@ function pick(id: string): void {
 .wsdialog__actions {
   flex: none;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  align-items: center;
+  gap: 2px;
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--dv-ui-line-soft);
+}
+
+/* 把「危险动作」推到最右：正向操作在左、移除在右，中间留白分开 */
+.wsaction__spacer {
+  flex: 1;
+  min-width: 8px;
 }
 
 .wsaction {
@@ -283,8 +295,8 @@ function pick(id: string): void {
   color: var(--dv-ui-text);
 }
 
+/* 危险动作在 spacer 右侧，不需要再自己推 margin */
 .wsaction--danger {
-  margin-left: auto;
   color: var(--dv-ui-text-muted);
 }
 

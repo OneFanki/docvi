@@ -91,7 +91,7 @@ const zh: Dict = {
 
   'cmd.openFile': '打开 Markdown 文件',
   'cmd.openFolder': '添加文档目录',
-  'cmd.workspaceHome': '回到工作区首页',
+  'cmd.switchWorkspace': '切换工作区',
 
   'workspace.candidates.title': '这个目录下有多个文档根',
   'workspace.candidates.hint':
@@ -497,7 +497,7 @@ const en: Dict = {
 
   'cmd.openFile': 'Open Markdown file',
   'cmd.openFolder': 'Add document folder',
-  'cmd.workspaceHome': 'Go to workspace home',
+  'cmd.switchWorkspace': 'Switch workspace',
 
   'workspace.candidates.title': 'Several document roots in this folder',
   'workspace.candidates.hint':

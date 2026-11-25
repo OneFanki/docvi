@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { FolderOpen } from 'lucide-vue-next'
 
 import type { TreeNode } from '@docvi/shared'
 import { useI18n } from '../lib/i18n'
@@ -30,8 +29,6 @@ const props = defineProps<{
   checkedPaths?: string[]
   /** 键盘焦点所在节点（path） */
   focusedPath?: string | null
-  /** 归属工作区名（显示在树顶部；空则不显示头部） */
-  scopeLabel?: string
   /** 是否有可粘贴的条目（剪贴板内容由 App 持有；这里只决定菜单项是否可用） */
   canPaste?: boolean
   /** 递增触发「滚动到当前文档行」（祖先展开由 App 先做完，这里只管滚） */
@@ -507,16 +504,12 @@ function onMenuSelect(id: string): void {
 
 <template>
   <!--
-    工作区标识放在树顶部，而不是窗口标题栏：标题栏在标签之上，放那里会被读成
-    「全局状态」；工作区是标签内的上下文，这一条属于本标签的浏览现场。
-    右侧工具区留给宿主放定位/展开/收起按钮（slot），与工作区名同行。
+    工具条（定位 / 展开所选 / 全部收起 / 排序）靠右，与 VSCode 的树头部一致。
+    工作区名不在这里：它已经显示在左栏顶部的切换器上，树里再放一遍是重复的，
+    而且会把工具条挤到左边（空出来的位置没有任何内容填补）。
   -->
-  <div v-if="scopeLabel || $slots.tools" class="tree__header">
-    <div v-if="scopeLabel" v-tooltip="scopeLabel" class="tree__scope">
-      <FolderOpen :size="13" :stroke-width="1.7" aria-hidden="true" />
-      <span class="tree__scope-name">{{ scopeLabel }}</span>
-    </div>
-    <div v-if="$slots.tools" class="tree__tools">
+  <div v-if="$slots.tools" class="tree__header">
+    <div class="tree__tools">
       <slot name="tools" />
     </div>
   </div>
@@ -526,7 +519,7 @@ function onMenuSelect(id: string): void {
     class="tree"
     :class="{ 'is-drop-root': dropTarget === '' }"
     role="tree"
-    :aria-label="scopeLabel || t('tree.label')"
+    :aria-label="t('tree.label')"
     :aria-activedescendant="activePath ? `tree-node-${activePath}` : undefined"
     @keydown="onKeydown"
     @focusin="onFocusIn"
@@ -578,34 +571,10 @@ function onMenuSelect(id: string): void {
 .tree__header {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px 8px 6px 12px;
+  /* 工具靠右：它们是「对整棵树的操作」，右对齐与标签条、正文的右边界对齐 */
+  justify-content: flex-end;
+  padding: 6px 8px 2px;
   min-width: 0;
-}
-
-.tree__scope {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--dv-ui-text-2);
-  user-select: none;
-}
-
-.tree__scope svg {
-  flex: none;
-  color: var(--dv-ui-text-dim);
-}
-
-.tree__scope-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .tree__tools {
@@ -621,7 +590,8 @@ function onMenuSelect(id: string): void {
    * 内容少时若只占几行，可右键的区域就只剩那几行，等于没实现。
    */
   min-height: 100%;
-  padding: 2px 6px 12px;
+  /* 上边距留给工具条：工具条与第一行之间不额外加空隙，视觉上是一组 */
+  padding: 0 6px 12px;
   user-select: none;
 }
 

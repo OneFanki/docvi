@@ -37,7 +37,8 @@
     "screenshots": "node scripts/capture-screenshots.mjs",
     "site:build": "node scripts/build-site.mjs --out site-build",
     "verify:share": "node scripts/verify-share.mjs",
-    "verify:math": "node scripts/verify-math.mjs"
+    "verify:math": "node scripts/verify-math.mjs",
+    "verify:ui": "node scripts/verify-ui.mjs"
   },
   "dependencies": {
     "markdown-it": "^15.0.2",

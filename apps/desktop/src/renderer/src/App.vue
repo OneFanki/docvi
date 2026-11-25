@@ -1101,10 +1101,16 @@ async function switchWorkspace(workspaceId: string): Promise<void> {
   await store.openWorkspace(workspaceId)
 }
 
-/** 工作区弹窗是否打开（左栏顶部切换器点开） */
+/** 工作区弹窗是否打开（左栏顶部切换器与 Ctrl+1 共用同一个入口） */
 const workspaceDialogOpen = ref(false)
 
-function toggleWorkspaceMenu(): void {
+/**
+ * 打开工作区弹窗。
+ *
+ * 切换器按钮与命令面板的 `workspace.switch` 走同一条路径——两处各写一遍
+ * `workspaceDialogOpen.value = true` 迟早会漂移。
+ */
+function openWorkspaceDialog(): void {
   workspaceDialogOpen.value = true
 }
 
@@ -1152,18 +1158,6 @@ function onWorkspaceDialogShare(): void {
 function onWorkspaceDialogRemove(): void {
   workspaceDialogOpen.value = false
   if (store.activeWorkspaceId) void removeWorkspace(store.activeWorkspaceId)
-}
-
-/**
- * 回到当前工作区的落地页（Ctrl+1）。
- *
- * 没有文档库首屏之后，这个键的语义变成「回到这个库的入口那篇」——
- * 与 VSCode 的 Ctrl+1 一致：跳回第一组，而不是跳回一个项目列表。
- */
-async function openWorkspaceHome(): Promise<void> {
-  if (!store.activeWorkspaceId) return
-  const landing = findLanding(store.tree)
-  if (landing) await openDoc(landing)
 }
 
 /**
@@ -2586,13 +2580,20 @@ async function onDrop(event: DragEvent): Promise<void> {
 function registerCommands(): void {
   const list = [
     {
-      // 没有文档库首屏了：这条改成「回到当前工作区的落地页」（VSCode 的 Ctrl+1 语义）
-      id: 'workspace.home',
-      title: t('cmd.workspaceHome'),
-      keywords: 'home landing 首页 落地页',
+      /*
+       * 「切换工作区」而不是「回到工作区首页」：
+       *
+       * 没有文档库首屏之后，「首页」只剩「当前工作区的落地页」这一种解释，
+       * 而那篇文档在树里点一下就到了——为它占一个带 `Ctrl+1` 的顶层命令很浪费。
+       * 反过来，「切换工作区」是这里唯一没有键盘通道的高频动作（以前要点左栏
+       * 顶部的按钮），把它挂上来才对得起这个位置。
+       */
+      id: 'workspace.switch',
+      title: t('cmd.switchWorkspace'),
+      keywords: 'workspace switch 工作区 切换 打开',
       group: t('group.general'),
       hint: `${MOD_LABEL}+1`,
-      run: () => openWorkspaceHome(),
+      run: () => openWorkspaceDialog(),
     },
     {
       id: 'file.open',
@@ -3143,6 +3144,13 @@ function onKeydown(event: KeyboardEvent): void {
     paletteOpen.value = !paletteOpen.value
     return
   }
+  if (isMod(event) && !event.shiftKey && event.key === '1') {
+    // 与命令面板的 workspace.switch 同一条路径：这里只负责把键接上
+    if (editing.value) return
+    event.preventDefault()
+    openWorkspaceDialog()
+    return
+  }
   if (isMod(event) && event.key === '/') {
     event.preventDefault()
     shortcutsOpen.value = true
@@ -3297,7 +3305,7 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
             :aria-expanded="workspaceDialogOpen"
             aria-haspopup="dialog"
             :title="currentWorkspaceName || t('ws.empty')"
-            @click="toggleWorkspaceMenu"
+            @click="openWorkspaceDialog"
           >
             <FolderOpen :size="13" :stroke-width="1.8" aria-hidden="true" />
             <span class="sidebar__ws-name">{{ currentWorkspaceName || t('ws.empty') }}</span>
@@ -3430,7 +3438,11 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
         </div>
       </aside>
 
-      <!-- 右侧区域：标签条 + 画布。标签条只横贯这里，不压过左侧目录树 -->
+      <!--
+        右侧区域：标签条在上，下面一行是「画布 + 本页目录」。
+        两层容器是必须的：外层纵向（标签条定高、内容行吃满剩余），
+        内层横向（画布伸缩、大纲定宽在右侧）。合成一层会让大纲掉到画布下方。
+      -->
       <div class="shell__main">
         <TabBar
           ref="tabBarRef"
@@ -3448,131 +3460,133 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
           @reorder="onTabReorder"
         />
 
-        <main class="canvas">
-          <!--
+        <div class="shell__content">
+          <main class="canvas">
+            <!--
           没有工作区：唯一入口是「打开文件夹」。这里不列任何示例路径——
           第一次打开应用时该看到的是明确的下一步，不是一张空卡片。
         -->
-          <div
-            v-if="!store.workspaces.length && !store.loading"
-            class="canvas__empty canvas__empty--welcome"
-          >
-            <p class="canvas__empty-title">{{ t('empty.welcome.title') }}</p>
-            <p class="canvas__empty-hint">{{ t('empty.welcome.hint') }}</p>
-            <button class="canvas__empty-action" type="button" @click="addWorkspace">
-              <FolderOpen :size="14" :stroke-width="1.8" aria-hidden="true" />
-              {{ t('cmd.openFolder') }}
-            </button>
-            <button class="canvas__empty-link" type="button" @click="openFileDialog">
-              {{ t('cmd.openFile') }}
-            </button>
-          </div>
-          <!-- 有工作区但没有打开的标签：提示从左侧选一篇 -->
-          <div v-else-if="!activeTab" class="canvas__empty">
-            {{ t('empty.noTab') }}
-          </div>
-          <PluginsView v-else-if="view === 'plugins'" />
-          <SettingsView
-            v-else-if="view === 'settings'"
-            :section="settingsSection"
-            @open-section="settingsSection = $event"
-          />
-          <div v-else-if="activeTab?.kind === 'file' && !currentDoc" class="canvas__empty">
-            {{ t('file.outsideHint') }}
-          </div>
-          <!--
+            <div
+              v-if="!store.workspaces.length && !store.loading"
+              class="canvas__empty canvas__empty--welcome"
+            >
+              <p class="canvas__empty-title">{{ t('empty.welcome.title') }}</p>
+              <p class="canvas__empty-hint">{{ t('empty.welcome.hint') }}</p>
+              <button class="canvas__empty-action" type="button" @click="addWorkspace">
+                <FolderOpen :size="14" :stroke-width="1.8" aria-hidden="true" />
+                {{ t('cmd.openFolder') }}
+              </button>
+              <button class="canvas__empty-link" type="button" @click="openFileDialog">
+                {{ t('cmd.openFile') }}
+              </button>
+            </div>
+            <!-- 有工作区但没有打开的标签：提示从左侧选一篇 -->
+            <div v-else-if="!activeTab" class="canvas__empty">
+              {{ t('empty.noTab') }}
+            </div>
+            <PluginsView v-else-if="view === 'plugins'" />
+            <SettingsView
+              v-else-if="view === 'settings'"
+              :section="settingsSection"
+              @open-section="settingsSection = $event"
+            />
+            <div v-else-if="activeTab?.kind === 'file' && !currentDoc" class="canvas__empty">
+              {{ t('file.outsideHint') }}
+            </div>
+            <!--
           分屏：左源码 + 右渲染。
           两块共用同一个文档缓冲区（documents store），所以左侧打字右侧立刻能看到
           语义结果；右侧只挂阅读视图，不挂 CM6——同一份文档开两个编辑器实例会让
           撤销栈与光标互相打架。
         -->
-          <div v-else-if="docMode === 'split' && currentDoc" class="split">
-            <div class="split__pane" :style="{ flexBasis: `${splitRatio * 100}%` }">
-              <EditorView
-                ref="editorRef"
-                :absolute-path="currentDoc?.absolutePath ?? ''"
-                mode="source"
-                :doc-theme="theme.theme"
-                :wrap="theme.editorWrap === 'wrap'"
-                :workspace-id="activeTab?.workspaceId ?? null"
-                :doc-path="docBasePath"
-                :initial-state="currentEditorState"
-                :restore-to-line="restoreAnchor"
-                @error="store.setError($event)"
-                @saved="onEditorSaved"
-                @scrolled="onEditorScrolled"
-                @state-snapshot="rememberEditorState"
-                @restored="consumeAnchor"
+            <div v-else-if="docMode === 'split' && currentDoc" class="split">
+              <div class="split__pane" :style="{ flexBasis: `${splitRatio * 100}%` }">
+                <EditorView
+                  ref="editorRef"
+                  :absolute-path="currentDoc?.absolutePath ?? ''"
+                  mode="source"
+                  :doc-theme="theme.theme"
+                  :wrap="theme.editorWrap === 'wrap'"
+                  :workspace-id="activeTab?.workspaceId ?? null"
+                  :doc-path="docBasePath"
+                  :initial-state="currentEditorState"
+                  :restore-to-line="restoreAnchor"
+                  @error="store.setError($event)"
+                  @saved="onEditorSaved"
+                  @scrolled="onEditorScrolled"
+                  @state-snapshot="rememberEditorState"
+                  @restored="consumeAnchor"
+                />
+              </div>
+              <div
+                class="split__divider"
+                role="separator"
+                aria-orientation="vertical"
+                :aria-valuenow="Math.round(splitRatio * 100)"
+                tabindex="0"
+                @pointerdown="startSplitDrag"
+                @keydown.left.prevent="splitRatio = Math.max(0.3, splitRatio - 0.05)"
+                @keydown.right.prevent="splitRatio = Math.min(0.7, splitRatio + 0.05)"
               />
+              <div class="split__pane split__pane--preview">
+                <ReaderView
+                  ref="viewerRef"
+                  :key="`split-${pluginEpoch}-${activeTab?.id ?? ''}`"
+                  :doc="splitDoc"
+                  :doc-theme="theme.theme"
+                  :link-prefix="docLinkPrefix"
+                  :asset-prefix="docAssetPrefix"
+                  source-lines
+                  @outline="outline = $event"
+                  @error="store.setError($event)"
+                  @export="exportDoc"
+                  @rendered="onSplitRendered"
+                />
+              </div>
             </div>
-            <div
-              class="split__divider"
-              role="separator"
-              aria-orientation="vertical"
-              :aria-valuenow="Math.round(splitRatio * 100)"
-              tabindex="0"
-              @pointerdown="startSplitDrag"
-              @keydown.left.prevent="splitRatio = Math.max(0.3, splitRatio - 0.05)"
-              @keydown.right.prevent="splitRatio = Math.min(0.7, splitRatio + 0.05)"
+            <ReaderView
+              v-else-if="!editing"
+              :key="pluginEpoch"
+              ref="readerRef"
+              :doc="currentDoc"
+              :doc-theme="theme.theme"
+              :show-tree-hint="activeTab?.kind === 'file'"
+              :link-prefix="docLinkPrefix"
+              :asset-prefix="docAssetPrefix"
+              :share="currentDocShare"
+              @outline="outline = $event"
+              @error="store.setError($event)"
+              @pick-file="openFileDialog"
+              @share="shareCurrentDoc"
+              @unshare="unshareCurrentDoc"
+              @copy-share-link="copySharedLink"
+              @export="exportDoc"
+              @navigate="onContentNavigate"
+              @content-ready="onContentReady"
+              @rendered="onRendered"
+              @scrolled="onReaderScrolled"
             />
-            <div class="split__pane split__pane--preview">
-              <ReaderView
-                ref="viewerRef"
-                :key="`split-${pluginEpoch}-${activeTab?.id ?? ''}`"
-                :doc="splitDoc"
-                :doc-theme="theme.theme"
-                :link-prefix="docLinkPrefix"
-                :asset-prefix="docAssetPrefix"
-                source-lines
-                @outline="outline = $event"
-                @error="store.setError($event)"
-                @export="exportDoc"
-                @rendered="onSplitRendered"
-              />
-            </div>
-          </div>
-          <ReaderView
-            v-else-if="!editing"
-            :key="pluginEpoch"
-            ref="readerRef"
-            :doc="currentDoc"
-            :doc-theme="theme.theme"
-            :show-tree-hint="activeTab?.kind === 'file'"
-            :link-prefix="docLinkPrefix"
-            :asset-prefix="docAssetPrefix"
-            :share="currentDocShare"
-            @outline="outline = $event"
-            @error="store.setError($event)"
-            @pick-file="openFileDialog"
-            @share="shareCurrentDoc"
-            @unshare="unshareCurrentDoc"
-            @copy-share-link="copySharedLink"
-            @export="exportDoc"
-            @navigate="onContentNavigate"
-            @content-ready="onContentReady"
-            @rendered="onRendered"
-            @scrolled="onReaderScrolled"
-          />
-          <EditorView
-            v-else-if="currentDoc"
-            ref="editorRef"
-            :absolute-path="currentDoc?.absolutePath ?? ''"
-            :mode="docMode === 'source' ? 'source' : 'live'"
-            :doc-theme="theme.theme"
-            :wrap="theme.editorWrap === 'wrap'"
-            :doc-path="docBasePath"
-            :asset-prefix="docAssetPrefix"
-            :workspace-id="activeTab?.workspaceId ?? null"
-            :initial-state="currentEditorState"
-            :restore-to-line="restoreAnchor"
-            @error="store.setError($event)"
-            @saved="onEditorSaved"
-            @state-snapshot="rememberEditorState"
-            @restored="consumeAnchor"
-          />
-        </main>
+            <EditorView
+              v-else-if="currentDoc"
+              ref="editorRef"
+              :absolute-path="currentDoc?.absolutePath ?? ''"
+              :mode="docMode === 'source' ? 'source' : 'live'"
+              :doc-theme="theme.theme"
+              :wrap="theme.editorWrap === 'wrap'"
+              :doc-path="docBasePath"
+              :asset-prefix="docAssetPrefix"
+              :workspace-id="activeTab?.workspaceId ?? null"
+              :initial-state="currentEditorState"
+              :restore-to-line="restoreAnchor"
+              @error="store.setError($event)"
+              @saved="onEditorSaved"
+              @state-snapshot="rememberEditorState"
+              @restored="consumeAnchor"
+            />
+          </main>
 
-        <OutlinePanel v-if="showOutlinePanel" :entries="outline" scroll-selector=".reader" />
+          <OutlinePanel v-if="showOutlinePanel" :entries="outline" scroll-selector=".reader" />
+        </div>
       </div>
     </div>
 
@@ -3762,6 +3776,18 @@ onBeforeUnmount(() => disposeUpdateAvailable?.())
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/*
+ * 标签条下面那一行：画布 + 本页目录。
+ *
+ * 必须与 `.shell__main` 分开成两层：外层定标签条高度、内层横排画布与大纲。
+ * 合成一层时 `flex-direction: column` 会把大纲排到画布下方——它会跑到窗口底部。
+ */
+.shell__content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 
 .sidebar {

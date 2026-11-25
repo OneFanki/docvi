@@ -39,6 +39,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: '通用',
     items: [
       { keys: ['Mod', 'K'], action: '命令面板（搜索文档 / 执行命令）' },
+      { keys: ['Mod', '1'], action: '切换工作区' },
       { keys: ['Mod', 'B'], action: '显示 / 隐藏目录树（编辑态为加粗）' },
       { keys: ['Mod', 'Alt', 'B'], action: '显示 / 隐藏本页目录' },
       { keys: ['Mod', 'Alt', 'W'], action: '正文宽度：铺满 / 收窄' },

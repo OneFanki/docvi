@@ -51,6 +51,10 @@
 - **点左栏顶部的工作区名改成居中弹窗**：列出所有工作区并标出当前这个，打开文件夹 / 打开文件 / 分享目录 / 移除都在里面。下拉框贴在按钮边上，工作区一多就被窗口边缘裁掉
 - **搜索默认只搜当前工作区**：输入框右边一个按钮可切「全部工作区」。只搜当前时不光结果更准，也不用在启动时替其它库读一遍整库正文；切到「全部」才开始建它们的索引
 - **搜到别的库的文档，打开后左栏跟着切过去**：人到了那篇文档，树也在那个库里，不会出现「正文是 B 的、左栏还是 A 的」
+- **`Ctrl+1` 改成切换工作区**：以前它跳到「工作区首页」，而那个入口在树里点一下就有；切换工作区反倒是唯一没有键盘通道的高频动作
+- **修好本页目录跑到窗口底部**：改成两行布局（标签条一行、画布与大目并排）后，大纲被排到了画布下方。现在它是右侧定宽的一列
+- **树的工具按钮靠右**：定位 / 展开所选 / 全部收起 / 排序这几个是「对整棵树的操作」，右对齐才与标签条、正文的边界一致；工作区名也不再在树里重复一遍（顶部切换器已经有了）
+- **工作区弹窗的底栏不再错行**：正向操作（开目录 / 开文件 / 分享）在左，移除单独靠右，一行放得下
 
 ### English
 
@@ -59,6 +63,10 @@
 - **Clicking the workspace name opens a centered dialog** instead of a dropdown: it lists every workspace with the current one marked, plus open folder / open file / share folder / remove. A dropdown anchored to the button gets clipped by the window edge once there are a few workspaces
 - **Search is scoped to the current workspace by default**: a button next to the input switches to all workspaces. Staying local is both more accurate and avoids reading every other library's full text at startup; their indexes are only built after you switch
 - **Opening a result from another workspace brings the sidebar along**: you land on the document with the tree switched to its library, never "content from B, tree from A"
+- **`Ctrl+1` now switches workspace**: it used to jump to the workspace landing page, which is one click away in the tree; switching workspaces was the one frequent action with no keyboard path
+- **Fixed the outline panel dropping to the bottom of the window**: after the two-row layout (tab strip, then canvas beside the outline) the outline was being laid out below the canvas. It is now a fixed-width column on the right
+- **Tree tool buttons are right-aligned**: locate / expand selection / collapse all / sort act on the whole tree, so aligning them right matches the tab strip and content edges. The workspace name is no longer repeated inside the tree—the switcher at the top already shows it
+- **The workspace dialog footer no longer wraps**: forward actions (open folder / open file / share) on the left, remove alone on the right, all on one line
 
 ## [0.9.0] - 2026-11-23
 
